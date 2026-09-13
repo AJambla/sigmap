@@ -1,13 +1,13 @@
 ---
 title: Roadmap
-description: SigMap version history and roadmap. From v0.0 to v8.35.0, with recent releases completing the grounded-codegen plan — a realistic §9 ablation (real-symbol corpus, exact-signature grounding, --verbose), a Gemini (AI Studio) provider for the §9 ablation, the init Creation-workflow CLAUDE.md block, scaffold persistence, the LLM A/B hallucination ablation harness, the sigmap create orchestrator and its four guard stages (scaffold, verify-plan, verify-ai-output, review-pr), the conventions command with its full flag set (--conflicts, --inject, --report, --ci, --fix, --update), the grounding benchmark, read-time self-heal, live-index MCP write hooks, the get_callee_signatures MCP tool (exact callee signatures), realistic per-query savings, release-pipeline robustness (bundle integrity + version.json gates, standalone-bundle smoke test), the sigmap gain token-savings dashboard, supply-chain hardening (zero system-shell access), Squeeze input minimization with symbol enrichment, source-of-truth llms.txt, the verify-ai-output Hallucination Guard, and Memory tools (note, status, read_memory MCP tool).
+description: SigMap version history and roadmap. From v0.0 to v8.36.0, with recent releases completing the grounded-codegen plan — a realistic §9 ablation (real-symbol corpus, exact-signature grounding, --verbose), a Gemini (AI Studio) provider for the §9 ablation, the init Creation-workflow CLAUDE.md block, scaffold persistence, the LLM A/B hallucination ablation harness, the sigmap create orchestrator and its four guard stages (scaffold, verify-plan, verify-ai-output, review-pr), the conventions command with its full flag set (--conflicts, --inject, --report, --ci, --fix, --update), the grounding benchmark, read-time self-heal, live-index MCP write hooks, the get_callee_signatures MCP tool (exact callee signatures), realistic per-query savings, release-pipeline robustness (bundle integrity + version.json gates, standalone-bundle smoke test), the sigmap gain token-savings dashboard, supply-chain hardening (zero system-shell access), Squeeze input minimization with symbol enrichment, source-of-truth llms.txt, the verify-ai-output Hallucination Guard, and Memory tools (note, status, read_memory MCP tool).
 head:
   - - meta
     - property: og:title
       content: "SigMap Roadmap — version history and upcoming features"
   - - meta
     - property: og:description
-      content: "174 versions shipped. See what changed in each release and what is coming next."
+      content: "175 versions shipped. See what changed in each release and what is coming next."
   - - meta
     - property: og:url
       content: "https://sigmap.io/guide/roadmap"
@@ -20,7 +20,7 @@ head:
 ---
 # Roadmap
 
-One hundred seventy-four versions shipped. MIT open source from day one.
+One hundred seventy-five versions shipped. MIT open source from day one.
 
 **Stats:** 96.6% overall token reduction · 78.6% retrieval hit@5 (1.73× measured lift vs single-shot grep) · 98.0% test-discovery F1 · installed-library grounding (JS/TS + Python) · method-level call-graph (JS/TS, Python, Java, Go, Rust, Kotlin, Scala) · 21 MCP tools · 33 languages · 17-language source resolver · 0 npm deps
 
@@ -835,6 +835,18 @@ Two milestones in one release. **`verify-ai-output` Reliable MVP** (#232) grows 
 **Tags:** `KNOWN_LIMITATIONS.md` · `extraction honesty` · `tier label` · `drift guard` · `G1` · `#520` · `PR #521`
 
 **Impact:** the credibility gap a skeptical reviewer finds first is closed in writing; 6 new guard checks (133 files); zero runtime changes.
+
+---
+
+### v8.36.0 — the compiler was already installed ✓ (2026-09-14)
+
+**Minor release — the first rung of the #542 host-toolchain ladder.** `exactness: { typescript: true }` parses `.ts` with the **target repo's own** `node_modules/typescript` — the user's install, never bundled, the lib-index precedent applied to parsing. Shipped dark behind the flag: every failure shape (off, absent, unusable, parse error) falls back to the regex tier byte-identically, and when native extraction fires the generated header records `toolchain=typescript@<version>`, so the determinism boundary is stated rather than implied.
+
+Measurement reshaped the plan twice. First, **typescript@7 — the Go-native compiler and current npm latest — exposes no classic compiler API** through its CommonJS entry (only `version`; the AST lives behind `unstable/*` exports), so the resolver rejects it by design and 7.x repos stay on the regex floor: tsgo speaks LSP, which is exactly the ladder's T3 tier, not T2. A hermetic test pins that package shape. Second, the regex tier proved stronger than assumed — the balanced scanner (#526) already handles multiline params — so the native win concentrates where regex structurally cannot go: typed arrow consts whose annotations contain `=>` (the `[^=]+` guard cannot cross them), exact end-line anchors for multiline type aliases and functions, and not inventing "members" from nested object-type literals.
+
+**Tags:** `typescript_native.js` · `exactness.typescript` · `toolchain label` · `T2` · `#542` · `#609` · `PR #610`
+
+**Impact:** zod (286 files, typescript@5.9.3): 0 parse failures · 256/286 byte-identical · signatures 1,185 → 1,831 (+54%), audited class by class. Default output unchanged everywhere — the flag ships off. 23 extractor + 152 integration tests passing.
 
 ---
 

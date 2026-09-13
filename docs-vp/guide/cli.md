@@ -1423,8 +1423,8 @@ sigmap bench --submit --json
 ────────────────────────────────────────────────────────
  SigMap Community Benchmark Submission
 ────────────────────────────────────────────────────────
- SigMap version : 8.35.0
- Benchmark ID   : sigmap-v8.35-main
+ SigMap version : 8.36.0
+ Benchmark ID   : sigmap-v8.36-main
  Submitted      : 2026-09-13
 ────────────────────────────────────────────────────────
  Canonical metrics (official release):
