@@ -99,6 +99,8 @@ __factories["./packages/adapters/claude"] = function(module, exports) {
     if (opts.coverage != null) parts.push(`coverage=${opts.coverage}%`);
     if (opts.dropped  != null) parts.push(`dropped=${opts.dropped}`);
     if (opts.commit)        parts.push(`commit=${opts.commit}`);
+    // Host-toolchain label (#609): byte-stability holds per toolchain version.
+    if (opts.toolchain)     parts.push(`toolchain=${opts.toolchain}`);
     return `<!-- sigmap: ${parts.join(' ')} -->`;
   }
 
@@ -276,6 +278,8 @@ __factories["./packages/adapters/copilot"] = function(module, exports) {
     if (opts.coverage != null) parts.push(`coverage=${opts.coverage}%`);
     if (opts.dropped  != null) parts.push(`dropped=${opts.dropped}`);
     if (opts.commit)        parts.push(`commit=${opts.commit}`);
+    // Host-toolchain label (#609): byte-stability holds per toolchain version.
+    if (opts.toolchain)     parts.push(`toolchain=${opts.toolchain}`);
     return `<!-- sigmap: ${parts.join(' ')} -->`;
   }
 
@@ -1545,6 +1549,14 @@ __factories["./src/config/defaults"] = function(module, exports) {
       centralityBlend: false,
       // Append route pseudo-signatures to the rankable index (opt-in, measure-gated)
       surfaceEnrichment: false,
+    },
+
+    // Host-toolchain exactness tiers (#542 T2, opt-in, silent regex fallback).
+    // typescript: parse .ts with the TARGET repo's own node_modules/typescript
+    // (the user's install, never bundled). Byte-stability then holds per
+    // toolchain version, and the generated header labels the version used.
+    exactness: {
+      typescript: false,
     },
 
     // Impact layer settings (v2.5)
@@ -9589,6 +9601,200 @@ __factories["./src/extractors/typescript"] = function(module, exports) {
   }
 
   module.exports = { extract };
+  
+};
+
+// ── ./src/extractors/typescript_native ──
+__factories["./src/extractors/typescript_native"] = function(module, exports) {
+  
+  const path = require('path');
+  const { anchor } = __require('./src/extractors/line-anchor');
+  const { capWithNotice, capMembersWithNotice } = __require('./src/util/truncate');
+
+  // True-AST TypeScript extraction via the TARGET REPO's own `typescript`
+  // package (#609, tier T2 of #542). Nothing is bundled and nothing is
+  // required to exist: `resolveRepoTypescript` probes node_modules upward from
+  // the file being extracted — the user's install, never ours (the lib-index
+  // precedent) — and every failure path returns null so the caller falls back
+  // to the regex extractor silently. Opt-in via `exactness.typescript`; the
+  // resolved compiler is the target repo's own code and runs in-process, which
+  // is why this tier is a conscious config choice rather than a default.
+  //
+  // Output parity: same line vocabulary as src/extractors/typescript.js (the
+  // regex floor), same ceilings, same disclosure markers — only the parse is
+  // different, so anchors and signatures survive multiline declarations,
+  // constrained generics, decorators, and overloads that regex cannot see.
+
+  // Emit only what the regex tier emits, in the same kind-grouped order, so a
+  // flag-on/flag-off diff shows parsing differences rather than reordering.
+  const MEMBER_LIMIT = 120;
+  const PER_FILE_LIMIT = 200;
+  const FUNC_RET_CHARS = 30;
+  const METHOD_RET_CHARS = 20;
+  const IFACE_TYPE_CHARS = 35;
+
+  const _resolveCache = new Map(); // dirname → { ts, version } | null
+
+  /**
+   * Resolve the target repo's own `typescript` package, walking node_modules
+   * upward from the file's directory. Cached per directory; null when absent
+   * or unloadable.
+   * @param {string} fromPath - absolute path of the file being extracted
+   * @returns {{ ts: object, version: string }|null}
+   */
+  function resolveRepoTypescript(fromPath) {
+    const dir = path.dirname(path.resolve(fromPath));
+    if (_resolveCache.has(dir)) return _resolveCache.get(dir);
+    let out = null;
+    try {
+      const resolved = require.resolve('typescript', { paths: [dir] });
+      const ts = require(resolved);
+      if (ts && typeof ts.createSourceFile === 'function' && typeof ts.version === 'string') {
+        out = { ts, version: ts.version };
+      }
+    } catch (_) {}
+    _resolveCache.set(dir, out);
+    return out;
+  }
+
+  const _compact = (s) => String(s).replace(/\s+/g, ' ').trim();
+
+  /**
+   * Extract signatures from TypeScript source via the provided compiler module.
+   * Returns null on ANY failure so the caller can fall back to regex.
+   * @param {string} src - raw file content
+   * @param {string} filePath - absolute path (names the SourceFile)
+   * @param {object} ts - a resolved `typescript` module
+   * @returns {string[]|null}
+   */
+  function extract(src, filePath, ts) {
+    if (!src || typeof src !== 'string' || !ts) return null;
+    try {
+      return _extract(src, filePath, ts);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function _extract(src, filePath, ts) {
+    const sf = ts.createSourceFile(filePath || 'file.ts', src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+    const lineOf = (pos) => sf.getLineAndCharacterOfPosition(pos).line + 1;
+    const startLine = (node) => lineOf(node.getStart(sf));
+    const endLine = (node) => lineOf(node.end > 0 ? node.end - 1 : node.end);
+    const mods = (node) => (ts.canHaveModifiers && ts.canHaveModifiers(node) ? ts.getModifiers(node) : node.modifiers) || [];
+    const hasMod = (node, kind) => mods(node).some((m) => m.kind === kind);
+    const isExported = (node) => hasMod(node, ts.SyntaxKind.ExportKeyword);
+
+    // Parameter rendering matches normalizeParams' output: names and defaults
+    // survive, type annotations do not; constructor parameter-property
+    // modifiers (private/readonly/...) survive because they name real fields.
+    const paramText = (p) => {
+      let out = '';
+      for (const m of mods(p)) out += m.getText(sf) + ' ';
+      if (p.dotDotDotToken) out += '...';
+      out += _compact(p.name.getText(sf));
+      if (p.initializer) out += ` = ${_compact(p.initializer.getText(sf)).slice(0, 40)}`;
+      return out;
+    };
+    const paramsText = (node) => (node.parameters || []).map(paramText).join(', ');
+    const retText = (node, cap) => {
+      if (!node.type) return '';
+      const t = _compact(node.type.getText(sf)).slice(0, cap);
+      return t ? ` → ${t}` : '';
+    };
+    const docHint = (node) => {
+      const js = node.jsDoc && node.jsDoc[0];
+      if (!js || !js.comment) return '';
+      const text = typeof js.comment === 'string'
+        ? js.comment
+        : js.comment.map((c) => c.text || '').join('');
+      return _compact(text).split(/[.!?]/)[0].trim().slice(0, 60);
+    };
+
+    const interfaces = [];
+    const types = [];
+    const enums = [];
+    const classes = [];
+    const funcs = [];
+    const arrows = [];
+
+    for (const node of sf.statements) {
+      if (ts.isInterfaceDeclaration(node) && isExported(node)) {
+        const block = [{ text: `export interface ${node.name.text}`, s: startLine(node), e: endLine(node) }];
+        const members = [];
+        for (const mem of node.members) {
+          if (ts.isPropertySignature(mem) && mem.name && mem.type) {
+            const ro = hasMod(mem, ts.SyntaxKind.ReadonlyKeyword) ? 'readonly ' : '';
+            const opt = mem.questionToken ? '?' : '';
+            members.push({
+              text: `${ro}${mem.name.getText(sf)}${opt}: ${_compact(mem.type.getText(sf)).slice(0, IFACE_TYPE_CHARS)}`,
+              s: startLine(mem), e: endLine(mem),
+            });
+          } else if (ts.isMethodSignature(mem) && mem.name) {
+            members.push({ text: `${mem.name.getText(sf)}(${paramsText(mem)})`, s: startLine(mem), e: endLine(mem) });
+          }
+        }
+        for (const mem of capMembersWithNotice(members, MEMBER_LIMIT, 'members')) {
+          block.push({ text: `  ${mem.text}`, s: mem.s || 0, e: mem.e || 0, marker: !mem.s });
+        }
+        interfaces.push(...block);
+      } else if (ts.isTypeAliasDeclaration(node) && isExported(node)) {
+        types.push({ text: `export type ${node.name.text}`, s: startLine(node), e: endLine(node) });
+      } else if (ts.isEnumDeclaration(node) && isExported(node)) {
+        enums.push({ text: `export enum ${node.name.text}`, s: startLine(node), e: endLine(node) });
+      } else if (ts.isClassDeclaration(node) && node.name) {
+        const prefix = isExported(node) ? 'export ' : '';
+        const abs = hasMod(node, ts.SyntaxKind.AbstractKeyword) ? 'abstract ' : '';
+        const block = [{ text: `${prefix}${abs}class ${node.name.text}`, s: startLine(node), e: endLine(node) }];
+        const members = [];
+        for (const mem of node.members) {
+          if (ts.isConstructorDeclaration(mem) && mem.body) {
+            members.push({ text: `constructor(${paramsText(mem)})`, s: startLine(mem), e: endLine(mem) });
+          } else if (ts.isMethodDeclaration(mem) && mem.body && mem.name) {
+            const name = mem.name.getText(sf);
+            if (/^(private|protected|_)/.test(name)) continue;
+            if (hasMod(mem, ts.SyntaxKind.PrivateKeyword) || hasMod(mem, ts.SyntaxKind.ProtectedKeyword)) continue;
+            const st = hasMod(mem, ts.SyntaxKind.StaticKeyword) ? 'static ' : '';
+            const as = hasMod(mem, ts.SyntaxKind.AsyncKeyword) ? 'async ' : '';
+            members.push({
+              text: `${st}${as}${name}(${paramsText(mem)})${retText(mem, METHOD_RET_CHARS)}`,
+              s: startLine(mem), e: endLine(mem),
+            });
+          }
+        }
+        for (const mem of capMembersWithNotice(members, MEMBER_LIMIT, 'methods')) {
+          block.push({ text: `  ${mem.text}`, s: mem.s || 0, e: mem.e || 0, marker: !mem.s });
+        }
+        classes.push(...block);
+      } else if (ts.isFunctionDeclaration(node) && node.body && node.name && isExported(node)) {
+        const as = hasMod(node, ts.SyntaxKind.AsyncKeyword) ? 'async ' : '';
+        const hint = docHint(node);
+        funcs.push({
+          text: `export ${as}function ${node.name.text}(${paramsText(node)})${retText(node, FUNC_RET_CHARS)}`,
+          s: startLine(node), e: endLine(node), hint,
+        });
+      } else if (ts.isVariableStatement(node) && isExported(node)) {
+        for (const decl of node.declarationList.declarations) {
+          const init = decl.initializer;
+          if (!init || !ts.isArrowFunction(init) || !ts.isIdentifier(decl.name)) continue;
+          const as = hasMod(init, ts.SyntaxKind.AsyncKeyword) ? 'async ' : '';
+          arrows.push({
+            text: `export const ${decl.name.text} = ${as}(${paramsText(init)}) =>`,
+            s: startLine(node), e: endLine(node), hint: docHint(node),
+          });
+        }
+      }
+    }
+
+    const rows = [...interfaces, ...types, ...enums, ...classes, ...funcs, ...arrows];
+    const sigs = rows.map((r) => {
+      const base = r.marker ? r.text : `${r.text}${anchor(r.s, r.e)}`;
+      return r.hint ? `${base}  # ${r.hint}` : base;
+    });
+    return capWithNotice(sigs, PER_FILE_LIMIT, 'signatures');
+  }
+
+  module.exports = { extract, resolveRepoTypescript };
   
 };
 
@@ -22706,13 +22912,37 @@ function getExtractor(name) {
   }
 }
 
-function detectAndExtract(filePath, content, maxSigsPerFile) {
+// Version of the repo-local typescript used for native extraction this run,
+// or null when the regex tier served every file. Read by the adapter-output
+// step so the generated header states the toolchain (determinism honesty:
+// byte-stability holds per toolchain version, #609).
+let _nativeTsVersion = null;
+
+function detectAndExtract(filePath, content, maxSigsPerFile, exactness) {
   const base = path.basename(filePath);
   const ext = path.extname(base).toLowerCase();
   let extractorName = EXT_MAP[ext] || null;
   if (!extractorName && isDockerfile(base)) extractorName = 'dockerfile';
   // Feature 7: generic fallback — catches Nix, Elixir, Gleam, Zig, Go templates, etc.
   if (!extractorName) extractorName = 'generic';
+
+  // T2 exactness (#609, opt-in): parse .ts with the target repo's own
+  // typescript package when the flag is on and one resolves. Any failure —
+  // no package, broken package, parse error — falls through to the regex
+  // tier below, byte-identical to the flag being off.
+  if (extractorName === 'typescript' && exactness && exactness.typescript) {
+    try {
+      const native = requireSourceOrBundled('./src/extractors/typescript_native');
+      const resolved = native.resolveRepoTypescript(filePath);
+      if (resolved) {
+        const sigs = native.extract(content, filePath, resolved.ts);
+        if (Array.isArray(sigs) && sigs.length > 0) {
+          _nativeTsVersion = resolved.version;
+          return sigs.slice(0, maxSigsPerFile);
+        }
+      }
+    } catch (_) {}
+  }
 
   const extractor = getExtractor(extractorName);
   if (!extractor) return [];
@@ -23086,7 +23316,7 @@ function buildDiffSectionFromBase(cwd, baseRef, currentEntries, config) {
       baseSrc = '';
     }
 
-    const baseSigs = baseSrc ? detectAndExtract(entry.filePath, baseSrc, config.maxSigsPerFile) : [];
+    const baseSigs = baseSrc ? detectAndExtract(entry.filePath, baseSrc, config.maxSigsPerFile, config.exactness) : [];
     const d = diffSignatures(baseSigs, entry.sigs || []);
 
     const markers = [];
@@ -23433,7 +23663,7 @@ function writeOutputs(content, targets, cwd, config) {
           const defaultPath = path.join(cwd, '.github', 'copilot-instructions.md');
           if (outPath !== defaultPath) {
             // custom path: format and write directly (no append logic)
-            const formatted = adapterMod.format(adapterContent, { version: VERSION });
+            const formatted = adapterMod.format(adapterContent, { version: VERSION, toolchain: _nativeTsVersion ? 'typescript@' + _nativeTsVersion : undefined });
             ensureDir(outPath);
             fs.writeFileSync(outPath, formatted, 'utf8');
             console.warn(`[sigmap] wrote ${path.relative(cwd, outPath)}`);
@@ -23441,11 +23671,11 @@ function writeOutputs(content, targets, cwd, config) {
           }
         }
         if (typeof adapterMod.write === 'function') {
-          adapterMod.write(adapterContent, cwd, { version: VERSION });
+          adapterMod.write(adapterContent, cwd, { version: VERSION, toolchain: _nativeTsVersion ? 'typescript@' + _nativeTsVersion : undefined });
           const outPath = adapterMod.outputPath(cwd);
           console.warn(`[sigmap] wrote ${path.relative(cwd, outPath)} (appended signatures)`);
         } else {
-          const formatted = adapterMod.format(adapterContent, { version: VERSION });
+          const formatted = adapterMod.format(adapterContent, { version: VERSION, toolchain: _nativeTsVersion ? 'typescript@' + _nativeTsVersion : undefined });
           const outPath = adapterMod.outputPath(cwd);
           ensureDir(outPath);
           fs.writeFileSync(outPath, formatted, 'utf8');
@@ -23848,7 +24078,7 @@ function runDiff(cwd, config, stagedOnly, baseRef) {
       continue;
     }
 
-    let sigs = detectAndExtract(filePath, content, config.maxSigsPerFile);
+    let sigs = detectAndExtract(filePath, content, config.maxSigsPerFile, config.exactness);
     if (sigs.length === 0) continue;
 
     inputTokenTotal += estimateTokens(content);
@@ -23983,13 +24213,13 @@ function runGenerate(cwd, config, reportMode, reportJson = false) {
       if (cached && cached.mtime === mtime) {
         sigs = cached.sigs;
       } else {
-        sigs = detectAndExtract(filePath, content, config.maxSigsPerFile);
+        sigs = detectAndExtract(filePath, content, config.maxSigsPerFile, config.exactness);
         if (sigs.length > 0) {
           cache.set(filePath, { mtime, sigs });
         }
       }
     } else {
-      sigs = detectAndExtract(filePath, content, config.maxSigsPerFile);
+      sigs = detectAndExtract(filePath, content, config.maxSigsPerFile, config.exactness);
     }
     if (sigs.length === 0) continue;
 
@@ -25902,7 +26132,7 @@ function main() {
       for (const fp of syncFiles) {
         let content = '';
         try { content = fs.readFileSync(fp, 'utf8'); } catch (_) { continue; }
-        const sigs = detectAndExtract(fp, content, config.maxSigsPerFile || 25);
+        const sigs = detectAndExtract(fp, content, config.maxSigsPerFile || 25, config.exactness);
         if (sigs.length === 0) continue;
         syncEntries.push({ filePath: fp, sigs, language: null });
       }
