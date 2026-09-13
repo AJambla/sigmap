@@ -96,6 +96,14 @@ Stack both MCP servers for the two-layer context strategy — SigMap for always-
 }
 ```
 
+## Spec conformance
+
+The server is verified against the black-box [`@hasmcp/mcp-spec-test`](https://www.npmjs.com/package/@hasmcp/mcp-spec-test) conformance suite. As of v8.35.0 both tested revisions report **conformant on what could be checked** — 14/0 on 2025-11-25 and 13/0 on 2026-07-28 (remaining skips are capabilities the server honestly does not advertise: it is tools-only).
+
+- `initialize` negotiates against an explicit supported-version list (`2025-11-25` … `2024-11-05`). An unsupported or absent offer gets the newest supported version — never an echo of a version the server cannot speak.
+- `server/discover` (spec 2026-07-28) is answered session-less, before any handshake, with the honest version list, capabilities, identity, and cache hints — so clients can discover instead of offer-and-hope.
+- `tools/list` rejects pagination cursors it never issued with `-32602` rather than silently restarting from page one.
+
 ## 11 available tools
 
 ::: tip New in v6.3.0 — native tool registration

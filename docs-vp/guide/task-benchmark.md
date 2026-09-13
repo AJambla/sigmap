@@ -1,13 +1,13 @@
 ---
 title: Task benchmark
-description: Latest saved task benchmark for SigMap v8.31.0. 62.9% correct, 44.4% fewer prompts, 78.9% hit@5 across 105 tasks, with R language support.
+description: Latest saved task benchmark for SigMap v8.35.0. 61.0% correct, 43.4% fewer prompts, 78.6% hit@5 across 105 tasks, with R language support.
 head:
   - - meta
     - property: og:title
       content: "SigMap task benchmark — fewer retries, better context (with R language)"
   - - meta
     - property: og:description
-      content: "Latest saved run: 62.9% correct, 1.53 prompts per task, 44.4% prompt reduction, 105 tasks, 18+ repos with R support."
+      content: "Latest saved run: 61.0% correct, 1.61 prompts per task, 43.4% prompt reduction, 105 tasks, 18 repos with R support."
   - - meta
     - property: og:url
       content: "https://sigmap.io/guide/task-benchmark"
@@ -15,21 +15,21 @@ head:
 
 # Task benchmark
 
-::: info Official v8.31.0 benchmark snapshot
-**Benchmark ID:** sigmap-v8.31-main &nbsp;·&nbsp; **Date:** 2026-09-08 (with R language)
+::: info Official v8.35.0 benchmark snapshot
+**Benchmark ID:** sigmap-v8.35-main &nbsp;·&nbsp; **Date:** 2026-09-13 (with R language)
 
 | Metric | Value |
 |---|---:|
-| Hit@5 | **82%** vs 44.0% single-shot grep baseline |
-| Graph-boosted hit@5 | **88%** |
-| Honest lift (vs grep agent) | **1.79×** |
-| Prompt reduction | **44.4%** (2.84 → 1.58) |
-| Task success proxy | **62.9%** |
-| Token reduction (21 repos) | **96.8%** |
+| Hit@5 | **78.6%** vs 44.0% single-shot grep baseline |
+| Graph-boosted hit@5 | **78.6%** |
+| Honest lift (vs grep agent) | **1.73×** |
+| Prompt reduction | **43.4%** (2.84 → 1.61) |
+| Task success proxy | **61.0%** |
+| Token reduction (21 repos) | **96.6%** |
 | GPT-4o overflow (without → with) | **16/21 → 0/21** |
 :::
 
-Latest saved run: **2026-09-08 (v8.31.0)** — Now includes R language support (ggplot2, dplyr, shiny)
+Latest saved run: **2026-09-13 (v8.35.0)** — includes R language support (ggplot2, dplyr, shiny)
 
 This page answers the question people care about most:
 
@@ -39,11 +39,11 @@ This page answers the question people care about most:
 
 | Metric | Without SigMap | With SigMap |
 |---|:---:|:---:|
-| Task success proxy | 10% | **62.9%** |
-| Prompts per task | 2.84 | **1.58** |
+| Task success proxy | 10% | **61.0%** |
+| Prompts per task | 2.84 | **1.61** |
 | Prompt reduction | — | **48%** |
 | Retrieval hit@5 | 13.6% | **88%** |
-| Token reduction | — | **96.8%** |
+| Token reduction | — | **96.6%** |
 
 ## Why the task benchmark exists
 
@@ -63,18 +63,18 @@ The task benchmark models that outcome from the ranked file quality tiers:
 
 | Tier | Meaning | Tasks | Share |
 |---|---|---:|---:|
-| Correct | Right file was ranked first | 61 | **62.9%** |
-| Partial | Right file was present but not first | 17 | **18.9%** |
-| Wrong | Right file never surfaced in top 5 | 13 | **14.4%** |
+| Correct | Right file was ranked first | 64 | **61.0%** |
+| Partial | Right file was present but not first | 18 | **17.1%** |
+| Wrong | Right file never surfaced in top 5 | 23 | **21.9%** |
 
 ## Prompt model summary
 
 | Metric | Value |
 |---|---:|
 | Average prompts without SigMap | 2.84 |
-| Average prompts with SigMap | **1.58** |
-| Reduction | **48%** |
-| Honest hit@5 lift | **1.79x** vs single-shot grep baseline (per-repo random lifts remain in the report as data) |
+| Average prompts with SigMap | **1.61** |
+| Reduction | **43.4%** |
+| Honest hit@5 lift | **1.73x** vs single-shot grep baseline (per-repo random lifts remain in the report as data) |
 
 ## What changed in the v5 story
 
@@ -91,14 +91,24 @@ That makes the benchmark more than a marketing claim. It maps onto the actual da
 
 | Repo | Prompt reduction | Correct / Partial / Wrong |
 |---|---:|---:|
-| flask | 62.9% | 5 / 0 / 0 |
-| gin | 43.7% | 3 / 1 / 1 |
-| rails | 47.2% | 2 / 1 / 2 |
-| rust-analyzer | 62.9% | 4 / 1 / 0 |
-| serilog | 26.1% | 0 / 2 / 3 |
-| laravel | 64.7% | 2 / 3 / 0 |
-| vapor | 17.7% | 1 / 1 / 3 |
-| fastapi | 48.9% | 4 / 0 / 1 |
+| express | 31.3% | 5 / 3 / 0 |
+| flask | 34.8% | 5 / 0 / 3 |
+| gin | 57.5% | 6 / 2 / 0 |
+| spring-petclinic | 44.8% | 4 / 0 / 1 |
+| rails | 53.3% | 3 / 2 / 0 |
+| axios | 13.9% | 1 / 3 / 4 |
+| rust-analyzer | 59.9% | 4 / 1 / 0 |
+| abseil-cpp | 66.6% | 5 / 0 / 0 |
+| serilog | 4.7% | 0 / 1 / 4 |
+| riverpod | 53.1% | 4 / 0 / 1 |
+| okhttp | 62.5% | 5 / 0 / 0 |
+| laravel | 60.0% | 4 / 1 / 0 |
+| akka | 52.9% | 3 / 2 / 0 |
+| vapor | 5.2% | 0 / 1 / 4 |
+| vue-core | 59.6% | 4 / 1 / 0 |
+| svelte | 39.7% | 3 / 0 / 2 |
+| fastify | 37.7% | 5 / 0 / 3 |
+| fastapi | 44.4% | 3 / 1 / 1 |
 
 These rows show why the task benchmark matters. Some repos have great retrieval lift but still need workflow help around validation and judge-based trust.
 

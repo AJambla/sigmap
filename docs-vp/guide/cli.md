@@ -1385,9 +1385,9 @@ sigmap compare --json
 ────────────────────────────────────────────
  SigMap vs Baseline
 ────────────────────────────────────────────
- hit@5         82.2% vs 44.0% grep   (1.79× lift)
+ hit@5         78.6% vs 44.0% grep   (1.73× lift)
  Avg prompts   1.53 vs 2.84
- Token story   96.8% overall reduction
+ Token story   96.6% overall reduction
 ────────────────────────────────────────────
 ```
 
@@ -1403,7 +1403,7 @@ sigmap share
 
 ```
 Generated with SigMap — the deterministic, verifiable grounding layer for AI code work
-96.8% fewer tokens · 78.9% retrieval hit@5 · 44.4% fewer prompts
+96.6% fewer tokens · 78.6% retrieval hit@5 · 43.4% fewer prompts
 https://sigmap.io
 [sigmap] Copied to clipboard.
 ```
@@ -1423,13 +1423,13 @@ sigmap bench --submit --json
 ────────────────────────────────────────────────────────
  SigMap Community Benchmark Submission
 ────────────────────────────────────────────────────────
- SigMap version : 8.21.0
- Benchmark ID   : sigmap-v8.29-main
- Submitted      : 2026-08-18
+ SigMap version : 8.35.0
+ Benchmark ID   : sigmap-v8.35-main
+ Submitted      : 2026-09-13
 ────────────────────────────────────────────────────────
  Canonical metrics (official release):
- hit@5          : 82.2%
- token reduction: 96.8%
+ hit@5          : 78.6%
+ token reduction: 96.6%
 ────────────────────────────────────────────────────────
  Local run metrics: none yet — run node scripts/run-retrieval-benchmark.mjs
 ────────────────────────────────────────────────────────
@@ -1447,7 +1447,7 @@ JSON output (`--json`) returns a machine-readable object:
   "sigmapVersion": "6.8.0",
   "benchmarkId": "sigmap-v6.11-main",
   "canonicalHitAt5": 80.0,
-  "canonicalReduction": 96.8,
+  "canonicalReduction": 96.6,
   "local": null,
   "submittedAt": "2026-05-03"
 }
