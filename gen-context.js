@@ -22674,7 +22674,20 @@ function estimateTokens(str) {
 }
 
 function isTestFile(filePath) {
-  return /\.(test|spec)\.[a-z]+$/.test(filePath) || /_test\.[a-z]+$/.test(filePath);
+  const p = filePath.replace(/\\/g, '/');
+  // Filename conventions: foo.test.ts / foo.spec.js / foo_test.go / test_foo.py,
+  // plus the PascalCase JVM/C#/Swift family (FooTest.java, FooTests.kt,
+  // FooSpec.scala). The [a-z0-9] guard keeps `contest.java` and `Latest.java`
+  // out; the suffix must be a real case boundary.
+  if (/\.(test|spec)\.[a-z]+$/.test(p) || /_test\.[a-z]+$/.test(p)) return true;
+  if (/(^|\/)test_[^/]+\.[a-z]+$/.test(p)) return true;
+  if (/[a-z0-9](Test|Spec)s?\.(java|kt|kts|scala|groovy|cs|swift)$/.test(p)) return true;
+  // Path-segment conventions (src/test/java/**, tests/, spec/, __tests__/, e2e/)
+  // — the form the entire JVM world uses. Without this, "drop test files first"
+  // ran INVERTED on JVM repos: spring-petclinic's budget kept all 17 src/test/
+  // files while dropping the application entry point, the owner entities and
+  // every owner template (#592).
+  return /(^|\/)(test|tests|spec|specs|__tests__|e2e)(\/|$)/i.test(p);
 }
 
 function isConfigFile(filePath) {
@@ -22691,6 +22704,21 @@ function isMockFile(filePath) {
   return /\/(mock|mocks|stub|stubs|fake|fakes|demo|demos|__mocks__|fixtures)\//i.test(p) ||
     /\.(mock|stub|fake)\.[jt]sx?$/.test(p) ||
     /mock\.(ts|js|tsx|jsx)$/.test(p);
+}
+
+// The application entry point is the single most orientation-valuable file in
+// a repo, yet it is often tiny (a main class with 2-3 signatures), so the
+// fewest-sigs tie-break dropped it while keeping bulkier files: petclinic's
+// budget dropped PetClinicApplication.java and an agent asking for the startup
+// entry point could not reach it at all (#592). Deliberately narrow — bare
+// main/app/application names plus the Spring `*Application.java` and C#
+// `Program.cs` conventions. `index.*` is excluded: JS barrel files are hubs,
+// not entry points, and protecting every one would crowd out real code.
+function isEntryPointFile(filePath) {
+  const base = path.basename(filePath.replace(/\\/g, '/'));
+  return /^(main|app|application|__main__)\.[a-z]+$/i.test(base)
+    || /Application\.(java|kt|kts)$/.test(base)
+    || /^Program\.cs$/.test(base);
 }
 
 /**
@@ -22812,6 +22840,7 @@ function applyTokenBudget(fileEntries, maxTokens) {
     else if (isMockFile(e.filePath)) { priority = 9;  dropReason = 'budget: mock file'; }
     else if (isTestFile(e.filePath)) { priority = 8;  dropReason = 'budget: test file'; }
     else if (isConfigFile(e.filePath)) { priority = 6; dropReason = 'budget: config file'; }
+    else if (isEntryPointFile(e.filePath)) { priority = 3; dropReason = 'budget: entry point'; }
     else priority = 4;
     const loc = e.content ? e.content.split('\n').length : 1;
     const signalQuality = loc > 0 ? (e.sigs ? e.sigs.length : 0) / loc : 0;
