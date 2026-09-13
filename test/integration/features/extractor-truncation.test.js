@@ -34,13 +34,13 @@ test('capMembersWithNotice: appends a member-shaped marker', () => {
   assert.strictEqual(r[8].text, '… +4 more methods');
 });
 
-test('JS extractor: a class with >8 methods discloses the drop', () => {
-  const methods = Array.from({ length: 12 }, (_, i) => `  method${i}(a) { return a; }`).join('\n');
+test('JS extractor: a class with >120 methods discloses the drop', () => {
+  const methods = Array.from({ length: 130 }, (_, i) => `  method${i}(a) { return a; }`).join('\n');
   const src = `class Big {\n${methods}\n}\n`;
   const sigs = jsExtract(src);
   assert.ok(sigs.some((s) => /\+\d+ more methods/.test(s)), `expected a truncation marker, got:\n${sigs.join('\n')}`);
-  // still capped at 8 real methods + 1 marker (+ the class line)
-  assert.ok(sigs.filter((s) => /method\d+\(/.test(s)).length === 8, 'should keep exactly 8 methods');
+  // still capped at 120 real methods + 1 marker (+ the class line)
+  assert.ok(sigs.filter((s) => /method\d+\(/.test(s)).length === 120, 'should keep exactly 120 methods');
 });
 
 test('JS extractor: a small class is NOT annotated', () => {
@@ -48,15 +48,15 @@ test('JS extractor: a small class is NOT annotated', () => {
   assert.ok(!sigs.some((s) => /more methods/.test(s)), 'no marker for a small class');
 });
 
-test('TS extractor: an interface with >8 members discloses the drop', () => {
-  const members = Array.from({ length: 11 }, (_, i) => `  field${i}: string;`).join('\n');
+test('TS extractor: an interface with >120 members discloses the drop', () => {
+  const members = Array.from({ length: 130 }, (_, i) => `  field${i}: string;`).join('\n');
   const src = `export interface Big {\n${members}\n}\n`;
   const sigs = tsExtract(src);
   assert.ok(sigs.some((s) => /\+\d+ more members/.test(s)), `expected a members marker, got:\n${sigs.join('\n')}`);
 });
 
-test('TS extractor: a class with >8 methods discloses the drop', () => {
-  const methods = Array.from({ length: 12 }, (_, i) => `  method${i}(a: number): number { return a; }`).join('\n');
+test('TS extractor: a class with >120 methods discloses the drop', () => {
+  const methods = Array.from({ length: 130 }, (_, i) => `  method${i}(a: number): number { return a; }`).join('\n');
   const sigs = tsExtract(`export class Big {\n${methods}\n}\n`);
   assert.ok(sigs.some((s) => /\+\d+ more methods/.test(s)), `expected a methods marker, got:\n${sigs.join('\n')}`);
 });

@@ -1,13 +1,13 @@
 ---
 title: Roadmap
-description: SigMap version history and roadmap. From v0.0 to v8.32.0, with recent releases completing the grounded-codegen plan — a realistic §9 ablation (real-symbol corpus, exact-signature grounding, --verbose), a Gemini (AI Studio) provider for the §9 ablation, the init Creation-workflow CLAUDE.md block, scaffold persistence, the LLM A/B hallucination ablation harness, the sigmap create orchestrator and its four guard stages (scaffold, verify-plan, verify-ai-output, review-pr), the conventions command with its full flag set (--conflicts, --inject, --report, --ci, --fix, --update), the grounding benchmark, read-time self-heal, live-index MCP write hooks, the get_callee_signatures MCP tool (exact callee signatures), realistic per-query savings, release-pipeline robustness (bundle integrity + version.json gates, standalone-bundle smoke test), the sigmap gain token-savings dashboard, supply-chain hardening (zero system-shell access), Squeeze input minimization with symbol enrichment, source-of-truth llms.txt, the verify-ai-output Hallucination Guard, and Memory tools (note, status, read_memory MCP tool).
+description: SigMap version history and roadmap. From v0.0 to v8.35.0, with recent releases completing the grounded-codegen plan — a realistic §9 ablation (real-symbol corpus, exact-signature grounding, --verbose), a Gemini (AI Studio) provider for the §9 ablation, the init Creation-workflow CLAUDE.md block, scaffold persistence, the LLM A/B hallucination ablation harness, the sigmap create orchestrator and its four guard stages (scaffold, verify-plan, verify-ai-output, review-pr), the conventions command with its full flag set (--conflicts, --inject, --report, --ci, --fix, --update), the grounding benchmark, read-time self-heal, live-index MCP write hooks, the get_callee_signatures MCP tool (exact callee signatures), realistic per-query savings, release-pipeline robustness (bundle integrity + version.json gates, standalone-bundle smoke test), the sigmap gain token-savings dashboard, supply-chain hardening (zero system-shell access), Squeeze input minimization with symbol enrichment, source-of-truth llms.txt, the verify-ai-output Hallucination Guard, and Memory tools (note, status, read_memory MCP tool).
 head:
   - - meta
     - property: og:title
       content: "SigMap Roadmap — version history and upcoming features"
   - - meta
     - property: og:description
-      content: "173 versions shipped. See what changed in each release and what is coming next."
+      content: "174 versions shipped. See what changed in each release and what is coming next."
   - - meta
     - property: og:url
       content: "https://sigmap.io/guide/roadmap"
@@ -20,9 +20,9 @@ head:
 ---
 # Roadmap
 
-One hundred seventy-three versions shipped. MIT open source from day one.
+One hundred seventy-four versions shipped. MIT open source from day one.
 
-**Stats:** 96.8% overall token reduction · 78.9% retrieval hit@5 (1.79× measured lift vs single-shot grep) · 98.0% test-discovery F1 · installed-library grounding (JS/TS + Python) · method-level call-graph (JS/TS, Python, Java, Go, Rust) · 21 MCP tools · 32 languages · 17-language source resolver · 0 npm deps
+**Stats:** 96.6% overall token reduction · 78.6% retrieval hit@5 (1.73× measured lift vs single-shot grep) · 98.0% test-discovery F1 · installed-library grounding (JS/TS + Python) · method-level call-graph (JS/TS, Python, Java, Go, Rust, Kotlin, Scala) · 21 MCP tools · 33 languages · 17-language source resolver · 0 npm deps
 
 ## Token reduction by version
 
@@ -835,6 +835,20 @@ Two milestones in one release. **`verify-ai-output` Reliable MVP** (#232) grows 
 **Tags:** `KNOWN_LIMITATIONS.md` · `extraction honesty` · `tier label` · `drift guard` · `G1` · `#520` · `PR #521`
 
 **Impact:** the credibility gap a skeptical reviewer finds first is closed in writing; 6 new guard checks (133 files); zero runtime changes.
+
+---
+
+### v8.35.0 — the instrument was the bug ✓ (2026-09-13)
+
+**Minor release — four issues closed, and three of them turned out to be the measuring equipment.** The retrieval gate had disagreed with a developer clone for two releases: same commit, same files, hard 72.2% in CI vs 73.3% locally, cause unknown after four investigated-and-retracted mechanisms. The answer was one loop: the graph-boost hop-1 pass evaluated its seed condition (`score > 0`) *while mutating scores in place*, so a zero-scored file boosted by an earlier-visited seed became a seed itself — but only when it sat after its booster in the index, and index order is what git history changes via the recent-commits hoist. 108 of 113 gate queries carried such cascade seeds; reversing index insertion order alone changed the top-5 on 76 of 113 tasks. Seeds are now snapshotted before the loop (the call-graph block always did this, with the comment "so boosts never cascade") and hop-2 eligibility is frozen after hop-1. Ranking is bit-identical across insertion orders and git depths, and hard *rose* to 75.6% as cascade noise stopped crediting near-hub files into top-5 slots they had not earned. The baseline is re-recorded and trustworthy for the first time in three releases.
+
+That trustworthy gate immediately paid twice. The **extractor ceiling raise** — attempted before and rejected when CI read it as 75.6% → 72.2% — re-measured as bit-stable: the rejection had been the gate's order-instability, not the change. Member ceilings 8 → 120, per-file 25–50 → 200, and class-body scans 2–5 KB → 200 KB (11 extractors), un-hiding the 43–71% of member surface the issue had measured on Swift/PHP/Kotlin/Scala/C# repos — akka's `scaladsl/Source.scala` went from 8 members with a wrong end anchor to 48 typed members spanning `:241-1033`. And the **petclinic mystery** (#592) dissolved under measurement: not a ranking weakness at all, but the token-budget drop order running *inverted* on JVM repos — `isTestFile()` never matched `src/test/**` or `*Tests.java`, so the budget kept all 17 petclinic test files while dropping the application entry point and every owner template. Path-segment and PascalCase test conventions plus an entry-point drop tier fixed it: petclinic 60% → 80%, vapor 0% → 20%.
+
+Separately, the **MCP server now passes `@hasmcp/mcp-spec-test` on both revisions it was reported failing**. One line caused both reports: `initialize` echoed back any offered `protocolVersion`, which is itself the 2025-11-25 violation — and it made the suite believe 2026-07-28 was supported, producing six phantom `server/discover` failures. Negotiation now runs against an explicit supported list, session-less `server/discover` is implemented per the 2026-07-28 schema (advertising only versions actually served), and `tools/list` rejects cursors it never issued.
+
+**Tags:** `graph-boost cascade` · `order invariance` · `isTestFile` · `isEntryPointFile` · `MAX_CLASS_BODY_CHARS` · `server/discover` · `protocol negotiation` · `#544` · `#545` · `#576` · `#592` · `#596` · `PR #604` · `PR #605` · `PR #606` · `PR #607`
+
+**Impact:** hard hit@5 72.2% → 75.6% (order-invariant, identical in CI and local); petclinic matrix retrieval 60% → 80%; member surface un-hidden at 1–2pp token cost on member-heavy repos; both MCP conformance verdicts now "conformant on what could be checked"; baseline re-recorded. Fresh full run: 96.6% token reduction · 78.6% hit@5 (1.73× vs grep) · 43.4% prompt reduction. 23 extractor + 151 integration tests passing.
 
 ---
 

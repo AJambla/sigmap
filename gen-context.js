@@ -5469,8 +5469,13 @@ __factories["./src/extractors/cpp"] = function(module, exports) {
   // Ceilings sit above the default `maxSigsPerFile` so the configured budget
   // governs output rather than a literal buried here, and omissions are disclosed
   // — an undisclosed cap looks like a class that simply has eight methods (#576).
-  const MEMBER_LIMIT = 8;
-  const PER_FILE_LIMIT = 25;
+  // Class bodies are scanned to this many characters. Real classes routinely
+  // run past the old 4KB scan window — truncating there silently hid every
+  // member after ~4000 chars AND anchored class end-lines short (#576). The
+  // ceiling only guards against pathological input (Java parity, #551).
+  const MAX_CLASS_BODY_CHARS = 200000;
+  const MEMBER_LIMIT = 120;
+  const PER_FILE_LIMIT = 200;
 
   /**
    * Extract signatures from C/C++ source code.
@@ -5507,7 +5512,7 @@ __factories["./src/extractors/cpp"] = function(module, exports) {
 
   function extractBlock(src, startIndex) {
     let depth = 1, i = startIndex;
-    const end = Math.min(src.length, startIndex + 4000);
+    const end = Math.min(src.length, startIndex + MAX_CLASS_BODY_CHARS);
     while (i < end && depth > 0) {
       if (src[i] === '{') depth++;
       else if (src[i] === '}') depth--;
@@ -5551,8 +5556,13 @@ __factories["./src/extractors/csharp"] = function(module, exports) {
   // Ceilings sit above the default `maxSigsPerFile` so the configured budget
   // governs output rather than a literal buried here, and omissions are disclosed
   // — an undisclosed cap looks like a class that simply has eight methods (#576).
-  const MEMBER_LIMIT = 8;
-  const PER_FILE_LIMIT = 25;
+  // Class bodies are scanned to this many characters. Real classes routinely
+  // run past the old 4KB scan window — truncating there silently hid every
+  // member after ~4000 chars AND anchored class end-lines short (#576). The
+  // ceiling only guards against pathological input (Java parity, #551).
+  const MAX_CLASS_BODY_CHARS = 200000;
+  const MEMBER_LIMIT = 120;
+  const PER_FILE_LIMIT = 200;
 
   /**
    * Extract signatures from C# source code.
@@ -5587,7 +5597,7 @@ __factories["./src/extractors/csharp"] = function(module, exports) {
 
   function extractBlock(src, startIndex) {
     let depth = 1, i = startIndex;
-    const end = Math.min(src.length, startIndex + 5000);
+    const end = Math.min(src.length, startIndex + MAX_CLASS_BODY_CHARS);
     while (i < end && depth > 0) {
       if (src[i] === '{') depth++;
       else if (src[i] === '}') depth--;
@@ -5632,7 +5642,7 @@ __factories["./src/extractors/css"] = function(module, exports) {
 
   // Ceiling sits above the default `maxSigsPerFile` so the configured budget
   // governs output rather than a literal buried here, and omissions are disclosed (#576).
-  const PER_FILE_LIMIT = 25;
+  const PER_FILE_LIMIT = 200;
 
   /**
    * Extract signatures from CSS/SCSS/SASS/Less source code.
@@ -5713,8 +5723,13 @@ __factories["./src/extractors/dart"] = function(module, exports) {
   // Ceilings sit above the default `maxSigsPerFile` so the configured budget
   // governs output rather than a literal buried here, and omissions are disclosed
   // — an undisclosed cap looks like a class that simply has eight methods (#576).
-  const MEMBER_LIMIT = 8;
-  const PER_FILE_LIMIT = 25;
+  // Class bodies are scanned to this many characters. Real classes routinely
+  // run past the old 4KB scan window — truncating there silently hid every
+  // member after ~4000 chars AND anchored class end-lines short (#576). The
+  // ceiling only guards against pathological input (Java parity, #551).
+  const MAX_CLASS_BODY_CHARS = 200000;
+  const MEMBER_LIMIT = 120;
+  const PER_FILE_LIMIT = 200;
 
   /**
    * Extract signatures from Dart source code.
@@ -5768,7 +5783,7 @@ __factories["./src/extractors/dart"] = function(module, exports) {
 
   function extractBlock(src, startIndex) {
     let depth = 1, i = startIndex;
-    const end = Math.min(src.length, startIndex + 4000);
+    const end = Math.min(src.length, startIndex + MAX_CLASS_BODY_CHARS);
     while (i < end && depth > 0) {
       if (src[i] === '{') depth++;
       else if (src[i] === '}') depth--;
@@ -6075,7 +6090,7 @@ __factories["./src/extractors/dockerfile"] = function(module, exports) {
 
   // Ceiling sits above the default `maxSigsPerFile` so the configured budget
   // governs output rather than a literal buried here, and omissions are disclosed (#576).
-  const PER_FILE_LIMIT = 25;
+  const PER_FILE_LIMIT = 200;
 
   /**
    * Extract signatures from Dockerfiles.
@@ -6134,10 +6149,10 @@ __factories["./src/extractors/gdscript"] = function(module, exports) {
 
   // Ceiling sits above the default `maxSigsPerFile` so the configured budget
   // governs output rather than a literal buried here, and omissions are disclosed (#576).
-  const PER_FILE_LIMIT = 25;
+  const PER_FILE_LIMIT = 200;
 
   // Ceilings disclose what they drop rather than truncating silently (#576).
-  const MEMBER_LIMIT = 6;
+  const MEMBER_LIMIT = 120;
   const ENUM_LIMIT = 24;
 
   /**
@@ -6307,11 +6322,19 @@ __factories["./src/extractors/generic"] = function(module, exports) {
 __factories["./src/extractors/go"] = function(module, exports) {
   
   const { lineAt, withAnchor } = __require('./src/extractors/line-anchor');
-  const { capWithNotice } = __require('./src/util/truncate');
+  const { capWithNotice, capMembersWithNotice } = __require('./src/util/truncate');
 
   // Ceiling sits above the default `maxSigsPerFile` so the configured budget
   // governs output rather than a literal buried here, and omissions are disclosed (#576).
-  const PER_FILE_LIMIT = 25;
+  // Class bodies are scanned to this many characters. Real classes routinely
+  // run past the old 4KB scan window — truncating there silently hid every
+  // member after ~4000 chars AND anchored class end-lines short (#576). The
+  // ceiling only guards against pathological input (Java parity, #551).
+  const MAX_CLASS_BODY_CHARS = 200000;
+  const PER_FILE_LIMIT = 200;
+
+  // Per-interface member ceiling, disclosed via capMembersWithNotice (#576).
+  const MEMBER_LIMIT = 120;
 
   /**
    * Extract signatures from Go source code.
@@ -6347,7 +6370,7 @@ __factories["./src/extractors/go"] = function(module, exports) {
       const block = extractBlock(stripped, bodyStart);
       sigs.push(hinted(withAnchor(`type ${m[1]} interface`, lineAt(stripped, m.index), lineAt(stripped, bodyStart + block.length)), m[1]));
       for (const meth of extractInterfaceMethods(block)) {
-        sigs.push(withAnchor(`  ${meth.text}`, lineAt(stripped, bodyStart + meth.declIdx), lineAt(stripped, bodyStart + meth.endIdx)));
+        sigs.push(withAnchor(`  ${meth.text}`, lineAt(stripped, bodyStart + (meth.declIdx || 0)), lineAt(stripped, bodyStart + (meth.endIdx || 0))));
       }
     }
 
@@ -6365,7 +6388,7 @@ __factories["./src/extractors/go"] = function(module, exports) {
 
   function extractBlock(src, startIndex) {
     let depth = 1, i = startIndex;
-    const end = Math.min(src.length, startIndex + 2000);
+    const end = Math.min(src.length, startIndex + MAX_CLASS_BODY_CHARS);
     while (i < end && depth > 0) {
       if (src[i] === '{') depth++;
       else if (src[i] === '}') depth--;
@@ -6385,7 +6408,7 @@ __factories["./src/extractors/go"] = function(module, exports) {
         endIdx: m.index + m[0].length,
       });
     }
-    return methods.slice(0, 8);
+    return capMembersWithNotice(methods, MEMBER_LIMIT, 'methods');
   }
 
   function normalizeParams(params) {
@@ -6498,7 +6521,7 @@ __factories["./src/extractors/html"] = function(module, exports) {
 
   // Ceiling sits above the default `maxSigsPerFile` so the configured budget
   // governs output rather than a literal buried here, and omissions are disclosed (#576).
-  const PER_FILE_LIMIT = 25;
+  const PER_FILE_LIMIT = 200;
 
   /**
    * Extract signatures from HTML files.
@@ -6673,6 +6696,10 @@ __factories["./src/extractors/javascript"] = function(module, exports) {
   const { capWithNotice, capMembersWithNotice } = __require('./src/util/truncate');
   const { stripComments, maskCode, readBalanced } = __require('./src/extractors/scan');
 
+  // Class bodies are scanned to this many characters — guard against
+  // pathological input only; the old 4KB window silently hid members (#576).
+  const MAX_CLASS_BODY_CHARS = 200000;
+
   /**
    * Extract signatures from JavaScript source code.
    * Top-level declarations and class members carry a `:start-end` line anchor
@@ -6782,13 +6809,13 @@ __factories["./src/extractors/javascript"] = function(module, exports) {
       const anchored = anchors[i] ? withAnchor(s, anchors[i][0], anchors[i][1]) : s;
       return docHintFor[i] ? `${anchored}  # ${docHintFor[i]}` : anchored;
     });
-    return capWithNotice(withAnchors, 25, 'signatures');
+    return capWithNotice(withAnchors, 200, 'signatures');
   }
 
   function extractBlock(src, startIndex) {
     let depth = 1;
     let i = startIndex;
-    const end = Math.min(src.length, startIndex + 4000);
+    const end = Math.min(src.length, startIndex + MAX_CLASS_BODY_CHARS);
     while (i < end && depth > 0) {
       if (src[i] === '{') depth++;
       else if (src[i] === '}') depth--;
@@ -6823,7 +6850,7 @@ __factories["./src/extractors/javascript"] = function(module, exports) {
       const retStr = formatReturnHint(returnHints.get(m[1]));
       members.push({ text: `${isStatic}${isAsync}${m[1]}(${normalizeParams(params)})${retStr}`, start, end });
     }
-    return capMembersWithNotice(members, 8, 'methods');
+    return capMembersWithNotice(members, 120, 'methods');
   }
 
   function buildReturnHints(src) {
@@ -6897,8 +6924,13 @@ __factories["./src/extractors/kotlin"] = function(module, exports) {
   // Ceilings sit above the default `maxSigsPerFile` so the configured budget
   // governs output rather than a literal buried here, and omissions are disclosed
   // — an undisclosed cap looks like a class that simply has eight methods (#576).
-  const MEMBER_LIMIT = 8;
-  const PER_FILE_LIMIT = 25;
+  // Class bodies are scanned to this many characters. Real classes routinely
+  // run past the old 4KB scan window — truncating there silently hid every
+  // member after ~4000 chars AND anchored class end-lines short (#576). The
+  // ceiling only guards against pathological input (Java parity, #551).
+  const MAX_CLASS_BODY_CHARS = 200000;
+  const MEMBER_LIMIT = 120;
+  const PER_FILE_LIMIT = 200;
 
   /**
    * Extract signatures from Kotlin source code.
@@ -6952,7 +6984,7 @@ __factories["./src/extractors/kotlin"] = function(module, exports) {
 
   function extractBlock(src, startIndex) {
     let depth = 1, i = startIndex;
-    const end = Math.min(src.length, startIndex + 4000);
+    const end = Math.min(src.length, startIndex + MAX_CLASS_BODY_CHARS);
     while (i < end && depth > 0) {
       if (src[i] === '{') depth++;
       else if (src[i] === '}') depth--;
@@ -7054,7 +7086,7 @@ __factories["./src/extractors/lua"] = function(module, exports) {
   // Ceiling discloses what it drops rather than truncating silently (#583).
   // Collection runs to completion so the marker reports the true overflow —
   // stopping early made r.js report "+1 more" where 50 were hidden (#584).
-  const PER_FILE_LIMIT = 30;
+  const PER_FILE_LIMIT = 200;
 
   /**
    * Extract signatures from Lua source code.
@@ -7208,7 +7240,7 @@ __factories["./src/extractors/markdown"] = function(module, exports) {
   const { capWithNotice } = __require('./src/util/truncate');
 
   // Ceiling discloses what it drops rather than truncating silently (#583).
-  const PER_FILE_LIMIT = 40;
+  const PER_FILE_LIMIT = 200;
 
   /**
    * Lightweight markdown technical indexer.
@@ -7389,8 +7421,13 @@ __factories["./src/extractors/php"] = function(module, exports) {
   // Ceilings sit above the default `maxSigsPerFile` so the configured budget
   // governs output rather than a literal buried here, and omissions are disclosed
   // — an undisclosed cap looks like a class that simply has eight methods (#576).
-  const MEMBER_LIMIT = 8;
-  const PER_FILE_LIMIT = 25;
+  // Class bodies are scanned to this many characters. Real classes routinely
+  // run past the old 4KB scan window — truncating there silently hid every
+  // member after ~4000 chars AND anchored class end-lines short (#576). The
+  // ceiling only guards against pathological input (Java parity, #551).
+  const MAX_CLASS_BODY_CHARS = 200000;
+  const MEMBER_LIMIT = 120;
+  const PER_FILE_LIMIT = 200;
 
   /**
    * Extract signatures from PHP source code.
@@ -7448,7 +7485,7 @@ __factories["./src/extractors/php"] = function(module, exports) {
 
   function extractBlock(src, startIndex) {
     let depth = 1, i = startIndex;
-    const end = Math.min(src.length, startIndex + 4000);
+    const end = Math.min(src.length, startIndex + MAX_CLASS_BODY_CHARS);
     while (i < end && depth > 0) {
       if (src[i] === '{') depth++;
       else if (src[i] === '}') depth--;
@@ -7568,7 +7605,7 @@ __factories["./src/extractors/properties"] = function(module, exports) {
   const { capWithNotice } = __require('./src/util/truncate');
 
   // Ceiling discloses what it drops rather than truncating silently (#583).
-  const PER_FILE_LIMIT = 50;
+  const PER_FILE_LIMIT = 200;
 
   /**
    * Extract signatures from .properties configuration files.
@@ -7684,7 +7721,10 @@ __factories["./src/extractors/python"] = function(module, exports) {
 
   // Ceiling sits above the default `maxSigsPerFile` so the configured budget
   // governs output rather than a literal buried here, and omissions are disclosed (#576).
-  const PER_FILE_LIMIT = 30;
+  const PER_FILE_LIMIT = 200;
+
+  // Per-class member ceiling, disclosed via capWithNotice (#576).
+  const MEMBER_LIMIT = 120;
 
   /**
    * 1-based line of the last source line belonging to a top-level (indent 0)
@@ -7840,7 +7880,7 @@ __factories["./src/extractors/python"] = function(module, exports) {
         methods.push(`${asyncKw}def ${m[1]}(${params})${retStr}`);
       }
     }
-    return methods.slice(0, 8);
+    return capWithNotice(methods, MEMBER_LIMIT, 'methods');
   }
 
   function tryExtractDataclassFields(stripped, classIndex) {
@@ -7949,6 +7989,8 @@ __factories["./src/extractors/python"] = function(module, exports) {
 // ── ./src/extractors/python_dataclass ──
 __factories["./src/extractors/python_dataclass"] = function(module, exports) {
   
+  const { capWithNotice } = __require('./src/util/truncate');
+
   /**
    * Extract Python dataclass, Pydantic model, and SQLAlchemy ORM metadata.
    * Focuses on model fields, validation, and relationships.
@@ -8020,7 +8062,7 @@ __factories["./src/extractors/python_dataclass"] = function(module, exports) {
       sigs.push('config-class');
     }
 
-    return Array.from(new Set(sigs)).slice(0, 50);
+    return capWithNotice(Array.from(new Set(sigs)), 200, 'signatures');
   }
 
   module.exports = { extract };
@@ -8034,7 +8076,7 @@ __factories["./src/extractors/r"] = function(module, exports) {
 
   // Ceiling sits above the default `maxSigsPerFile` so the configured budget
   // governs output rather than a literal buried here, and omissions are disclosed (#576).
-  const PER_FILE_LIMIT = 30;
+  const PER_FILE_LIMIT = 200;
 
   /**
    * Extract signatures from R source code.
@@ -8313,7 +8355,7 @@ __factories["./src/extractors/ruby"] = function(module, exports) {
 
   // Ceiling sits above the default `maxSigsPerFile` so the configured budget
   // governs output rather than a literal buried here, and omissions are disclosed (#576).
-  const PER_FILE_LIMIT = 25;
+  const PER_FILE_LIMIT = 200;
 
   /**
    * Extract signatures from Ruby source code.
@@ -8374,11 +8416,19 @@ __factories["./src/extractors/ruby"] = function(module, exports) {
 __factories["./src/extractors/rust"] = function(module, exports) {
   
   const { lineAt, withAnchor } = __require('./src/extractors/line-anchor');
-  const { capWithNotice } = __require('./src/util/truncate');
+  const { capWithNotice, capMembersWithNotice } = __require('./src/util/truncate');
 
   // Ceiling sits above the default `maxSigsPerFile` so the configured budget
   // governs output rather than a literal buried here, and omissions are disclosed (#576).
-  const PER_FILE_LIMIT = 25;
+  // Class bodies are scanned to this many characters. Real classes routinely
+  // run past the old 4KB scan window — truncating there silently hid every
+  // member after ~4000 chars AND anchored class end-lines short (#576). The
+  // ceiling only guards against pathological input (Java parity, #551).
+  const MAX_CLASS_BODY_CHARS = 200000;
+  const PER_FILE_LIMIT = 200;
+
+  // Per-impl member ceiling, disclosed via capMembersWithNotice (#576).
+  const MEMBER_LIMIT = 120;
 
   /**
    * Extract signatures from Rust source code.
@@ -8436,7 +8486,7 @@ __factories["./src/extractors/rust"] = function(module, exports) {
       const block = extractBlock(stripped, bodyStart);
       sigs.push(withAnchor(`impl ${m[1]}`, lineAt(stripped, m.index), lineAt(stripped, bodyStart + block.length)));
       for (const fn of extractMethods(block)) {
-        sigs.push(hinted(withAnchor(`  ${fn.text}`, lineAt(stripped, bodyStart + fn.declIdx), lineAt(stripped, bodyStart + fn.endIdx)), fn.name));
+        sigs.push(hinted(withAnchor(`  ${fn.text}`, lineAt(stripped, bodyStart + (fn.declIdx || 0)), lineAt(stripped, bodyStart + (fn.endIdx || 0))), fn.name));
       }
     }
 
@@ -8453,7 +8503,7 @@ __factories["./src/extractors/rust"] = function(module, exports) {
 
   function extractBlock(src, startIndex) {
     let depth = 1, i = startIndex;
-    const end = Math.min(src.length, startIndex + 5000);
+    const end = Math.min(src.length, startIndex + MAX_CLASS_BODY_CHARS);
     while (i < end && depth > 0) {
       if (src[i] === '{') depth++;
       else if (src[i] === '}') depth--;
@@ -8474,7 +8524,7 @@ __factories["./src/extractors/rust"] = function(module, exports) {
         endIdx: m.index + m[0].length,
       });
     }
-    return methods.slice(0, 8);
+    return capMembersWithNotice(methods, MEMBER_LIMIT, 'methods');
   }
 
   function normalizeParams(params) {
@@ -8526,8 +8576,13 @@ __factories["./src/extractors/scala"] = function(module, exports) {
   // Ceilings sit above the default `maxSigsPerFile` so the configured budget
   // governs output rather than a literal buried here, and omissions are disclosed
   // — an undisclosed cap looks like a class that simply has eight methods (#576).
-  const MEMBER_LIMIT = 8;
-  const PER_FILE_LIMIT = 25;
+  // Class bodies are scanned to this many characters. Real classes routinely
+  // run past the old 4KB scan window — truncating there silently hid every
+  // member after ~4000 chars AND anchored class end-lines short (#576). The
+  // ceiling only guards against pathological input (Java parity, #551).
+  const MAX_CLASS_BODY_CHARS = 200000;
+  const MEMBER_LIMIT = 120;
+  const PER_FILE_LIMIT = 200;
 
   /**
    * Extract signatures from Scala source code.
@@ -8574,7 +8629,7 @@ __factories["./src/extractors/scala"] = function(module, exports) {
 
   function extractBlock(src, startIndex) {
     let depth = 1, i = startIndex;
-    const end = Math.min(src.length, startIndex + 4000);
+    const end = Math.min(src.length, startIndex + MAX_CLASS_BODY_CHARS);
     while (i < end && depth > 0) {
       if (src[i] === '{') depth++;
       else if (src[i] === '}') depth--;
@@ -8719,7 +8774,7 @@ __factories["./src/extractors/shell"] = function(module, exports) {
 
   // Ceiling sits above the default `maxSigsPerFile` so the configured budget
   // governs output rather than a literal buried here, and omissions are disclosed (#576).
-  const PER_FILE_LIMIT = 25;
+  const PER_FILE_LIMIT = 200;
 
   /**
    * Extract signatures from shell scripts (bash, zsh, fish).
@@ -8869,7 +8924,7 @@ __factories["./src/extractors/svelte"] = function(module, exports) {
 
   // Ceiling sits above the default `maxSigsPerFile` so the configured budget
   // governs output rather than a literal buried here, and omissions are disclosed (#576).
-  const PER_FILE_LIMIT = 25;
+  const PER_FILE_LIMIT = 200;
 
   /**
    * Extract signatures from Svelte components.
@@ -8939,8 +8994,13 @@ __factories["./src/extractors/swift"] = function(module, exports) {
   // Ceilings sit above the default `maxSigsPerFile` so the configured budget
   // governs output rather than a literal buried here, and omissions are disclosed
   // — an undisclosed cap looks like a class that simply has eight methods (#576).
-  const MEMBER_LIMIT = 8;
-  const PER_FILE_LIMIT = 25;
+  // Class bodies are scanned to this many characters. Real classes routinely
+  // run past the old 4KB scan window — truncating there silently hid every
+  // member after ~4000 chars AND anchored class end-lines short (#576). The
+  // ceiling only guards against pathological input (Java parity, #551).
+  const MAX_CLASS_BODY_CHARS = 200000;
+  const MEMBER_LIMIT = 120;
+  const PER_FILE_LIMIT = 200;
 
   /**
    * Extract signatures from Swift source code.
@@ -8994,7 +9054,7 @@ __factories["./src/extractors/swift"] = function(module, exports) {
 
   function extractBlock(src, startIndex) {
     let depth = 1, i = startIndex;
-    const end = Math.min(src.length, startIndex + 4000);
+    const end = Math.min(src.length, startIndex + MAX_CLASS_BODY_CHARS);
     while (i < end && depth > 0) {
       if (src[i] === '{') depth++;
       else if (src[i] === '}') depth--;
@@ -9153,7 +9213,7 @@ __factories["./src/extractors/toml"] = function(module, exports) {
   const { capWithNotice } = __require('./src/util/truncate');
 
   // Ceiling discloses what it drops rather than truncating silently (#583).
-  const PER_FILE_LIMIT = 40;
+  const PER_FILE_LIMIT = 200;
 
   /**
    * Extract signatures from TOML configuration files.
@@ -9204,6 +9264,10 @@ __factories["./src/extractors/typescript"] = function(module, exports) {
   const { lineAt, withAnchor } = __require('./src/extractors/line-anchor');
   const { capWithNotice, capMembersWithNotice } = __require('./src/util/truncate');
   const { stripComments, maskCode, readBalanced } = __require('./src/extractors/scan');
+
+  // Class bodies are scanned to this many characters — guard against
+  // pathological input only; the old 4KB window silently hid members (#576).
+  const MAX_CLASS_BODY_CHARS = 200000;
 
   /**
    * Extract signatures from TypeScript source code.
@@ -9390,13 +9454,13 @@ __factories["./src/extractors/typescript"] = function(module, exports) {
       const anchored = anchors[i] ? withAnchor(s, anchors[i][0], anchors[i][1]) : s;
       return docHintFor[i] ? `${anchored}  # ${docHintFor[i]}` : anchored;
     });
-    return capWithNotice(withAnchors, 35, 'signatures');
+    return capWithNotice(withAnchors, 200, 'signatures');
   }
 
   function extractBlock(src, startIndex) {
     let depth = 1;
     let i = startIndex;
-    const end = Math.min(src.length, startIndex + 4000);
+    const end = Math.min(src.length, startIndex + MAX_CLASS_BODY_CHARS);
     while (i < end && depth > 0) {
       if (src[i] === '{') depth++;
       else if (src[i] === '}') depth--;
@@ -9424,7 +9488,7 @@ __factories["./src/extractors/typescript"] = function(module, exports) {
       const start = m.index + (m[0].length - m[0].replace(/^\s+/, '').length);
       members.push({ text: `${m[1]}(${normalizeParams(block.slice(openIdx + 1, closeIdx))})`, start, end: closeIdx + 1 });
     }
-    return capMembersWithNotice(members, 8, 'members');
+    return capMembersWithNotice(members, 120, 'members');
   }
 
   const _CTRL_KEYWORDS = new Set(['if', 'for', 'while', 'switch', 'do', 'try', 'catch', 'finally', 'else', 'return']);
@@ -9459,7 +9523,7 @@ __factories["./src/extractors/typescript"] = function(module, exports) {
       const retStr = retType ? ` → ${retType}` : '';
       members.push({ text: `${isStatic}${isAsync}${m[1]}(${normalizeParams(params)})${retStr}`, start, end });
     }
-    return capMembersWithNotice(members, 8, 'methods');
+    return capMembersWithNotice(members, 120, 'methods');
   }
 
   function normalizeParams(params) {
@@ -9534,7 +9598,7 @@ __factories["./src/extractors/typescript_react"] = function(module, exports) {
   const { capWithNotice } = __require('./src/util/truncate');
 
   // Ceiling discloses what it drops rather than truncating silently (#583).
-  const PER_FILE_LIMIT = 50;
+  const PER_FILE_LIMIT = 200;
 
   /**
    * Extract React component signatures from .tsx files.
@@ -9600,6 +9664,8 @@ __factories["./src/extractors/typescript_react"] = function(module, exports) {
 // ── ./src/extractors/vue_sfc ──
 __factories["./src/extractors/vue_sfc"] = function(module, exports) {
   
+  const { capWithNotice } = __require('./src/util/truncate');
+
   /**
    * Extract Vue Single-File Component (SFC) signatures from .vue files.
    * Captures component metadata: name, props, emits, slots, composables, lifecycle.
@@ -9693,7 +9759,7 @@ __factories["./src/extractors/vue_sfc"] = function(module, exports) {
       sigs.push(`slot ${s}`);
     }
 
-    return Array.from(new Set(sigs)).slice(0, 50);
+    return capWithNotice(Array.from(new Set(sigs)), 200, 'signatures');
   }
 
   module.exports = { extract };
@@ -9703,6 +9769,8 @@ __factories["./src/extractors/vue_sfc"] = function(module, exports) {
 // ── ./src/extractors/xml ──
 __factories["./src/extractors/xml"] = function(module, exports) {
   
+  const { capWithNotice } = __require('./src/util/truncate');
+
   /**
    * Lightweight XML config extractor.
    * Captures root tags, key config tags, and id/name/class attributes.
@@ -9743,7 +9811,7 @@ __factories["./src/extractors/xml"] = function(module, exports) {
       if (cls) sigs.push(`${tag} -> ${cls[1]}`);
     }
 
-    return Array.from(new Set(sigs)).slice(0, 50);
+    return capWithNotice(Array.from(new Set(sigs)), 200, 'signatures');
   }
 
   module.exports = { extract };
@@ -9757,7 +9825,7 @@ __factories["./src/extractors/yaml"] = function(module, exports) {
 
   // Ceiling sits above the default `maxSigsPerFile` so the configured budget
   // governs output rather than a literal buried here, and omissions are disclosed (#576).
-  const PER_FILE_LIMIT = 25;
+  const PER_FILE_LIMIT = 200;
 
   /**
    * Extract signatures from YAML configuration files.
@@ -16065,8 +16133,8 @@ __factories["./src/mcp/server"] = function(module, exports) {
    * One JSON object per line on both stdin and stdout.
    *
    * Supported methods:
-   *   initialize        → serverInfo + capabilities
-   *   tools/list        → 19 tool definitions
+   *   initialize        → serverInfo + capabilities + negotiated protocolVersion
+   *   tools/list        → 21 tool definitions
    *   tools/call        → dispatch to handler, return result
    */
 
@@ -16076,9 +16144,21 @@ __factories["./src/mcp/server"] = function(module, exports) {
 
   const SERVER_INFO = {
     name: 'sigmap',
-    version: '8.34.0',
+    version: '8.35.0',
     description: 'SigMap MCP server — code signatures on demand',
   };
+
+  // Protocol revisions this server actually speaks. The tools-only surface —
+  // initialize / tools/list / tools/call plus the initialized/cancelled
+  // notifications — is identical across these revisions, and the
+  // @hasmcp/mcp-spec-test suite passes every applicable 2025-11-25 case against
+  // it. 2026-07-28 is deliberately absent: that revision requires
+  // server/discover, which is not implemented. Newest first: a client offering
+  // a version outside this list is downgraded to [0], never echoed back —
+  // echoing an unspeakable version is itself a spec violation (#544), and it
+  // made the conformance suite believe 2026-07-28 was supported, producing six
+  // phantom server/discover failures on a revision never really offered (#545).
+  const SUPPORTED_PROTOCOL_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
 
   // ---------------------------------------------------------------------------
   // JSON-RPC helpers
@@ -16104,9 +16184,32 @@ __factories["./src/mcp/server"] = function(module, exports) {
       return;
     }
 
-    if (method === 'initialize') {
+    // server/discover (spec 2026-07-28) — session-less discovery, answerable
+    // before any handshake, so a client can learn the honest version list
+    // instead of offering versions and hoping. The response is a
+    // CacheableResult: deterministic, so the TTL promise of stability holds.
+    // Note supportedVersions does NOT include 2026-07-28 — answering discover
+    // is forward-compatible plumbing, not a claim to serve that revision's
+    // whole surface (per-result envelopes, inline _meta negotiation).
+    if (method === 'server/discover') {
       respond(id, {
-        protocolVersion: (params && params.protocolVersion) || '2024-11-05',
+        resultType: 'complete',
+        cacheScope: 'public',
+        ttlMs: 3600000,
+        supportedVersions: SUPPORTED_PROTOCOL_VERSIONS,
+        capabilities: { tools: {} },
+        serverInfo: SERVER_INFO,
+        instructions: 'SigMap serves code signatures for the working directory. Call query_context or search_signatures to rank and fetch signature blocks instead of reading whole files.',
+      });
+      return;
+    }
+
+    if (method === 'initialize') {
+      const offered = params && params.protocolVersion;
+      respond(id, {
+        protocolVersion: SUPPORTED_PROTOCOL_VERSIONS.includes(offered)
+          ? offered
+          : SUPPORTED_PROTOCOL_VERSIONS[0],
         serverInfo: SERVER_INFO,
         capabilities: { tools: {} },
       });
@@ -16114,6 +16217,13 @@ __factories["./src/mcp/server"] = function(module, exports) {
     }
 
     if (method === 'tools/list') {
+      // No pagination: the full list fits one page, so any cursor a client
+      // presents is one this server never issued — reject it (-32602, per the
+      // spec's SHOULD) rather than silently restarting from page one.
+      if (params && params.cursor !== undefined) {
+        respondError(id, -32602, `Invalid cursor: ${String(params.cursor)}`);
+        return;
+      }
       respond(id, { tools: TOOLS });
       return;
     }
@@ -17743,9 +17853,15 @@ __factories["./src/retrieval/ranker"] = function(module, exports) {
       const hop1Files = new Set(); // normalised keys that received a hop1 boost
       const hop1Seeds = [];        // original (un-normalised) paths, for hop-2 lookup
 
-      // Hop 1: direct neighbors of scored files
-      for (const entry of scored) {
-        if (entry.score <= 0) continue;
+      // Hop 1: direct neighbors of scored files. Seeds snapshotted BEFORE the
+      // loop (as the call-graph block below already does) so boosts never
+      // cascade: a file whose only score is a hop-1 boost must not become a seed
+      // itself mid-loop, or the effective seed set — and every boost total —
+      // depends on index insertion order, which git history changes via the
+      // recent-commits hoist. That made gate scores differ between a shallow CI
+      // checkout and a developer clone of the same commit (#596).
+      const hop1SeedEntries = scored.filter((e) => e.score > 0);
+      for (const entry of hop1SeedEntries) {
         const neighbors = _graphGet(graph.forward, path.resolve(cwd, entry.file)) || [];
         for (const neighborAbs of neighbors) {
           const nk = path.normalize(neighborAbs);
@@ -17760,7 +17876,10 @@ __factories["./src/retrieval/ranker"] = function(module, exports) {
         }
       }
 
-      // Hop 2: neighbors of hop1 files (only if they didn't get a direct score)
+      // Hop 2: neighbors of hop1 files (only if they didn't get a direct score).
+      // Eligibility frozen after hop-1 for the same reason: a file whose first
+      // score is a hop-2 boost must not become hop-2-eligible mid-loop (#596).
+      const hop2Eligible = scored.map((e) => e.score > 0);
       for (const hop1Key of hop1Seeds) {
         if (_graphGet(keyToIdx, hop1Key) === undefined) continue; // skip files not in index
         const neighbors = _graphGet(graph.forward, hop1Key) || [];
@@ -17769,7 +17888,7 @@ __factories["./src/retrieval/ranker"] = function(module, exports) {
           if (_isHub(nk) || hubs.has(nk) || hubs.has(nk.toLowerCase())) continue;
           if (hop1Files.has(nk)) continue; // skip already hop1-boosted
           const idx = _graphGet(keyToIdx, nk);
-          if (idx !== undefined && scored[idx].score > 0) {
+          if (idx !== undefined && hop2Eligible[idx]) {
             // Only boost files that have some baseline score (not noise)
             scored[idx].score += GRAPH_BOOST_AMOUNTS.hop2;
             scored[idx].signals.graphBoost = (scored[idx].signals.graphBoost || 0) + GRAPH_BOOST_AMOUNTS.hop2;
@@ -22370,7 +22489,7 @@ function __tryGit(args, opts = {}) {
   catch (_) { return ''; }
 }
 
-const VERSION = '8.34.0';
+const VERSION = '8.35.0';
 const MARKER = '\n\n## Auto-generated signatures\n<!-- Updated by gen-context.js -->\n';
 
 function requireSourceOrBundled(key) {
@@ -22665,7 +22784,20 @@ function estimateTokens(str) {
 }
 
 function isTestFile(filePath) {
-  return /\.(test|spec)\.[a-z]+$/.test(filePath) || /_test\.[a-z]+$/.test(filePath);
+  const p = filePath.replace(/\\/g, '/');
+  // Filename conventions: foo.test.ts / foo.spec.js / foo_test.go / test_foo.py,
+  // plus the PascalCase JVM/C#/Swift family (FooTest.java, FooTests.kt,
+  // FooSpec.scala). The [a-z0-9] guard keeps `contest.java` and `Latest.java`
+  // out; the suffix must be a real case boundary.
+  if (/\.(test|spec)\.[a-z]+$/.test(p) || /_test\.[a-z]+$/.test(p)) return true;
+  if (/(^|\/)test_[^/]+\.[a-z]+$/.test(p)) return true;
+  if (/[a-z0-9](Test|Spec)s?\.(java|kt|kts|scala|groovy|cs|swift)$/.test(p)) return true;
+  // Path-segment conventions (src/test/java/**, tests/, spec/, __tests__/, e2e/)
+  // — the form the entire JVM world uses. Without this, "drop test files first"
+  // ran INVERTED on JVM repos: spring-petclinic's budget kept all 17 src/test/
+  // files while dropping the application entry point, the owner entities and
+  // every owner template (#592).
+  return /(^|\/)(test|tests|spec|specs|__tests__|e2e)(\/|$)/i.test(p);
 }
 
 function isConfigFile(filePath) {
@@ -22682,6 +22814,21 @@ function isMockFile(filePath) {
   return /\/(mock|mocks|stub|stubs|fake|fakes|demo|demos|__mocks__|fixtures)\//i.test(p) ||
     /\.(mock|stub|fake)\.[jt]sx?$/.test(p) ||
     /mock\.(ts|js|tsx|jsx)$/.test(p);
+}
+
+// The application entry point is the single most orientation-valuable file in
+// a repo, yet it is often tiny (a main class with 2-3 signatures), so the
+// fewest-sigs tie-break dropped it while keeping bulkier files: petclinic's
+// budget dropped PetClinicApplication.java and an agent asking for the startup
+// entry point could not reach it at all (#592). Deliberately narrow — bare
+// main/app/application names plus the Spring `*Application.java` and C#
+// `Program.cs` conventions. `index.*` is excluded: JS barrel files are hubs,
+// not entry points, and protecting every one would crowd out real code.
+function isEntryPointFile(filePath) {
+  const base = path.basename(filePath.replace(/\\/g, '/'));
+  return /^(main|app|application|__main__)\.[a-z]+$/i.test(base)
+    || /Application\.(java|kt|kts)$/.test(base)
+    || /^Program\.cs$/.test(base);
 }
 
 /**
@@ -22803,6 +22950,7 @@ function applyTokenBudget(fileEntries, maxTokens) {
     else if (isMockFile(e.filePath)) { priority = 9;  dropReason = 'budget: mock file'; }
     else if (isTestFile(e.filePath)) { priority = 8;  dropReason = 'budget: test file'; }
     else if (isConfigFile(e.filePath)) { priority = 6; dropReason = 'budget: config file'; }
+    else if (isEntryPointFile(e.filePath)) { priority = 3; dropReason = 'budget: entry point'; }
     else priority = 4;
     const loc = e.content ? e.content.split('\n').length : 1;
     const signalQuality = loc > 0 ? (e.sigs ? e.sigs.length : 0) / loc : 0;

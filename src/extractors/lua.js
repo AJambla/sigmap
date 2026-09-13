@@ -5,7 +5,7 @@ const { capWithNotice } = require('../util/truncate');
 // Ceiling discloses what it drops rather than truncating silently (#583).
 // Collection runs to completion so the marker reports the true overflow —
 // stopping early made r.js report "+1 more" where 50 were hidden (#584).
-const PER_FILE_LIMIT = 30;
+const PER_FILE_LIMIT = 200;
 
 /**
  * Extract signatures from Lua source code.

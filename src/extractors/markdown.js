@@ -3,7 +3,7 @@
 const { capWithNotice } = require('../util/truncate');
 
 // Ceiling discloses what it drops rather than truncating silently (#583).
-const PER_FILE_LIMIT = 40;
+const PER_FILE_LIMIT = 200;
 
 /**
  * Lightweight markdown technical indexer.

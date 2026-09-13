@@ -4,6 +4,10 @@ const { lineAt, withAnchor } = require('./line-anchor');
 const { capWithNotice, capMembersWithNotice } = require('../util/truncate');
 const { stripComments, maskCode, readBalanced } = require('./scan');
 
+// Class bodies are scanned to this many characters — guard against
+// pathological input only; the old 4KB window silently hid members (#576).
+const MAX_CLASS_BODY_CHARS = 200000;
+
 /**
  * Extract signatures from JavaScript source code.
  * Top-level declarations and class members carry a `:start-end` line anchor
@@ -113,13 +117,13 @@ function extract(src) {
     const anchored = anchors[i] ? withAnchor(s, anchors[i][0], anchors[i][1]) : s;
     return docHintFor[i] ? `${anchored}  # ${docHintFor[i]}` : anchored;
   });
-  return capWithNotice(withAnchors, 25, 'signatures');
+  return capWithNotice(withAnchors, 200, 'signatures');
 }
 
 function extractBlock(src, startIndex) {
   let depth = 1;
   let i = startIndex;
-  const end = Math.min(src.length, startIndex + 4000);
+  const end = Math.min(src.length, startIndex + MAX_CLASS_BODY_CHARS);
   while (i < end && depth > 0) {
     if (src[i] === '{') depth++;
     else if (src[i] === '}') depth--;
@@ -154,7 +158,7 @@ function extractClassMembers(block, maskedBlock, returnHints) {
     const retStr = formatReturnHint(returnHints.get(m[1]));
     members.push({ text: `${isStatic}${isAsync}${m[1]}(${normalizeParams(params)})${retStr}`, start, end });
   }
-  return capMembersWithNotice(members, 8, 'methods');
+  return capMembersWithNotice(members, 120, 'methods');
 }
 
 function buildReturnHints(src) {

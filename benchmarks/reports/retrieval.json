@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-13T15:10:31.186Z",
+  "generated": "2026-09-13T20:23:39.334Z",
   "repos": [
     {
       "repo": "express",
@@ -104,16 +104,16 @@
     {
       "repo": "flask",
       "fileCount": 19,
-      "sigCount": 20,
+      "sigCount": 17,
       "tasks": 8,
-      "hitAt5": 0.875,
-      "mrr": 0.893,
+      "hitAt5": 0.625,
+      "mrr": 0.625,
       "randomBaseline": 0.263,
-      "improvement": 3.3,
+      "improvement": 2.4,
       "tiers": {
-        "correct": 7,
+        "correct": 5,
         "partial": 0,
-        "wrong": 1
+        "wrong": 3
       },
       "taskDetails": [
         {
@@ -134,9 +134,9 @@
             "src/flask/ctx.py",
             "src/flask/globals.py"
           ],
-          "top1": "src/flask/ctx.py",
-          "firstHitRank": 1,
-          "tier": "correct"
+          "top1": "src/flask/app.py",
+          "firstHitRank": null,
+          "tier": "wrong"
         },
         {
           "id": "flask-t003",
@@ -187,7 +187,7 @@
             "src/flask/blueprints.py"
           ],
           "top1": "src/flask/sansio/scaffold.py",
-          "firstHitRank": 7,
+          "firstHitRank": null,
           "tier": "wrong"
         },
         {
@@ -197,9 +197,9 @@
             "src/flask/ctx.py",
             "src/flask/globals.py"
           ],
-          "top1": "src/flask/ctx.py",
-          "firstHitRank": 1,
-          "tier": "correct"
+          "top1": "src/flask/sansio/scaffold.py",
+          "firstHitRank": null,
+          "tier": "wrong"
         }
       ]
     },
@@ -309,16 +309,16 @@
     {
       "repo": "spring-petclinic",
       "fileCount": 13,
-      "sigCount": 39,
+      "sigCount": 37,
       "tasks": 5,
-      "hitAt5": 0.6,
-      "mrr": 0.6,
+      "hitAt5": 0.8,
+      "mrr": 0.8,
       "randomBaseline": 0.385,
-      "improvement": 1.6,
+      "improvement": 2.1,
       "tiers": {
-        "correct": 3,
+        "correct": 4,
         "partial": 0,
-        "wrong": 2
+        "wrong": 1
       },
       "taskDetails": [
         {
@@ -327,9 +327,9 @@
           "expected": [
             "src/main/java/org/springframework/samples/petclinic/PetClinicApplication.java"
           ],
-          "top1": "src/test/java/org/springframework/samples/petclinic/MysqlTestApplication.java",
-          "firstHitRank": null,
-          "tier": "wrong"
+          "top1": "src/main/java/org/springframework/samples/petclinic/PetClinicApplication.java",
+          "firstHitRank": 1,
+          "tier": "correct"
         },
         {
           "id": "spring-t002",
@@ -348,9 +348,9 @@
             "src/main/resources/templates/owners/createOrUpdateOwnerForm.html",
             "src/main/resources/templates/owners/findOwners.html"
           ],
-          "top1": "src/main/resources/templates/vets/vetList.html",
-          "firstHitRank": null,
-          "tier": "wrong"
+          "top1": "src/main/resources/templates/owners/createOrUpdateOwnerForm.html",
+          "firstHitRank": 1,
+          "tier": "correct"
         },
         {
           "id": "spring-t004",
@@ -369,16 +369,16 @@
             "src/test/java/org/springframework/samples/petclinic/MySqlIntegrationTests.java",
             "src/test/java/org/springframework/samples/petclinic/PostgresIntegrationTests.java"
           ],
-          "top1": "src/test/java/org/springframework/samples/petclinic/MySqlIntegrationTests.java",
-          "firstHitRank": 1,
-          "tier": "correct"
+          "top1": "src/main/resources/application-postgres.properties",
+          "firstHitRank": null,
+          "tier": "wrong"
         }
       ]
     },
     {
       "repo": "rails",
       "fileCount": 1179,
-      "sigCount": 275,
+      "sigCount": 283,
       "tasks": 5,
       "hitAt5": 1,
       "mrr": 0.767,
@@ -553,7 +553,7 @@
     {
       "repo": "rust-analyzer",
       "fileCount": 635,
-      "sigCount": 162,
+      "sigCount": 143,
       "tasks": 5,
       "hitAt5": 1,
       "mrr": 0.9,
@@ -608,7 +608,7 @@
             "crates/tt/src/buffer.rs",
             "crates/tt/src/storage.rs"
           ],
-          "top1": "crates/tt/src/storage.rs",
+          "top1": "crates/tt/src/buffer.rs",
           "firstHitRank": 1,
           "tier": "correct"
         },
@@ -628,7 +628,7 @@
     {
       "repo": "abseil-cpp",
       "fileCount": 700,
-      "sigCount": 147,
+      "sigCount": 145,
       "tasks": 5,
       "hitAt5": 1,
       "mrr": 1,
@@ -701,7 +701,7 @@
     {
       "repo": "serilog",
       "fileCount": 99,
-      "sigCount": 47,
+      "sigCount": 50,
       "tasks": 5,
       "hitAt5": 0.2,
       "mrr": 0.1,
@@ -763,7 +763,7 @@
             "src/Serilog/Capturing/MessageTemplateProcessor.cs",
             "src/Serilog/Capturing/PropertyBinder.cs"
           ],
-          "top1": "src/Serilog/Rendering/MessageTemplateRenderer.cs",
+          "top1": "src/Serilog/Log.cs",
           "firstHitRank": null,
           "tier": "wrong"
         }
@@ -772,16 +772,16 @@
     {
       "repo": "riverpod",
       "fileCount": 446,
-      "sigCount": 115,
+      "sigCount": 188,
       "tasks": 5,
-      "hitAt5": 1,
-      "mrr": 1,
+      "hitAt5": 0.8,
+      "mrr": 0.829,
       "randomBaseline": 0.011,
-      "improvement": 89.2,
+      "improvement": 71.4,
       "tiers": {
-        "correct": 5,
+        "correct": 4,
         "partial": 0,
-        "wrong": 0
+        "wrong": 1
       },
       "taskDetails": [
         {
@@ -830,9 +830,9 @@
           "expected": [
             "packages/riverpod_sqflite/example/analysis_options.yaml"
           ],
-          "top1": "packages/riverpod_sqflite/example/analysis_options.yaml",
-          "firstHitRank": 1,
-          "tier": "correct"
+          "top1": "packages/riverpod_lint/analysis_options.yaml",
+          "firstHitRank": 7,
+          "tier": "wrong"
         }
       ]
     },
@@ -907,7 +907,7 @@
     {
       "repo": "laravel",
       "fileCount": 1533,
-      "sigCount": 269,
+      "sigCount": 170,
       "tasks": 5,
       "hitAt5": 1,
       "mrr": 0.9,
@@ -978,10 +978,10 @@
     {
       "repo": "akka",
       "fileCount": 211,
-      "sigCount": 108,
+      "sigCount": 112,
       "tasks": 5,
       "hitAt5": 1,
-      "mrr": 0.75,
+      "mrr": 0.767,
       "randomBaseline": 0.024,
       "improvement": 42.2,
       "tiers": {
@@ -997,7 +997,7 @@
             "akka-cluster/src/main/scala/akka/cluster/Cluster.scala",
             "akka-cluster/src/main/scala/akka/cluster/Gossip.scala"
           ],
-          "top1": "akka-cluster/src/main/scala/akka/cluster/Gossip.scala",
+          "top1": "akka-cluster/src/main/scala/akka/cluster/Cluster.scala",
           "firstHitRank": 1,
           "tier": "correct"
         },
@@ -1019,7 +1019,7 @@
             "akka-cluster/src/main/scala/akka/cluster/ClusterSettings.scala"
           ],
           "top1": "akka-cluster/src/main/scala/akka/cluster/routing/ClusterRouterConfig.scala",
-          "firstHitRank": 2,
+          "firstHitRank": 3,
           "tier": "partial"
         },
         {
@@ -1039,8 +1039,8 @@
           "expected": [
             "akka-stream/src/main/scala/akka/stream/javadsl/RestartFlow.scala"
           ],
-          "top1": "akka-stream/src/main/scala/akka/stream/javadsl/RestartSource.scala",
-          "firstHitRank": 4,
+          "top1": "akka-stream/src/main/scala/akka/stream/scaladsl/RestartFlow.scala",
+          "firstHitRank": 2,
           "tier": "partial"
         }
       ]
@@ -1048,16 +1048,16 @@
     {
       "repo": "vapor",
       "fileCount": 131,
-      "sigCount": 58,
+      "sigCount": 57,
       "tasks": 5,
-      "hitAt5": 0,
-      "mrr": 0,
+      "hitAt5": 0.2,
+      "mrr": 0.1,
       "randomBaseline": 0.038,
-      "improvement": 0,
+      "improvement": 5.2,
       "tiers": {
         "correct": 0,
-        "partial": 0,
-        "wrong": 5
+        "partial": 1,
+        "wrong": 4
       },
       "taskDetails": [
         {
@@ -1078,9 +1078,9 @@
             "Sources/Vapor/Routing/RoutesBuilder+Method.swift",
             "Sources/Vapor/Application.swift"
           ],
-          "top1": "Sources/Vapor/Routing/RoutesBuilder+WebSocket.swift",
-          "firstHitRank": null,
-          "tier": "wrong"
+          "top1": "Sources/Vapor/Sessions/SessionsMiddleware.swift",
+          "firstHitRank": 2,
+          "tier": "partial"
         },
         {
           "id": "vapor-t003",
@@ -1120,7 +1120,7 @@
     {
       "repo": "vue-core",
       "fileCount": 232,
-      "sigCount": 135,
+      "sigCount": 129,
       "tasks": 5,
       "hitAt5": 1,
       "mrr": 0.9,
@@ -1223,7 +1223,7 @@
           "expected": [
             "packages/svelte/src/internal/client/reactivity/effects.js"
           ],
-          "top1": "packages/svelte/src/index-client.js",
+          "top1": "packages/svelte/src/internal/client/reactivity/batch.js",
           "firstHitRank": 9,
           "tier": "wrong"
         },
@@ -1269,7 +1269,7 @@
       "sigCount": 29,
       "tasks": 8,
       "hitAt5": 0.625,
-      "mrr": 0.667,
+      "mrr": 0.664,
       "randomBaseline": 0.161,
       "improvement": 3.9,
       "tiers": {
@@ -1295,7 +1295,7 @@
             "lib/request.js"
           ],
           "top1": "lib/content-type-parser.js",
-          "firstHitRank": 6,
+          "firstHitRank": 7,
           "tier": "wrong"
         },
         {

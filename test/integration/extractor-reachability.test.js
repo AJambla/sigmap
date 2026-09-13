@@ -57,7 +57,7 @@ test('.vue resolves to the SFC extractor and still extracts', () => {
 
 // ── Disclosure on the four previously-silent extractors ────────────────────
 
-const OVERFLOW = 80;
+const OVERFLOW = 240;
 const cases = [
   ['x.tsx', 'import React from "react";\n' + Array.from({ length: OVERFLOW },
     (_, i) => `export function Comp${i}(p: { a: string }) { return <div/>; }`).join('\n')],
@@ -82,11 +82,11 @@ test('r.js reports the true overflow, not the collection cap', () => {
   const sigs = r.extract(Array.from({ length: OVERFLOW },
     (_, i) => `fn${i} <- function(a, b) { a }`).join('\n'));
   const marker = sigs.find((s) => MARKER.test(s));
-  assert.ok(marker, `80 R functions produced ${sigs.length} signatures with no marker`);
-  // 80 functions, ceiling 30 → 50 hidden. An inner break that stops collection
+  assert.ok(marker, `240 R functions produced ${sigs.length} signatures with no marker`);
+  // 240 functions, ceiling 200 → 40 hidden. An inner break that stops collection
   // early makes this read "+1 more", which is the bug.
   const n = Number(marker.match(/\+(\d+)/)[1]);
-  assert.strictEqual(n, 50, `marker says +${n} more; 50 signatures are actually hidden`);
+  assert.strictEqual(n, 40, `marker says +${n} more; 40 signatures are actually hidden`);
 });
 
 test('r.js stays silent when nothing is dropped', () => {

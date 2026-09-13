@@ -1,6 +1,6 @@
 ---
 title: How I built SigMap
-description: How I fixed the LLM context problem — deterministic AI code retrieval without embeddings, vector databases, or external services. 78.9% hit@5, 96.8% token reduction.
+description: How I fixed the LLM context problem — deterministic AI code retrieval without embeddings, vector databases, or external services. 78.6% hit@5, 96.6% token reduction.
 head:
   - - meta
     - property: og:title
@@ -29,7 +29,7 @@ Before the story, the outcome — so you know what you're reading toward. These 
 
 | | Number |
 |---|---|
-| File retrieval accuracy | **78.9% hit@5** (vs 13.6% baseline — 5.8× lift) |
+| File retrieval accuracy | **78.6% hit@5** (vs 13.6% baseline — 5.8× lift) |
 | Token reduction | **40–98%** across 18 real open-source repos |
 | Task success rate | **52.2%** (vs 10% without context) |
 | Prompts per task | **1.69** (down from 2.84) |
@@ -195,7 +195,7 @@ I was using an LLM to improve a tool designed to make LLMs work better. Better e
 Benchmark: sigmap-v6.10-main
 Date: 2026-05-12
 
-Hit@5:              78.9%  (baseline 13.6%  — 5.8× lift)
+Hit@5:              78.6%  (baseline 13.6%  — 5.8× lift)
 Prompt reduction:   40.6%
 Task success:       52.2%  (baseline 10%)
 Prompts per task:   1.72   (baseline 2.84)
@@ -292,7 +292,7 @@ Not hit@5, not token reduction — *how many prompts until the user got what the
 | Feature | What it does |
 |---|---|
 | **Signature extraction** | 29 languages, zero dependencies, milliseconds |
-| **Deterministic retrieval** | TF-IDF + graph boost, 78.9% hit@5 |
+| **Deterministic retrieval** | TF-IDF + graph boost, 78.6% hit@5 |
 | **Groundedness scoring** | Catch hallucinations before they reach production |
 | **Learned weights** | Files that helped rank higher next time |
 | **MCP server** | 9 on-demand tools for Claude Code, Cursor, Windsurf |

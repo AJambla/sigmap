@@ -59,10 +59,10 @@ That map is exactly what agentic grep is worst at: reproducible, auditable conte
 
 **Proof it pays off** (full benchmark below):
 <!--SM:whyMetrics-->
-- **78.9% hit@5** — right file in top 5 results (vs 44.0% single-shot grep baseline — 1.73× lift)
-- **96.8% token reduction** — average across 21 real repos
-- **62.9% task-success proxy** — modeled from retrieval tiers, not measured LLM sessions
-- **1.58 prompts per task** — down from 2.84 (44.4% fewer retries, modeled)
+- **78.6% hit@5** — right file in top 5 results (vs 44.0% single-shot grep baseline — 1.73× lift)
+- **96.6% token reduction** — average across 21 real repos
+- **61.0% task-success proxy** — modeled from retrieval tiers, not measured LLM sessions
+- **1.61 prompts per task** — down from 2.84 (43.4% fewer retries, modeled)
 <!--/SM:whyMetrics-->
 - **<!--SM:languages-->33<!--/SM:languages--> languages supported** — TypeScript, Python, Go, Rust, Java, R, and more
 - **No vendor lock-in** — works with any AI assistant or local LLM
@@ -122,13 +122,13 @@ Ask → Rank → Context → Validate → Judge → Learn
 
 <!--SM:benchmarkBlock-->
 ```
-Benchmark : sigmap-v8.34-main (21 repositories, including R language)
+Benchmark : sigmap-v8.35-main (21 repositories, including R language)
 Date      : 2026-09-13
 
-Hit@5          : 78.9%   (grep-agent baseline 44.0%  — 1.73× lift)
-Token reduction: 96.8%   (across 21 repos)
-Prompt reduction : 44.4% (2.84 → 1.58 prompts per task, modeled)
-Task success   : 62.9%   (proxy — modeled from retrieval tiers)
+Hit@5          : 78.6%   (grep-agent baseline 44.0%  — 1.73× lift)
+Token reduction: 96.6%   (across 21 repos)
+Prompt reduction : 43.4% (2.84 → 1.61 prompts per task, modeled)
+Task success   : 61.0%   (proxy — modeled from retrieval tiers)
 Repos tested   : 21 (JavaScript, Python, Go, Rust, Java, R, C++, C#, Dart, Swift, Ruby, PHP, Scala, Kotlin, and more)
 ```
 <!--/SM:benchmarkBlock-->

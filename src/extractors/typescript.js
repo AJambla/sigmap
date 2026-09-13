@@ -4,6 +4,10 @@ const { lineAt, withAnchor } = require('./line-anchor');
 const { capWithNotice, capMembersWithNotice } = require('../util/truncate');
 const { stripComments, maskCode, readBalanced } = require('./scan');
 
+// Class bodies are scanned to this many characters — guard against
+// pathological input only; the old 4KB window silently hid members (#576).
+const MAX_CLASS_BODY_CHARS = 200000;
+
 /**
  * Extract signatures from TypeScript source code.
  * Top-level declarations carry a `:start-end` line anchor (see line-anchor.js);
@@ -189,13 +193,13 @@ function extract(src) {
     const anchored = anchors[i] ? withAnchor(s, anchors[i][0], anchors[i][1]) : s;
     return docHintFor[i] ? `${anchored}  # ${docHintFor[i]}` : anchored;
   });
-  return capWithNotice(withAnchors, 35, 'signatures');
+  return capWithNotice(withAnchors, 200, 'signatures');
 }
 
 function extractBlock(src, startIndex) {
   let depth = 1;
   let i = startIndex;
-  const end = Math.min(src.length, startIndex + 4000);
+  const end = Math.min(src.length, startIndex + MAX_CLASS_BODY_CHARS);
   while (i < end && depth > 0) {
     if (src[i] === '{') depth++;
     else if (src[i] === '}') depth--;
@@ -223,7 +227,7 @@ function extractInterfaceMembers(block) {
     const start = m.index + (m[0].length - m[0].replace(/^\s+/, '').length);
     members.push({ text: `${m[1]}(${normalizeParams(block.slice(openIdx + 1, closeIdx))})`, start, end: closeIdx + 1 });
   }
-  return capMembersWithNotice(members, 8, 'members');
+  return capMembersWithNotice(members, 120, 'members');
 }
 
 const _CTRL_KEYWORDS = new Set(['if', 'for', 'while', 'switch', 'do', 'try', 'catch', 'finally', 'else', 'return']);
@@ -258,7 +262,7 @@ function extractClassMembers(block, maskedBlock) {
     const retStr = retType ? ` → ${retType}` : '';
     members.push({ text: `${isStatic}${isAsync}${m[1]}(${normalizeParams(params)})${retStr}`, start, end });
   }
-  return capMembersWithNotice(members, 8, 'methods');
+  return capMembersWithNotice(members, 120, 'methods');
 }
 
 function normalizeParams(params) {
