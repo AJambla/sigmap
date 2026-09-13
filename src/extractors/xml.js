@@ -1,5 +1,7 @@
 'use strict';
 
+const { capWithNotice } = require('../util/truncate');
+
 /**
  * Lightweight XML config extractor.
  * Captures root tags, key config tags, and id/name/class attributes.
@@ -40,7 +42,7 @@ function extract(src) {
     if (cls) sigs.push(`${tag} -> ${cls[1]}`);
   }
 
-  return Array.from(new Set(sigs)).slice(0, 50);
+  return capWithNotice(Array.from(new Set(sigs)), 200, 'signatures');
 }
 
 module.exports = { extract };

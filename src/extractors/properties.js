@@ -3,7 +3,7 @@
 const { capWithNotice } = require('../util/truncate');
 
 // Ceiling discloses what it drops rather than truncating silently (#583).
-const PER_FILE_LIMIT = 50;
+const PER_FILE_LIMIT = 200;
 
 /**
  * Extract signatures from .properties configuration files.

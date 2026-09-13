@@ -1,11 +1,19 @@
 'use strict';
 
 const { lineAt, withAnchor } = require('./line-anchor');
-const { capWithNotice } = require('../util/truncate');
+const { capWithNotice, capMembersWithNotice } = require('../util/truncate');
 
 // Ceiling sits above the default `maxSigsPerFile` so the configured budget
 // governs output rather than a literal buried here, and omissions are disclosed (#576).
-const PER_FILE_LIMIT = 25;
+// Class bodies are scanned to this many characters. Real classes routinely
+// run past the old 4KB scan window — truncating there silently hid every
+// member after ~4000 chars AND anchored class end-lines short (#576). The
+// ceiling only guards against pathological input (Java parity, #551).
+const MAX_CLASS_BODY_CHARS = 200000;
+const PER_FILE_LIMIT = 200;
+
+// Per-interface member ceiling, disclosed via capMembersWithNotice (#576).
+const MEMBER_LIMIT = 120;
 
 /**
  * Extract signatures from Go source code.
@@ -41,7 +49,7 @@ function extract(src) {
     const block = extractBlock(stripped, bodyStart);
     sigs.push(hinted(withAnchor(`type ${m[1]} interface`, lineAt(stripped, m.index), lineAt(stripped, bodyStart + block.length)), m[1]));
     for (const meth of extractInterfaceMethods(block)) {
-      sigs.push(withAnchor(`  ${meth.text}`, lineAt(stripped, bodyStart + meth.declIdx), lineAt(stripped, bodyStart + meth.endIdx)));
+      sigs.push(withAnchor(`  ${meth.text}`, lineAt(stripped, bodyStart + (meth.declIdx || 0)), lineAt(stripped, bodyStart + (meth.endIdx || 0))));
     }
   }
 
@@ -59,7 +67,7 @@ function extract(src) {
 
 function extractBlock(src, startIndex) {
   let depth = 1, i = startIndex;
-  const end = Math.min(src.length, startIndex + 2000);
+  const end = Math.min(src.length, startIndex + MAX_CLASS_BODY_CHARS);
   while (i < end && depth > 0) {
     if (src[i] === '{') depth++;
     else if (src[i] === '}') depth--;
@@ -79,7 +87,7 @@ function extractInterfaceMethods(block) {
       endIdx: m.index + m[0].length,
     });
   }
-  return methods.slice(0, 8);
+  return capMembersWithNotice(methods, MEMBER_LIMIT, 'methods');
 }
 
 function normalizeParams(params) {
