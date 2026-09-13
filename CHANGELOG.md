@@ -10,6 +10,20 @@ Format: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [8.33.0] — 2026-09-13
+
+### Added
+- The generated artifact now **says when the token budget left files out**. The `[sigmap] budget: dropped N file(s)` warning only ever went to stderr, which an agent reading the file never sees — on flask that meant 25 of 51 files present with no indication the other 26 existed, indistinguishable from a 25-file repo. `applyTokenBudget` attaches a non-enumerable summary to the array it returns, so all four call sites (full, per-module, hot-cold) gain the footer without a signature change. The wording states that the omitted files are still in the retrieval index and reachable via `sigmap ask`, and a test asserts it does not overstate the loss — replacing a misleading silence with a misleading warning would be no improvement (#587, PR #599)
+- A test fixture for **every** language extractor, plus a guard that fails when one is missing (#588, PR #595). The 8 languages named in the issue were only part of it: the guard immediately found a ninth, `typescript_react` — `.tsx`, every React component, and the extractor that shipped a silent truncation cap in v8.32.0. It also caught a stale `test/expected/vue.txt` that outlived the `vue.js` deleted in v8.32.1, which had been making `--diagnose-extractors` print a silent `SKIP`. That diagnostic went from 21 passing with an unnoticed SKIP to 32 passing with none
+
+### Fixed
+- NestJS route paths now compose the `@Controller` prefix. `@Controller('cats')` + `@Get(':id')` emitted `:id` rather than `/cats/:id`, so the route pseudo-signature matched nothing a user would ask about — defeating the purpose of the feature, which exists so a route-worded query can reach a controller whose signatures never mention the path. The prefix is attributed per controller rather than per file, since a file may declare several. The other six claimed frameworks were verified unchanged (#585, PR #598)
+
+### Changed
+- Extractor resolution has **one source of truth**. Three places decided which extractor module to load and two had drifted: `src/eval/analyzer.js` carried a dead duplicate `.vue` key, and the `--diagnose-extractors` map still pointed at `vue.js` after that module was deleted — which is how an unreachable extractor survived unnoticed in the first place. The hand-maintained copy was also incomplete, with no `.gd` entry, so gdscript was never actually diagnosed despite having both a fixture and recorded expected output. `language-detector.js` and `dashboard.js` are deliberately **not** merged in: they map `.tsx` for language *statistics* and display *labels*, not resolution, and a test pins that distinction so a future dedup cannot quietly break language counts (#591, PR #597)
+
+---
+
 ## [8.32.1] — 2026-09-13
 
 

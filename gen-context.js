@@ -4151,47 +4151,13 @@ __factories["./src/eval/analyzer"] = function(module, exports) {
   const path = require('path');
 
   // Extension → extractor name (mirrors EXT_MAP in gen-context.js)
-  const EXT_MAP = {
-    '.ts': 'typescript', '.tsx': 'typescript',
-    '.js': 'javascript', '.jsx': 'javascript', '.mjs': 'javascript', '.cjs': 'javascript',
-    '.py': 'python',     '.pyw': 'python',
-    '.java': 'java',
-    '.kt': 'kotlin',     '.kts': 'kotlin',
-    '.go': 'go',
-    '.rs': 'rust',
-    '.cs': 'csharp',
-    '.cpp': 'cpp', '.c': 'cpp', '.h': 'cpp', '.hpp': 'cpp', '.cc': 'cpp',
-    '.rb': 'ruby',       '.rake': 'ruby',
-    '.php': 'php',
-    '.swift': 'swift',
-    '.dart': 'dart',
-    '.scala': 'scala',   '.sc': 'scala',
-    '.gd': 'gdscript',
-    '.r': 'r',           '.R': 'r',
-    '.svelte': 'svelte',
-    '.html': 'html',     '.htm': 'html',
-    '.css': 'css',       '.scss': 'css', '.sass': 'css', '.less': 'css',
-    '.yml': 'yaml',      '.yaml': 'yaml',
-    '.sh': 'shell',      '.bash': 'shell', '.zsh': 'shell', '.fish': 'shell',
-    '.toml': 'toml',
-    '.properties': 'properties',
-    '.xml': 'xml',
-    '.md': 'markdown',
-    // Phase C specialized extractors
-    '.tsx': 'typescript_react',
-    '.vue': 'vue_sfc',
-  };
-
-  function isDockerfile(name) {
-    return name === 'Dockerfile' || name.startsWith('Dockerfile.');
-  }
+  // Extractor resolution goes through the dispatcher — the single source of
+  // truth (#591). This file previously kept its own copy, which had drifted to
+  // a dead duplicate `.vue` key.
+  const { langFor } = __require('./src/extractors/dispatch');
 
   function getExtractorName(filePath) {
-    const base = path.basename(filePath);
-    const ext  = path.extname(base).toLowerCase();
-    if (EXT_MAP[ext]) return EXT_MAP[ext];
-    if (isDockerfile(base)) return 'dockerfile';
-    return null;
+    return langFor(filePath);
   }
 
   /** Rough token estimate: chars / 4 */
@@ -5989,6 +5955,21 @@ __factories["./src/extractors/dispatch"] = function(module, exports) {
     generic: __require('./src/extractors/generic'),
   };
 
+  /**
+   * Extension → extractor module name. **The single source of truth for
+   * extractor resolution** (#591).
+   *
+   * Anything that decides *which extractor module to load* must go through
+   * `langFor` rather than declaring its own copy. Three copies existed and two
+   * had drifted: `src/eval/analyzer.js` carried a dead duplicate `.vue` key, and
+   * the `--diagnose-extractors` map pointed at `vue.js` after that module was
+   * deleted — which is how an unreachable extractor survived unnoticed (#582).
+   *
+   * Not every extension map in the codebase belongs here. `language-detector.js`
+   * maps `.tsx → typescript` for language *statistics*, and `dashboard.js` keeps
+   * short display *labels*. Both are correct for their purpose and deliberately
+   * differ from resolution — folding them in would miscount languages.
+   */
   const EXT_MAP = {
     '.ts': 'typescript', '.tsx': 'typescript_react',
     '.js': 'javascript', '.jsx': 'javascript', '.mjs': 'javascript', '.cjs': 'javascript',
@@ -6049,7 +6030,7 @@ __factories["./src/extractors/dispatch"] = function(module, exports) {
     }
   }
 
-  module.exports = { extractFile, langFor };
+  module.exports = { extractFile, langFor, EXT_MAP };
   
 };
 
@@ -14454,6 +14435,45 @@ __factories["./src/map/route-table"] = function(module, exports) {
   }
 
   /**
+   * Byte offsets and prefixes of every `@Controller(...)` in a file.
+   * A file may declare several controllers, so each route is attributed to the
+   * nearest one above it rather than to a single file-wide prefix.
+   * @param {string} content
+   * @returns {Array<{index:number, prefix:string}>} ascending by index
+   */
+  function nestControllerPrefixes(content) {
+    const out = [];
+    const re = /@Controller\s*\(\s*(?:['"`]([^'"`]*)['"`])?/g;
+    let m;
+    while ((m = re.exec(content)) !== null) {
+      out.push({ index: m.index, prefix: m[1] || '' });
+    }
+    return out;
+  }
+
+  /** Prefix of the nearest `@Controller` above `index`, or '' when there is none. */
+  function prefixBefore(controllers, index) {
+    let prefix = '';
+    for (const c of controllers) {
+      if (c.index > index) break;
+      prefix = c.prefix;
+    }
+    return prefix;
+  }
+
+  /**
+   * Join a controller prefix and a method path into one route path.
+   * Either side may be empty, absent, or carry its own slashes.
+   * @returns {string} always slash-prefixed; never a trailing slash except '/'
+   */
+  function joinRoute(prefix, methodPath) {
+    const parts = [prefix, methodPath]
+      .map((p) => String(p || '').trim().replace(/^\/+|\/+$/g, ''))
+      .filter(Boolean);
+    return parts.length ? '/' + parts.join('/') : '/';
+  }
+
+  /**
    * Structured route rows across the supported frameworks — the data behind
    * `analyze`, exposed for retrieval surface-enrichment (#488).
    * @param {string[]} files absolute paths
@@ -14481,16 +14501,14 @@ __factories["./src/map/route-table"] = function(module, exports) {
           routes.push({ method: m[1].toUpperCase(), path: m[2], file: rel });
         }
 
-        // NestJS decorators: @Get('/path') @Post('/path')
-        const re2 = /@(Get|Post|Put|Patch|Delete|Head|Options|All)\s*\(\s*['"`]([^'"`]+)['"`]\s*\)/g;
+        // NestJS: @Get(':id') / @Post() — composed with the enclosing
+        // @Controller('prefix'). Without the prefix the emitted path matches
+        // nothing real, which defeats the point of route pseudo-signatures (#585).
+        const controllers = nestControllerPrefixes(content);
+        const re2 = /@(Get|Post|Put|Patch|Delete|Head|Options|All)\s*\(\s*(?:['"`]([^'"`]*)['"`])?\s*\)/g;
         while ((m = re2.exec(content)) !== null) {
-          routes.push({ method: m[1].toUpperCase(), path: m[2], file: rel });
-        }
-
-        // NestJS: @Get() with no path
-        const re3 = /@(Get|Post|Put|Patch|Delete)\s*\(\s*\)/g;
-        while ((m = re3.exec(content)) !== null) {
-          routes.push({ method: m[1].toUpperCase(), path: '/', file: rel });
+          const prefix = prefixBefore(controllers, m.index);
+          routes.push({ method: m[1].toUpperCase(), path: joinRoute(prefix, m[2]), file: rel });
         }
       }
 
@@ -15788,7 +15806,7 @@ __factories["./src/mcp/server"] = function(module, exports) {
 
   const SERVER_INFO = {
     name: 'sigmap',
-    version: '8.32.1',
+    version: '8.33.0',
     description: 'SigMap MCP server — code signatures on demand',
   };
 
@@ -22082,7 +22100,7 @@ function __tryGit(args, opts = {}) {
   catch (_) { return ''; }
 }
 
-const VERSION = '8.32.1';
+const VERSION = '8.33.0';
 const MARKER = '\n\n## Auto-generated signatures\n<!-- Updated by gen-context.js -->\n';
 
 function requireSourceOrBundled(key) {
@@ -22532,6 +22550,17 @@ function applyTokenBudget(fileEntries, maxTokens) {
   // Restore the original file order for stable output.
   const kept = withPriority.filter((e) => finalByPath.has(e.filePath)).map((e) => finalByPath.get(e.filePath));
 
+  // Record what was omitted so the artifact itself can say so (#587). The
+  // stderr warning below is invisible to an agent that only reads the file:
+  // 25 sections with no notice is indistinguishable from a 25-file repo.
+  // Non-enumerable so every existing consumer still sees a plain array.
+  if (verboseDropped.length > 0 || collapsedCount > 0) {
+    Object.defineProperty(kept, '__omissions', {
+      value: { dropped: verboseDropped.length, collapsed: collapsedCount, maxTokens },
+      enumerable: false, writable: false, configurable: true,
+    });
+  }
+
   if (verboseDropped.length > 0 || collapsedCount > 0) {
     const parts = [];
     if (verboseDropped.length) parts.push(`dropped ${verboseDropped.length} file(s)`);
@@ -22858,6 +22887,20 @@ function formatOutput(fileEntries, cwd, routingEnabled, config, extras) {
     } catch (err) {
       console.warn(`[sigmap] routing hints skipped: ${err.message}`);
     }
+  }
+
+  // Say what the budget left out — an omission the reader cannot see is the
+  // same failure as an undisclosed truncation cap (#587, cf. #576).
+  const omitted = fileEntries && fileEntries.__omissions;
+  if (omitted && (omitted.dropped > 0 || omitted.collapsed > 0)) {
+    const bits = [];
+    if (omitted.dropped) bits.push(`${omitted.dropped} file(s) omitted`);
+    if (omitted.collapsed) bits.push(`${omitted.collapsed} collapsed to anchors`);
+    lines.push('');
+    lines.push(`> **Not everything is here.** ${bits.join(', ')} to stay under the `
+      + `${omitted.maxTokens}-token budget (tests and configs go first). `
+      + 'The retrieval index still has them all — run `sigmap ask "<question>"` '
+      + 'to pull in anything missing.');
   }
 
   return lines.join('\n');
@@ -26849,23 +26892,16 @@ function main() {
         process.exit(1);
       }
 
-      const EXT_TO_LANG = {
-        '.ts': 'typescript', '.js': 'javascript', '.py': 'python',
-        '.java': 'java', '.kt': 'kotlin', '.go': 'go', '.rs': 'rust',
-        '.cs': 'csharp', '.cpp': 'cpp', '.rb': 'ruby', '.php': 'php',
-        '.swift': 'swift', '.dart': 'dart', '.scala': 'scala',
-        '.r': 'r', '.R': 'r',
-        '.vue': 'vue_sfc', '.svelte': 'svelte', '.html': 'html',
-        '.css': 'css', '.yml': 'yaml', '.sh': 'shell',
-      };
-      const SPECIAL = { 'Dockerfile': 'dockerfile' };
+      // Resolution goes through the dispatcher — the single source of truth
+      // (#591). This map was a third copy, and it still pointed at `vue.js`
+      // after that module was deleted, which is how a dead extractor survived.
+      const { langFor } = requireSourceOrBundled('./src/extractors/dispatch');
 
       let passed = 0; let failed = 0;
       const entries = fs.readdirSync(fixturesDir).sort();
 
       for (const filename of entries) {
-        const ext  = path.extname(filename).toLowerCase();
-        const lang = EXT_TO_LANG[ext] || SPECIAL[filename];
+        const lang = langFor(filename);
         if (!lang) continue;
 
         const fixturePath = path.join(fixturesDir, filename);
