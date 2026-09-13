@@ -10,6 +10,17 @@ Format: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [8.34.0] — 2026-09-13
+
+### Added
+- **Lua extractor** (Tier 3) — global and local functions, module-table functions (`function M.name`, `function M:name`), assigned functions, `require` module hints, and LDoc `---` doc comments as first-sentence hints (#540, PR #550) — thanks **@zerone0x**. The contribution shipped its own fixture and expected output, which is exactly what the #588 fixture guard now requires, contributed before that guard existed. Brought up to the disclosure convention it predates: its caps now report the true overflow rather than truncating silently, with the ceiling unchanged
+- Call-graph definitions for **Kotlin and Scala** (#586, PR #602). `extractDefs` returned null for `.kt`/`.scala` and the walk did not collect them, so the graph was empty for both — and an empty graph returns no error, so `--impact` and blast radius silently read zero. That is the failure mode that cost a release in #561, and akka (Scala) sits in the gated JVM corpus, so CI exercised Scala in a way that could never detect it. Adds `jvmBodyRange` for expression bodies (`fun f() = expr`), which Java does not have. On a small Kotlin+Scala tree: 0 symbols / 0 edges → 8 / 2. Scope is pinned by test — same-file calls resolve, cross-file *receiver* calls do not yet, because receiver typing is Java-shaped
+
+### Fixed
+- Generated `context-*.md` splits from a previous `strategy` no longer pollute retrieval (#555, PR #601). Splits are discovered by filename pattern at read time, not by consulting the config, so a file left by an earlier strategy — or by a module since dropped from `srcDirs` — kept being merged into the index and steering every query. On a 524-file Java repo a stale 376 KB split held ranks 1, 3 and 4 with generated entities, one unrelated to the query, while both files implementing the feature fell outside the top 6 — with `sig-index.json` correctly holding zero entries for it. Each strategy now declares what it wrote and the rest is pruned, and the prune is reported rather than silent
+
+---
+
 ## [8.33.0] — 2026-09-13
 
 ### Added

@@ -1644,7 +1644,7 @@ __factories["./src/config/loader"] = function(module, exports) {
     '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs',
     '.py', '.pyw', '.java', '.kt', '.kts', '.go', '.rs', '.cs',
     '.cpp', '.c', '.h', '.hpp', '.cc', '.rb', '.rake', '.php',
-    '.swift', '.dart', '.scala', '.sc', '.vue', '.svelte',
+    '.swift', '.dart', '.scala', '.sc', '.lua', '.vue', '.svelte',
     '.html', '.htm', '.css', '.scss', '.sass', '.less',
     '.yml', '.yaml', '.sh', '.bash', '.zsh', '.fish',
     '.sql', '.graphql', '.gql', '.tf', '.tfvars', '.proto',
@@ -1968,7 +1968,7 @@ __factories["./src/config/tune"] = function(module, exports) {
   const SOURCE_EXTS = new Set([
     '.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.py', '.rb', '.go', '.rs',
     '.java', '.kt', '.cs', '.cpp', '.c', '.h', '.hpp', '.swift', '.dart',
-    '.scala', '.php', '.gd', '.r', '.R',
+    '.scala', '.php', '.lua', '.gd', '.r', '.R',
   ]);
 
   /** Raw user config file content, or null when absent/unparsable. */
@@ -3128,6 +3128,7 @@ __factories["./src/discovery/language-detector"] = function(module, exports) {
     '.java': 'java', '.kt': 'kotlin', '.cs': 'csharp', '.cpp': 'cpp',
     '.c': 'cpp', '.h': 'cpp', '.hpp': 'cpp', '.swift': 'swift',
     '.dart': 'dart', '.scala': 'scala', '.php': 'php',
+    '.lua': 'lua',
     '.gd': 'gdscript',
     '.r': 'r', '.R': 'r',
   };
@@ -3558,10 +3559,19 @@ __factories["./src/discovery/source-root-registry"] = function(module, exports) 
         akka:  { detectionFiles: [], detectionDeps: ['akka'], srcDirs: ['src/main/scala','src'] },
         play:  { detectionFiles: [], detectionDeps: ['play'], srcDirs: ['app','conf'] },
         spark: { detectionFiles: [], detectionDeps: ['spark'],srcDirs: ['src/main/scala'] },
-        zio:   { detectionFiles: [], detectionDeps: ['zio'],  srcDirs: ['src/main/scala'] },
+        zio:   { detectionFiles: [], detectionDeps: ['zio'], srcDirs: ['src/main/scala'] },
       },
       srcDirs:  ['src/main/scala','src'],
       penalties: ['target'],
+    },
+
+    lua: {
+      manifestFiles: ['.luarc.json', 'selene.toml', 'stylua.toml'],
+      frameworks: {
+        luarocks: { detectionFiles: ['*.rockspec'], srcDirs: ['src','lua','lib'] },
+      },
+      srcDirs:  ['src','lua','lib'],
+      penalties: ['.luarocks','luarocks_modules'],
     },
 
     r: {
@@ -3797,7 +3807,7 @@ __factories["./src/discovery/source-root-scorer"] = function(module, exports) {
   const CODE_EXTS = new Set([
     '.js','.mjs','.cjs','.ts','.tsx','.jsx',
     '.py','.rb','.go','.rs','.java','.kt',
-    '.cs','.cpp','.c','.h','.swift','.dart','.scala','.php',
+    '.cs','.cpp','.c','.h','.swift','.dart','.scala','.php','.lua',
   ]);
 
   const AUTO_SKIP = new Set([
@@ -5883,6 +5893,28 @@ __factories["./src/extractors/deps"] = function(module, exports) {
   }
 
   /**
+   * Extract Lua require() module dependencies.
+   * Captures `require "mod"` and `require("mod")`, returning compact module
+   * names as they appear in source.
+   * @param {string} src
+   * @returns {string[]}
+   */
+  function extractLuaDeps(src) {
+    const deps = new Set();
+    const stripped = stripLuaComments(src || '');
+    for (const m of stripped.matchAll(/\brequire\s*(?:\(\s*)?["']([A-Za-z0-9_.\/-]+)["']\s*\)?/g)) {
+      if (m[1]) deps.add(m[1]);
+    }
+    return [...deps].slice(0, 5);
+  }
+
+  function stripLuaComments(src) {
+    return String(src || '')
+      .replace(/--\[\[[\s\S]*?\]\]/g, '')
+      .replace(/--.*$/gm, '');
+  }
+
+  /**
    * Build reverse dependency map from forward map.
    * @param {Map<string, string[]>} forwardMap
    * @returns {Map<string, string[]>}
@@ -5900,7 +5932,7 @@ __factories["./src/extractors/deps"] = function(module, exports) {
     return reverse;
   }
 
-  module.exports = { extractPythonDeps, extractTSDeps, extractRDeps, buildReverseDepMap };
+  module.exports = { extractPythonDeps, extractTSDeps, extractRDeps, extractLuaDeps, buildReverseDepMap };
   
 };
 
@@ -5935,6 +5967,7 @@ __factories["./src/extractors/dispatch"] = function(module, exports) {
     swift: __require('./src/extractors/swift'),
     dart: __require('./src/extractors/dart'),
     scala: __require('./src/extractors/scala'),
+    lua: __require('./src/extractors/lua'),
     gdscript: __require('./src/extractors/gdscript'),
     r: __require('./src/extractors/r'),
     vue_sfc: __require('./src/extractors/vue_sfc'),
@@ -5985,6 +6018,7 @@ __factories["./src/extractors/dispatch"] = function(module, exports) {
     '.swift': 'swift',
     '.dart': 'dart',
     '.scala': 'scala', '.sc': 'scala',
+    '.lua': 'lua',
     '.gd': 'gdscript',
     '.r': 'r', '.R': 'r',
     '.vue': 'vue_sfc',
@@ -7009,6 +7043,162 @@ __factories["./src/extractors/line-anchor"] = function(module, exports) {
   }
 
   module.exports = { lineAt, anchor, withAnchor };
+  
+};
+
+// ── ./src/extractors/lua ──
+__factories["./src/extractors/lua"] = function(module, exports) {
+  
+  const { capWithNotice } = __require('./src/util/truncate');
+
+  // Ceiling discloses what it drops rather than truncating silently (#583).
+  // Collection runs to completion so the marker reports the true overflow —
+  // stopping early made r.js report "+1 more" where 50 were hidden (#584).
+  const PER_FILE_LIMIT = 30;
+
+  /**
+   * Extract signatures from Lua source code.
+   *
+   * Recognised constructs:
+   *   - Global functions: `function name(args)`
+   *   - Module-table functions: `function M.name(args)` / `function M:name(args)`
+   *   - Local functions: `local function name(args)`
+   *   - Assigned functions: `name = function(args)` / `M.name = function(args)`
+   *   - Module imports: `local mod = require("mod")` as compact hints
+   *   - LDoc-style doc comments (`---`) as first-sentence hints
+   *
+   * The extractor is regex-only and zero-dependency, matching SigMap's Tier-3
+   * language extractor style.
+   *
+   * @param {string} src - Raw file content
+   * @returns {string[]} Array of signature strings
+   */
+  function extract(src) {
+    if (!src || typeof src !== 'string') return [];
+    const sigs = [];
+    const hints = collectDocHints(src);
+    const stripped = stripLuaComments(src);
+    const seen = new Set();
+
+    // local foo = require('bar.baz') — useful module-surface hint, capped low.
+    for (const m of stripped.matchAll(/^\s*(?:local\s+)?([A-Za-z_]\w*)\s*=\s*require\s*\(\s*['"]([A-Za-z0-9_.\/-]+)['"]\s*\)/gm)) {
+      pushUnique(sigs, seen, `require ${m[2]} as ${m[1]}`);
+    }
+
+    // local function name(args)
+    for (const m of stripped.matchAll(/^\s*local\s+function\s+([A-Za-z_]\w*)\s*\(([^)]*)\)/gm)) {
+      if (m[1].startsWith('_')) continue;
+      pushUnique(sigs, seen, `local function ${m[1]}(${normalizeParams(m[2])})${applyHint(hints, m[1])}`);
+    }
+
+    // function name(args), function M.name(args), function M:name(args)
+    for (const m of stripped.matchAll(/^\s*function\s+([A-Za-z_]\w*(?:(?:\.|:)[A-Za-z_]\w*)*)\s*\(([^)]*)\)/gm)) {
+      const name = m[1];
+      if (name.startsWith('_')) continue;
+      pushUnique(sigs, seen, `function ${name}(${normalizeParams(m[2])})${applyHint(hints, name)}`);
+    }
+
+    // name = function(args), M.name = function(args), M:name = function(args)
+    for (const m of stripped.matchAll(/^\s*(?:local\s+)?([A-Za-z_]\w*(?:(?:\.|:)[A-Za-z_]\w*)*)\s*=\s*function\s*\(([^)]*)\)/gm)) {
+      const name = m[1];
+      if (name.startsWith('_')) continue;
+      pushUnique(sigs, seen, `${name} = function(${normalizeParams(m[2])})${applyHint(hints, name)}`);
+    }
+
+    return capWithNotice(sigs, PER_FILE_LIMIT, 'signatures');
+  }
+
+  function pushUnique(out, seen, sig) {
+    if (!sig || seen.has(sig)) return;
+    seen.add(sig);
+    out.push(sig);
+  }
+
+  function normalizeParams(params) {
+    return String(params || '')
+      .replace(/--.*$/gm, '')
+      .split(',')
+      .map((p) => p.trim().replace(/\s+/g, ' '))
+      .filter(Boolean)
+      .join(', ');
+  }
+
+  function applyHint(hints, name) {
+    const h = hints.get(name);
+    return h ? `  # ${h}` : '';
+  }
+
+  /**
+   * Attach each contiguous `---` doc block to the next function-like declaration
+   * by its extracted symbol name.
+   */
+  function collectDocHints(src) {
+    const hints = new Map();
+    const lines = src.split('\n');
+    let block = [];
+    for (const line of lines) {
+      const doc = line.match(/^\s*---\s?(.*)$/);
+      if (doc) {
+        block.push(doc[1]);
+      } else if (block.length > 0) {
+        const decl = line.match(/^\s*local\s+function\s+([A-Za-z_]\w*)\s*\(/)
+                  || line.match(/^\s*function\s+([A-Za-z_]\w*(?:(?:\.|:)[A-Za-z_]\w*)*)\s*\(/)
+                  || line.match(/^\s*(?:local\s+)?([A-Za-z_]\w*(?:(?:\.|:)[A-Za-z_]\w*)*)\s*=\s*function\s*\(/);
+        if (decl) {
+          const hint = firstDocSentence(block);
+          if (hint) hints.set(decl[1], hint);
+        }
+        block = [];
+      }
+    }
+    return hints;
+  }
+
+  function firstDocSentence(block) {
+    for (const raw of block) {
+      const line = String(raw || '').trim();
+      if (!line || line.startsWith('@')) continue;
+      return line.replace(/\s+/g, ' ').slice(0, 60).replace(/[.,;:!?]+$/, '').trim();
+    }
+    return '';
+  }
+
+  /** Strip Lua line and long comments while preserving strings enough for regex scans. */
+  function stripLuaComments(src) {
+    const out = src.split('');
+    const blank = (a, b) => { for (let i = a; i < b; i++) if (out[i] !== '\n') out[i] = ' '; };
+    let i = 0;
+    while (i < src.length) {
+      const ch = src[i];
+      if (ch === '"' || ch === "'") {
+        const quote = ch;
+        i++;
+        while (i < src.length) {
+          if (src[i] === '\\') { i += 2; continue; }
+          if (src[i] === quote) { i++; break; }
+          if (src[i] === '\n') break;
+          i++;
+        }
+        continue;
+      }
+      if (src.startsWith('--[[', i)) {
+        const end = src.indexOf(']]', i + 4);
+        blank(i, end === -1 ? src.length : end + 2);
+        i = end === -1 ? src.length : end + 2;
+        continue;
+      }
+      if (src.startsWith('--', i)) {
+        const end = src.indexOf('\n', i + 2);
+        blank(i, end === -1 ? src.length : end);
+        i = end === -1 ? src.length : end;
+        continue;
+      }
+      i++;
+    }
+    return out.join('');
+  }
+
+  module.exports = { extract };
   
 };
 
@@ -11977,6 +12167,8 @@ __factories["./src/graph/call-graph"] = function(module, exports) {
   const JAVA_EXTS = new Set(['.java']);
   const GO_EXTS = new Set(['.go']);
   const RS_EXTS = new Set(['.rs']);
+  const KT_EXTS = new Set(['.kt', '.kts']);
+  const SCALA_EXTS = new Set(['.scala', '.sc']);
 
   // Tokens that look like `name(` calls or definition headers but are language
   // keywords, not user symbols — never treated as a call or a definition.
@@ -12300,6 +12492,81 @@ __factories["./src/graph/call-graph"] = function(module, exports) {
 
   // Pick the masker whose comment/string syntax matches the language.
   // Java and Go share JS syntax (Go raw strings mask like template literals).
+  /**
+   * Body range for a JVM-family member that may use either a brace body or an
+   * expression body (`fun f() = expr` / `def f = expr`), which Java has not.
+   * An expression body runs to the end of its line — enough to capture the calls
+   * it makes, which is all the graph needs.
+   * @returns {{bodyStart:number, bodyEnd:number}|null} null when neither form follows
+   */
+  function jvmBodyRange(masked, from) {
+    let k = from;
+    while (k < masked.length && masked[k] !== '{' && masked[k] !== '=' && masked[k] !== '\n' && masked[k] !== ';') k++;
+    if (masked[k] === '{') return { bodyStart: k, bodyEnd: matchDelim(masked, k, '{', '}') };
+    if (masked[k] === '=') {
+      // `= {` is still a brace body, just written with an assignment.
+      let j = k + 1;
+      while (j < masked.length && /\s/.test(masked[j])) j++;
+      if (masked[j] === '{') return { bodyStart: j, bodyEnd: matchDelim(masked, j, '{', '}') };
+      const eol = masked.indexOf('\n', k);
+      return { bodyStart: k, bodyEnd: eol === -1 ? masked.length : eol };
+    }
+    return null; // abstract member or interface declaration
+  }
+
+  /**
+   * Kotlin `fun` definitions, including extension functions (`fun Foo.bar()`,
+   * recorded as `bar`) and expression bodies.
+   */
+  function ktDefs(masked) {
+    const defs = [];
+    const seen = new Set();
+    const re = /(?:^|\n)[ \t]*((?:(?:public|private|protected|internal|open|override|abstract|final|suspend|inline|operator|infix|tailrec|external|expect|actual|inner|companion)\s+)*)fun\s+(?:<[^>\n]{0,80}>\s*)?(?:[A-Za-z_][\w.<>]*\.)?([A-Za-z_][\w]*)\s*\(/g;
+    let m;
+    while ((m = re.exec(masked)) !== null) {
+      const name = m[2];
+      if (NON_CALL.has(name)) continue;
+      const paren = masked.indexOf('(', m.index + m[0].length - 1);
+      const close = matchDelim(masked, paren, '(', ')');
+      if (close < 0) continue;
+      const range = jvmBodyRange(masked, close + 1);
+      const line = lineAt(masked, m.index + 1);
+      const key = name + ':' + (range ? range.bodyStart : line);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      // An abstract/interface member owns no body: it can receive edges but
+      // never produces them, the same treatment javaDefs gives declarations.
+      defs.push(range ? { name, line, ...range } : { name, line, bodyStart: close, bodyEnd: close });
+    }
+    return defs;
+  }
+
+  /**
+   * Scala `def` definitions. Handles parameterless members (`def foo: Int = 1`),
+   * type parameters, and expression bodies.
+   */
+  function scalaDefs(masked) {
+    const defs = [];
+    const seen = new Set();
+    const re = /(?:^|\n)[ \t]*((?:(?:private|protected|override|implicit|final|lazy|sealed|abstract|inline)(?:\s*\[[^\]\n]{0,60}\])?\s+)*)def\s+([A-Za-z_][\w]*)\s*(?=[\[\(:=])/g;
+    let m;
+    while ((m = re.exec(masked)) !== null) {
+      const name = m[2];
+      if (NON_CALL.has(name)) continue;
+      // Step past an optional type-parameter list, then an optional value list.
+      let k = m.index + m[0].length;
+      if (masked[k] === '[') { const e = matchDelim(masked, k, '[', ']'); if (e < 0) continue; k = e + 1; }
+      while (masked[k] === '(') { const e = matchDelim(masked, k, '(', ')'); if (e < 0) break; k = e + 1; }
+      const range = jvmBodyRange(masked, k);
+      const line = lineAt(masked, m.index + 1);
+      const key = name + ':' + (range ? range.bodyStart : line);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      defs.push(range ? { name, line, ...range } : { name, line, bodyStart: k, bodyEnd: k });
+    }
+    return defs;
+  }
+
   function maskFor(filePath, src) {
     const ext = path.extname(filePath).toLowerCase();
     if (PY_EXTS.has(ext)) return maskPy(src);
@@ -12314,6 +12581,8 @@ __factories["./src/graph/call-graph"] = function(module, exports) {
     if (JAVA_EXTS.has(ext)) return javaDefs(maskJs(src));
     if (GO_EXTS.has(ext)) return goDefs(maskJs(src));
     if (RS_EXTS.has(ext)) return rustDefs(maskRust(src));
+    if (KT_EXTS.has(ext)) return ktDefs(maskJs(src));
+    if (SCALA_EXTS.has(ext)) return scalaDefs(maskJs(src));
     return null; // unsupported language
   }
 
@@ -12403,7 +12672,8 @@ __factories["./src/graph/call-graph"] = function(module, exports) {
       if (e.isDirectory()) _walk(full, excludeSet, out, depth + 1, maxDepth);
       else if (e.isFile()) {
         const ext = path.extname(e.name).toLowerCase();
-        if (JS_EXTS.has(ext) || PY_EXTS.has(ext) || JAVA_EXTS.has(ext) || GO_EXTS.has(ext) || RS_EXTS.has(ext)) out.push(full);
+        if (JS_EXTS.has(ext) || PY_EXTS.has(ext) || JAVA_EXTS.has(ext) || GO_EXTS.has(ext)
+          || RS_EXTS.has(ext) || KT_EXTS.has(ext) || SCALA_EXTS.has(ext)) out.push(full);
       }
     }
   }
@@ -15806,7 +16076,7 @@ __factories["./src/mcp/server"] = function(module, exports) {
 
   const SERVER_INFO = {
     name: 'sigmap',
-    version: '8.33.0',
+    version: '8.34.0',
     description: 'SigMap MCP server — code signatures on demand',
   };
 
@@ -22100,7 +22370,7 @@ function __tryGit(args, opts = {}) {
   catch (_) { return ''; }
 }
 
-const VERSION = '8.33.0';
+const VERSION = '8.34.0';
 const MARKER = '\n\n## Auto-generated signatures\n<!-- Updated by gen-context.js -->\n';
 
 function requireSourceOrBundled(key) {
@@ -22467,6 +22737,38 @@ function computeEffectiveMaxTokens(fileEntries, config) {
   }
 
   return effective;
+}
+
+/**
+ * Delete `.github/context-*.md` split files this run did not write (#555).
+ *
+ * Splits are discovered by filename pattern at read time, not by consulting
+ * the config, so a file left behind by a previous `strategy` — or by a module
+ * since dropped from `srcDirs` — keeps being merged into the retrieval index
+ * and silently steers every query. Observed on a 524-file Java repo: a stale
+ * 376 KB `context-mall-mbg.md` kept generated entities at ranks 1, 3 and 4
+ * while both files implementing the feature fell outside the top 6, even
+ * though `sig-index.json` correctly held zero entries for that module.
+ *
+ * @param {string} cwd
+ * @param {string[]} keep  basenames this run wrote, e.g. ['context-core.md']
+ * @returns {string[]} basenames removed
+ */
+function pruneStaleContextSplits(cwd, keep) {
+  const ghDir = path.join(cwd, '.github');
+  const kept = new Set(keep);
+  const removed = [];
+  let entries;
+  try { entries = fs.readdirSync(ghDir); } catch (_) { return removed; }
+  for (const f of entries) {
+    if (!/^context-[\w.-]+\.md$/.test(f) || kept.has(f)) continue;
+    try { fs.unlinkSync(path.join(ghDir, f)); removed.push(f); } catch (_) { /* best effort */ }
+  }
+  if (removed.length) {
+    console.warn(`[sigmap] pruned ${removed.length} stale context split(s) from a previous `
+      + `strategy/srcDirs: ${removed.join(', ')}`);
+  }
+  return removed;
 }
 
 function applyTokenBudget(fileEntries, maxTokens) {
@@ -23276,6 +23578,7 @@ function runPerModuleStrategy(cwd, config, fileEntries, inputTokenTotal) {
   ];
 
   let totalOut = 0;
+  const writtenSplits = [];
   for (const mod of moduleNames) {
     const outName = `context-${mod}.md`;
     const outPath = path.join(cwd, '.github', outName);
@@ -23294,7 +23597,9 @@ function runPerModuleStrategy(cwd, config, fileEntries, inputTokenTotal) {
     console.warn(`[sigmap] per-module: wrote .github/${outName} (~${modTokens} tokens, ${budgeted.length} files)`);
 
     overviewLines.push(`| \`${mod}\` | \`.github/${outName}\` |`);
+    writtenSplits.push(outName);
   }
+  pruneStaleContextSplits(cwd, writtenSplits);
 
   overviewLines.push('');
   overviewLines.push('> Inject the relevant module file into your IDE context window.');
@@ -23333,6 +23638,7 @@ function runHotColdStrategy(cwd, config, fileEntries, recentFiles, inputTokenTot
   const coldContent = coldHeader + formatOutput(coldEntries, cwd, false, config, null);
   ensureDir(coldPath);
   fs.writeFileSync(coldPath, coldContent, 'utf8');
+  pruneStaleContextSplits(cwd, ['context-cold.md']);
   const coldTokens = estimateTokens(coldContent);
 
   console.warn('[sigmap] hot-cold:');
@@ -23657,6 +23963,9 @@ function runGenerate(cwd, config, reportMode, reportJson = false) {
       result = runHotColdStrategy(cwd, configWithBudget, fileEntries, recentFiles, inputTokenTotal);
     } else {
       // 'full' — original behaviour
+      // 'full' writes no split files — anything left from a previous
+      // strategy would still be merged into the index at read time (#555).
+      pruneStaleContextSplits(cwd, []);
       fileEntries = applyTokenBudget(fileEntries, effectiveMaxTokens);
       const droppedCount = beforeCount - fileEntries.length;
       const routingEnabled = !!(config.routing || process.argv.includes('--routing'));

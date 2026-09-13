@@ -26,6 +26,8 @@ const PY_EXTS = new Set(['.py', '.pyw']);
 const JAVA_EXTS = new Set(['.java']);
 const GO_EXTS = new Set(['.go']);
 const RS_EXTS = new Set(['.rs']);
+const KT_EXTS = new Set(['.kt', '.kts']);
+const SCALA_EXTS = new Set(['.scala', '.sc']);
 
 // Tokens that look like `name(` calls or definition headers but are language
 // keywords, not user symbols — never treated as a call or a definition.
@@ -349,6 +351,81 @@ function rustDefs(masked) {
 
 // Pick the masker whose comment/string syntax matches the language.
 // Java and Go share JS syntax (Go raw strings mask like template literals).
+/**
+ * Body range for a JVM-family member that may use either a brace body or an
+ * expression body (`fun f() = expr` / `def f = expr`), which Java has not.
+ * An expression body runs to the end of its line — enough to capture the calls
+ * it makes, which is all the graph needs.
+ * @returns {{bodyStart:number, bodyEnd:number}|null} null when neither form follows
+ */
+function jvmBodyRange(masked, from) {
+  let k = from;
+  while (k < masked.length && masked[k] !== '{' && masked[k] !== '=' && masked[k] !== '\n' && masked[k] !== ';') k++;
+  if (masked[k] === '{') return { bodyStart: k, bodyEnd: matchDelim(masked, k, '{', '}') };
+  if (masked[k] === '=') {
+    // `= {` is still a brace body, just written with an assignment.
+    let j = k + 1;
+    while (j < masked.length && /\s/.test(masked[j])) j++;
+    if (masked[j] === '{') return { bodyStart: j, bodyEnd: matchDelim(masked, j, '{', '}') };
+    const eol = masked.indexOf('\n', k);
+    return { bodyStart: k, bodyEnd: eol === -1 ? masked.length : eol };
+  }
+  return null; // abstract member or interface declaration
+}
+
+/**
+ * Kotlin `fun` definitions, including extension functions (`fun Foo.bar()`,
+ * recorded as `bar`) and expression bodies.
+ */
+function ktDefs(masked) {
+  const defs = [];
+  const seen = new Set();
+  const re = /(?:^|\n)[ \t]*((?:(?:public|private|protected|internal|open|override|abstract|final|suspend|inline|operator|infix|tailrec|external|expect|actual|inner|companion)\s+)*)fun\s+(?:<[^>\n]{0,80}>\s*)?(?:[A-Za-z_][\w.<>]*\.)?([A-Za-z_][\w]*)\s*\(/g;
+  let m;
+  while ((m = re.exec(masked)) !== null) {
+    const name = m[2];
+    if (NON_CALL.has(name)) continue;
+    const paren = masked.indexOf('(', m.index + m[0].length - 1);
+    const close = matchDelim(masked, paren, '(', ')');
+    if (close < 0) continue;
+    const range = jvmBodyRange(masked, close + 1);
+    const line = lineAt(masked, m.index + 1);
+    const key = name + ':' + (range ? range.bodyStart : line);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    // An abstract/interface member owns no body: it can receive edges but
+    // never produces them, the same treatment javaDefs gives declarations.
+    defs.push(range ? { name, line, ...range } : { name, line, bodyStart: close, bodyEnd: close });
+  }
+  return defs;
+}
+
+/**
+ * Scala `def` definitions. Handles parameterless members (`def foo: Int = 1`),
+ * type parameters, and expression bodies.
+ */
+function scalaDefs(masked) {
+  const defs = [];
+  const seen = new Set();
+  const re = /(?:^|\n)[ \t]*((?:(?:private|protected|override|implicit|final|lazy|sealed|abstract|inline)(?:\s*\[[^\]\n]{0,60}\])?\s+)*)def\s+([A-Za-z_][\w]*)\s*(?=[\[\(:=])/g;
+  let m;
+  while ((m = re.exec(masked)) !== null) {
+    const name = m[2];
+    if (NON_CALL.has(name)) continue;
+    // Step past an optional type-parameter list, then an optional value list.
+    let k = m.index + m[0].length;
+    if (masked[k] === '[') { const e = matchDelim(masked, k, '[', ']'); if (e < 0) continue; k = e + 1; }
+    while (masked[k] === '(') { const e = matchDelim(masked, k, '(', ')'); if (e < 0) break; k = e + 1; }
+    const range = jvmBodyRange(masked, k);
+    const line = lineAt(masked, m.index + 1);
+    const key = name + ':' + (range ? range.bodyStart : line);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    defs.push(range ? { name, line, ...range } : { name, line, bodyStart: k, bodyEnd: k });
+  }
+  return defs;
+}
+
 function maskFor(filePath, src) {
   const ext = path.extname(filePath).toLowerCase();
   if (PY_EXTS.has(ext)) return maskPy(src);
@@ -363,6 +440,8 @@ function extractDefs(filePath, src) {
   if (JAVA_EXTS.has(ext)) return javaDefs(maskJs(src));
   if (GO_EXTS.has(ext)) return goDefs(maskJs(src));
   if (RS_EXTS.has(ext)) return rustDefs(maskRust(src));
+  if (KT_EXTS.has(ext)) return ktDefs(maskJs(src));
+  if (SCALA_EXTS.has(ext)) return scalaDefs(maskJs(src));
   return null; // unsupported language
 }
 
@@ -452,7 +531,8 @@ function _walk(dir, excludeSet, out, depth, maxDepth) {
     if (e.isDirectory()) _walk(full, excludeSet, out, depth + 1, maxDepth);
     else if (e.isFile()) {
       const ext = path.extname(e.name).toLowerCase();
-      if (JS_EXTS.has(ext) || PY_EXTS.has(ext) || JAVA_EXTS.has(ext) || GO_EXTS.has(ext) || RS_EXTS.has(ext)) out.push(full);
+      if (JS_EXTS.has(ext) || PY_EXTS.has(ext) || JAVA_EXTS.has(ext) || GO_EXTS.has(ext)
+        || RS_EXTS.has(ext) || KT_EXTS.has(ext) || SCALA_EXTS.has(ext)) out.push(full);
     }
   }
 }
