@@ -16133,8 +16133,8 @@ __factories["./src/mcp/server"] = function(module, exports) {
    * One JSON object per line on both stdin and stdout.
    *
    * Supported methods:
-   *   initialize        → serverInfo + capabilities
-   *   tools/list        → 19 tool definitions
+   *   initialize        → serverInfo + capabilities + negotiated protocolVersion
+   *   tools/list        → 21 tool definitions
    *   tools/call        → dispatch to handler, return result
    */
 
@@ -16147,6 +16147,18 @@ __factories["./src/mcp/server"] = function(module, exports) {
     version: '8.34.0',
     description: 'SigMap MCP server — code signatures on demand',
   };
+
+  // Protocol revisions this server actually speaks. The tools-only surface —
+  // initialize / tools/list / tools/call plus the initialized/cancelled
+  // notifications — is identical across these revisions, and the
+  // @hasmcp/mcp-spec-test suite passes every applicable 2025-11-25 case against
+  // it. 2026-07-28 is deliberately absent: that revision requires
+  // server/discover, which is not implemented. Newest first: a client offering
+  // a version outside this list is downgraded to [0], never echoed back —
+  // echoing an unspeakable version is itself a spec violation (#544), and it
+  // made the conformance suite believe 2026-07-28 was supported, producing six
+  // phantom server/discover failures on a revision never really offered (#545).
+  const SUPPORTED_PROTOCOL_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
 
   // ---------------------------------------------------------------------------
   // JSON-RPC helpers
@@ -16172,9 +16184,32 @@ __factories["./src/mcp/server"] = function(module, exports) {
       return;
     }
 
-    if (method === 'initialize') {
+    // server/discover (spec 2026-07-28) — session-less discovery, answerable
+    // before any handshake, so a client can learn the honest version list
+    // instead of offering versions and hoping. The response is a
+    // CacheableResult: deterministic, so the TTL promise of stability holds.
+    // Note supportedVersions does NOT include 2026-07-28 — answering discover
+    // is forward-compatible plumbing, not a claim to serve that revision's
+    // whole surface (per-result envelopes, inline _meta negotiation).
+    if (method === 'server/discover') {
       respond(id, {
-        protocolVersion: (params && params.protocolVersion) || '2024-11-05',
+        resultType: 'complete',
+        cacheScope: 'public',
+        ttlMs: 3600000,
+        supportedVersions: SUPPORTED_PROTOCOL_VERSIONS,
+        capabilities: { tools: {} },
+        serverInfo: SERVER_INFO,
+        instructions: 'SigMap serves code signatures for the working directory. Call query_context or search_signatures to rank and fetch signature blocks instead of reading whole files.',
+      });
+      return;
+    }
+
+    if (method === 'initialize') {
+      const offered = params && params.protocolVersion;
+      respond(id, {
+        protocolVersion: SUPPORTED_PROTOCOL_VERSIONS.includes(offered)
+          ? offered
+          : SUPPORTED_PROTOCOL_VERSIONS[0],
         serverInfo: SERVER_INFO,
         capabilities: { tools: {} },
       });
@@ -16182,6 +16217,13 @@ __factories["./src/mcp/server"] = function(module, exports) {
     }
 
     if (method === 'tools/list') {
+      // No pagination: the full list fits one page, so any cursor a client
+      // presents is one this server never issued — reject it (-32602, per the
+      // spec's SHOULD) rather than silently restarting from page one.
+      if (params && params.cursor !== undefined) {
+        respondError(id, -32602, `Invalid cursor: ${String(params.cursor)}`);
+        return;
+      }
       respond(id, { tools: TOOLS });
       return;
     }
