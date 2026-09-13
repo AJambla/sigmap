@@ -22659,6 +22659,38 @@ function computeEffectiveMaxTokens(fileEntries, config) {
   return effective;
 }
 
+/**
+ * Delete `.github/context-*.md` split files this run did not write (#555).
+ *
+ * Splits are discovered by filename pattern at read time, not by consulting
+ * the config, so a file left behind by a previous `strategy` — or by a module
+ * since dropped from `srcDirs` — keeps being merged into the retrieval index
+ * and silently steers every query. Observed on a 524-file Java repo: a stale
+ * 376 KB `context-mall-mbg.md` kept generated entities at ranks 1, 3 and 4
+ * while both files implementing the feature fell outside the top 6, even
+ * though `sig-index.json` correctly held zero entries for that module.
+ *
+ * @param {string} cwd
+ * @param {string[]} keep  basenames this run wrote, e.g. ['context-core.md']
+ * @returns {string[]} basenames removed
+ */
+function pruneStaleContextSplits(cwd, keep) {
+  const ghDir = path.join(cwd, '.github');
+  const kept = new Set(keep);
+  const removed = [];
+  let entries;
+  try { entries = fs.readdirSync(ghDir); } catch (_) { return removed; }
+  for (const f of entries) {
+    if (!/^context-[\w.-]+\.md$/.test(f) || kept.has(f)) continue;
+    try { fs.unlinkSync(path.join(ghDir, f)); removed.push(f); } catch (_) { /* best effort */ }
+  }
+  if (removed.length) {
+    console.warn(`[sigmap] pruned ${removed.length} stale context split(s) from a previous `
+      + `strategy/srcDirs: ${removed.join(', ')}`);
+  }
+  return removed;
+}
+
 function applyTokenBudget(fileEntries, maxTokens) {
   // fileEntries: [{ filePath, sigs, mtime }]
   // Per-file rendered overhead: "### <path>", code fences, trailing blank line.
@@ -23466,6 +23498,7 @@ function runPerModuleStrategy(cwd, config, fileEntries, inputTokenTotal) {
   ];
 
   let totalOut = 0;
+  const writtenSplits = [];
   for (const mod of moduleNames) {
     const outName = `context-${mod}.md`;
     const outPath = path.join(cwd, '.github', outName);
@@ -23484,7 +23517,9 @@ function runPerModuleStrategy(cwd, config, fileEntries, inputTokenTotal) {
     console.warn(`[sigmap] per-module: wrote .github/${outName} (~${modTokens} tokens, ${budgeted.length} files)`);
 
     overviewLines.push(`| \`${mod}\` | \`.github/${outName}\` |`);
+    writtenSplits.push(outName);
   }
+  pruneStaleContextSplits(cwd, writtenSplits);
 
   overviewLines.push('');
   overviewLines.push('> Inject the relevant module file into your IDE context window.');
@@ -23523,6 +23558,7 @@ function runHotColdStrategy(cwd, config, fileEntries, recentFiles, inputTokenTot
   const coldContent = coldHeader + formatOutput(coldEntries, cwd, false, config, null);
   ensureDir(coldPath);
   fs.writeFileSync(coldPath, coldContent, 'utf8');
+  pruneStaleContextSplits(cwd, ['context-cold.md']);
   const coldTokens = estimateTokens(coldContent);
 
   console.warn('[sigmap] hot-cold:');
@@ -23847,6 +23883,9 @@ function runGenerate(cwd, config, reportMode, reportJson = false) {
       result = runHotColdStrategy(cwd, configWithBudget, fileEntries, recentFiles, inputTokenTotal);
     } else {
       // 'full' — original behaviour
+      // 'full' writes no split files — anything left from a previous
+      // strategy would still be merged into the index at read time (#555).
+      pruneStaleContextSplits(cwd, []);
       fileEntries = applyTokenBudget(fileEntries, effectiveMaxTokens);
       const droppedCount = beforeCount - fileEntries.length;
       const routingEnabled = !!(config.routing || process.argv.includes('--routing'));
