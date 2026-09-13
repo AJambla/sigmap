@@ -35,6 +35,9 @@ To ensure proper attribution:
 
 We welcome contributions! See [Contributing](./docs/CONTRIBUTING.md) for guidelines.
 
+### Recent Contributors (v8.33.0)
+- **@manojmallick** — feat(context): the artifact now states what the token budget omitted, with the counts, the reason, and a pointer to `sigmap ask` — the drop warning had only ever gone to stderr (#587, PR #599); test(extractors): a fixture for every language plus a guard that fails when one is missing, which immediately found a ninth the issue had not listed (`typescript_react`) and a stale expected file causing a silent `--diagnose-extractors` SKIP (#588, PR #595); fix(routes): NestJS paths compose the `@Controller` prefix, attributed per controller (#585, PR #598); refactor(extractors): one source of truth for extractor resolution — two of three copies had drifted, and the third was missing `.gd` so gdscript was never diagnosed (#591, PR #597)
+
 ### Recent Contributors (v8.32.1)
 - **@manojmallick** — fix(extractors): made the v8.32.0 disclosure claim true — removed the unreachable `vue.js` (`.vue` dispatches to `vue_sfc`), added disclosure to `.tsx`/`.properties`/`.toml`/`.md`, and cleared the eight inner caps that defeated `r.js`'s own marker (#582, #583, #584, PR #589); fix(config): JVM package layouts were mostly invisible at `maxDepth: 6` — 6 of 47 Java files on spring-petclinic — so the walk now deepens to 12 for JVM layouts only, matching the graph walk from #561 (#590, PR #593); docs: retracted the overstated v8.32.0 claim in the changelog, roadmap and GitHub release
 
