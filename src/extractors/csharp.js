@@ -6,8 +6,13 @@ const { capWithNotice, capMembersWithNotice } = require('../util/truncate');
 // Ceilings sit above the default `maxSigsPerFile` so the configured budget
 // governs output rather than a literal buried here, and omissions are disclosed
 // — an undisclosed cap looks like a class that simply has eight methods (#576).
-const MEMBER_LIMIT = 8;
-const PER_FILE_LIMIT = 25;
+// Class bodies are scanned to this many characters. Real classes routinely
+// run past the old 4KB scan window — truncating there silently hid every
+// member after ~4000 chars AND anchored class end-lines short (#576). The
+// ceiling only guards against pathological input (Java parity, #551).
+const MAX_CLASS_BODY_CHARS = 200000;
+const MEMBER_LIMIT = 120;
+const PER_FILE_LIMIT = 200;
 
 /**
  * Extract signatures from C# source code.
@@ -42,7 +47,7 @@ function extract(src) {
 
 function extractBlock(src, startIndex) {
   let depth = 1, i = startIndex;
-  const end = Math.min(src.length, startIndex + 5000);
+  const end = Math.min(src.length, startIndex + MAX_CLASS_BODY_CHARS);
   while (i < end && depth > 0) {
     if (src[i] === '{') depth++;
     else if (src[i] === '}') depth--;

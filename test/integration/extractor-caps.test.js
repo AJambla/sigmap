@@ -8,10 +8,11 @@
  * an 8-member cap hides 71% of Swift, 68% of PHP, 64% of Kotlin, 57% of Scala
  * and 43% of C# member surface — with no indication anything was dropped.
  *
- * These assert DISCLOSURE, not a raised ceiling. Silence is the defect an agent
- * cannot work around: a disclosed cap lets it ask for the rest, an undisclosed
- * one looks like a class that simply has eight methods. Raising the ceilings is
- * a separate decision with a measured index cost, tracked in #576.
+ * These assert DISCLOSURE at the raised ceilings (120 members, 200 signatures
+ * per file — Java parity, so the configured maxSigsPerFile governs output
+ * rather than a literal buried in the extractor). Silence is the defect an
+ * agent cannot work around: a disclosed cap lets it ask for the rest, an
+ * undisclosed one looks like a class that simply has eight methods (#576).
  */
 
 const assert = require('assert');
@@ -23,7 +24,7 @@ function test(name, fn) {
   catch (e) { console.log(`  FAIL  ${name}\n        ${e.message}`); failed++; }
 }
 
-const N = 14;                         // comfortably past the old cap of 8
+const N = 130;                        // comfortably past the raised cap of 120
 const rep = (f) => Array.from({ length: N }, (_, i) => f(i)).join('\n');
 
 /** One fixture per language: a class with N members. */
@@ -62,7 +63,7 @@ test('every extractor discloses omissions instead of truncating silently', () =>
   for (const f of fs.readdirSync(dir).filter((x) => x.endsWith('.js'))) {
     const src = fs.readFileSync(path.join(dir, f), 'utf8');
     // A bare `.slice(0, N)` on members or sigs drops content with no marker.
-    if (/return\s+(?:members|sigs)\.slice\(0,\s*\d+\)/.test(src)) silent.push(f);
+    if (/return\s+(?:members|sigs|methods)\.slice\(0,\s*\d+\)/.test(src)) silent.push(f);
   }
   assert.deepStrictEqual(silent, [],
     `these still truncate without a "… +N more" marker: ${silent.join(', ')}`);

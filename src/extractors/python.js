@@ -6,7 +6,10 @@ const { capWithNotice } = require('../util/truncate');
 
 // Ceiling sits above the default `maxSigsPerFile` so the configured budget
 // governs output rather than a literal buried here, and omissions are disclosed (#576).
-const PER_FILE_LIMIT = 30;
+const PER_FILE_LIMIT = 200;
+
+// Per-class member ceiling, disclosed via capWithNotice (#576).
+const MEMBER_LIMIT = 120;
 
 /**
  * 1-based line of the last source line belonging to a top-level (indent 0)
@@ -162,7 +165,7 @@ function extractClassMethods(stripped, startIndex) {
       methods.push(`${asyncKw}def ${m[1]}(${params})${retStr}`);
     }
   }
-  return methods.slice(0, 8);
+  return capWithNotice(methods, MEMBER_LIMIT, 'methods');
 }
 
 function tryExtractDataclassFields(stripped, classIndex) {

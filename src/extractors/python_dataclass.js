@@ -1,5 +1,7 @@
 'use strict';
 
+const { capWithNotice } = require('../util/truncate');
+
 /**
  * Extract Python dataclass, Pydantic model, and SQLAlchemy ORM metadata.
  * Focuses on model fields, validation, and relationships.
@@ -71,7 +73,7 @@ function extract(src) {
     sigs.push('config-class');
   }
 
-  return Array.from(new Set(sigs)).slice(0, 50);
+  return capWithNotice(Array.from(new Set(sigs)), 200, 'signatures');
 }
 
 module.exports = { extract };

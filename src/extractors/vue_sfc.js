@@ -1,5 +1,7 @@
 'use strict';
 
+const { capWithNotice } = require('../util/truncate');
+
 /**
  * Extract Vue Single-File Component (SFC) signatures from .vue files.
  * Captures component metadata: name, props, emits, slots, composables, lifecycle.
@@ -93,7 +95,7 @@ function extract(src) {
     sigs.push(`slot ${s}`);
   }
 
-  return Array.from(new Set(sigs)).slice(0, 50);
+  return capWithNotice(Array.from(new Set(sigs)), 200, 'signatures');
 }
 
 module.exports = { extract };
