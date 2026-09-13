@@ -163,6 +163,14 @@ const DEFAULTS = {
     surfaceEnrichment: false,
   },
 
+  // Host-toolchain exactness tiers (#542 T2, opt-in, silent regex fallback).
+  // typescript: parse .ts with the TARGET repo's own node_modules/typescript
+  // (the user's install, never bundled). Byte-stability then holds per
+  // toolchain version, and the generated header labels the version used.
+  exactness: {
+    typescript: false,
+  },
+
   // Impact layer settings (v2.5)
   impact: {
     // BFS traversal depth limit for --impact (0 = unlimited)
