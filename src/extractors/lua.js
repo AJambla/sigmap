@@ -1,5 +1,12 @@
 'use strict';
 
+const { capWithNotice } = require('../util/truncate');
+
+// Ceiling discloses what it drops rather than truncating silently (#583).
+// Collection runs to completion so the marker reports the true overflow —
+// stopping early made r.js report "+1 more" where 50 were hidden (#584).
+const PER_FILE_LIMIT = 30;
+
 /**
  * Extract signatures from Lua source code.
  *
@@ -27,14 +34,12 @@ function extract(src) {
   // local foo = require('bar.baz') — useful module-surface hint, capped low.
   for (const m of stripped.matchAll(/^\s*(?:local\s+)?([A-Za-z_]\w*)\s*=\s*require\s*\(\s*['"]([A-Za-z0-9_.\/-]+)['"]\s*\)/gm)) {
     pushUnique(sigs, seen, `require ${m[2]} as ${m[1]}`);
-    if (sigs.length >= 30) return sigs.slice(0, 30);
   }
 
   // local function name(args)
   for (const m of stripped.matchAll(/^\s*local\s+function\s+([A-Za-z_]\w*)\s*\(([^)]*)\)/gm)) {
     if (m[1].startsWith('_')) continue;
     pushUnique(sigs, seen, `local function ${m[1]}(${normalizeParams(m[2])})${applyHint(hints, m[1])}`);
-    if (sigs.length >= 30) return sigs.slice(0, 30);
   }
 
   // function name(args), function M.name(args), function M:name(args)
@@ -42,7 +47,6 @@ function extract(src) {
     const name = m[1];
     if (name.startsWith('_')) continue;
     pushUnique(sigs, seen, `function ${name}(${normalizeParams(m[2])})${applyHint(hints, name)}`);
-    if (sigs.length >= 30) return sigs.slice(0, 30);
   }
 
   // name = function(args), M.name = function(args), M:name = function(args)
@@ -50,10 +54,9 @@ function extract(src) {
     const name = m[1];
     if (name.startsWith('_')) continue;
     pushUnique(sigs, seen, `${name} = function(${normalizeParams(m[2])})${applyHint(hints, name)}`);
-    if (sigs.length >= 30) return sigs.slice(0, 30);
   }
 
-  return sigs.slice(0, 30);
+  return capWithNotice(sigs, PER_FILE_LIMIT, 'signatures');
 }
 
 function pushUnique(out, seen, sig) {

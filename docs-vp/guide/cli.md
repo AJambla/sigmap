@@ -1,6 +1,6 @@
 ---
 title: CLI reference
-description: Complete SigMap CLI reference. All commands and flags with examples — ask, evidence, budget, redact, tune, skills, squeeze, conventions, plan, bench, judge, verify, verify-ai-output, verify-plan, review-pr, create, memory, note, status, doctor, validate, roots, daemon, history, --package, --global, --ci, --cost, --coverage, --watch, --diff, --callers, --callees, --mcp, --report, --health, weights --export/--import and more.
+description: Complete SigMap CLI reference. All commands and flags with examples — ask, evidence, budget, redact, tune, skills, squeeze, conventions, plan, bench, judge, verify, verify-ai-output, verify-plan, review-pr, create, memory, lines, note, status, doctor, validate, roots, daemon, history, --package, --global, --ci, --cost, --coverage, --watch, --diff, --callers, --callees, --mcp, --report, --health, weights --export/--import and more.
 head:
   - - meta
     - property: og:title
@@ -90,8 +90,9 @@ If you are new to the product, start with the workflow pages first:
 | `roots [--explain | --json | --fix]` | Auto-detect source roots for 17 languages and 50+ frameworks; shows confidence and scoring |
 | `tune [--apply | --json]` | Recommend config from repo detection — srcDirs pin, monorepo, adapters, exclude, budget — one reason per change; `--apply` writes |
 | `skills list` | List skill clients (Claude/Cursor/Windsurf/Copilot/AGENTS.md) with presence and install state (`--json`) |
-| `skills install [--client <name> \| --all]` | Install the SigMap agent playbooks in each client's native skill/rules format; plain `install` wires only detected clients |
+| `skills install [--client <name> \| --all]` | Install the SigMap agent playbooks in each client's native skill/rules format, including the invokable `sigmap-task` loop; plain `install` wires only detected clients |
 | `history` | Show usage log + benchmark trend sparklines (hit@5, token reduction) |
+| `lines <file> <start>-<end>` | Print an exact line range — the CLI twin of the `get_lines` MCP tool; `:<line> --context <n>` for an anchor window |
 | `note "<text>"` | Append a note to the cross-session decision log (`note` alone lists recent) |
 | `status` | Repo state — branch, dirty files, index freshness, notes |
 | `doctor` | Diagnose config, index, freshness, coverage, and MCP wiring — with a fix per issue (`--json`; exits 1 on hard failure) |
@@ -1107,7 +1108,15 @@ $ sigmap mcp install claude
 [sigmap] Claude Code: registered MCP server in .claude/settings.json
 ```
 
-Supported clients: `claude`, `cursor`, `windsurf`, `vscode`, `zed`, `codex`, `gemini`, `opencode`, and `mcp` (portable `.mcp.json`). The command emits the correct shape per client — `mcpServers` JSON, Zed `context_servers`, or Codex YAML — and is **idempotent**: a second run reports that sigmap is already registered and never duplicates the entry. An unknown client name exits non-zero and lists the valid clients.
+Supported clients: `claude`, `cursor`, `windsurf`, `vscode`, `zed`, `codex`, `gemini`, `opencode`, and `mcp` (portable `.mcp.json`). The command emits the correct shape per client — `mcpServers` JSON, VS Code `servers`, Zed `context_servers`, or Codex YAML — and is **idempotent**: a second run reports that sigmap is already registered and never duplicates the entry. An unknown client name exits non-zero and lists the valid clients.
+
+**VS Code (v8.30.0).** VS Code reads a top-level `servers` key with an explicit transport `type`, not the generic `mcpServers` shape. Earlier versions wrote `mcpServers` into `.vscode/mcp.json`; the file was created, the command reported success, and VS Code silently ignored it — so GitHub Copilot never saw the server. `mcp install vscode` now writes:
+
+```json
+{ "servers": { "sigmap": { "type": "stdio", "command": "node", "args": ["…", "--mcp"] } } }
+```
+
+A config written by an earlier version is **migrated** rather than left in place: the stale `mcpServers.sigmap` entry is moved under `servers` and reported as `updated`, so re-running repairs a broken setup. Unrelated servers and other top-level keys (such as VS Code's `inputs`) are preserved.
 
 | Option | Description |
 |--------|-------------|
@@ -1239,7 +1248,13 @@ Five rules, each deterministic:
 
 ## skills
 
-Install SigMap's agent playbooks in each client's **native** skill/rules format (v8.26.0) — the multi-adapter idea applied to skills. Two skills ship: **sigmap-usage-maximizer** (the spend-minimizing loop: `ask` before any read → `get_lines` for anchored ranges → `verify_suggestion` before trusting → `squeeze` big pastes → checkpoint → watch `get_budget` and summarize-then-drop near budget) and **sigmap-config-optimizer** (the `tune` playbook: detect → review reasons → `--apply` → `validate`). Deterministic content with a version footer; installs are idempotent and human content is never touched.
+Install SigMap's agent playbooks in each client's **native** skill/rules format (v8.26.0) — the multi-adapter idea applied to skills. Three skills ship:
+
+- **sigmap-usage-maximizer** — the spend-minimizing loop: `ask` before any read → `get_lines` for anchored ranges → `verify_suggestion` before trusting → `squeeze` big pastes → checkpoint → watch `get_budget` and summarize-then-drop near budget.
+- **sigmap-task** (v8.30.0) — an **invokable** loop for environments where MCP is unavailable, driven entirely from the CLI. Where the maximizer is an always-on playbook that mostly names MCP tools, this one is a prompt the user calls deliberately and every step is a shell command: `sigmap ask` → read `.context/query-context.md` → open only the anchored line ranges → make the change → `sigmap verify-ai-output` → regenerate → report. For Copilot it installs as a prompt file, so `/sigmap-task <your change>` runs it in agent mode.
+- **sigmap-config-optimizer** — the `tune` playbook: detect → review reasons → `--apply` → `validate`.
+
+Deterministic content with a version footer; installs are idempotent and human content is never touched.
 
 ```bash
 sigmap skills list                     # clients, targets, install state
@@ -1250,8 +1265,10 @@ sigmap skills install --all --json     # everything, machine-readable
 
 ```
   claude     installed  .claude/skills/sigmap-usage-maximizer/SKILL.md
+  claude     installed  .claude/skills/sigmap-task/SKILL.md
   claude     installed  .claude/skills/sigmap-config-optimizer/SKILL.md
   copilot    installed  .github/instructions/sigmap-usage-maximizer.instructions.md
+  copilot    installed  .github/prompts/sigmap-task.prompt.md
   copilot    installed  .github/instructions/sigmap-config-optimizer.instructions.md
   codex      updated    AGENTS.md
 ```
@@ -1261,7 +1278,7 @@ sigmap skills install --all --json     # everything, machine-readable
 | `claude` | `.claude/skills/<skill>/SKILL.md` (frontmatter name/description) |
 | `cursor` | `.cursor/rules/<skill>.mdc` |
 | `windsurf` | `.windsurf/rules/<skill>.md` |
-| `copilot` | `.github/instructions/<skill>.instructions.md` |
+| `copilot` | `.github/instructions/<skill>.instructions.md`; prompt-kind skills go to `.github/prompts/<skill>.prompt.md` |
 | `codex` | marker-delimited block in `AGENTS.md`, inserted **above** the `## Auto-generated signatures` marker — survives `sigmap` regeneration |
 
 | Option | Description |
@@ -1270,6 +1287,39 @@ sigmap skills install --all --json     # everything, machine-readable
 | `--all` | Install for every supported client |
 | *(no flag)* | Wire only clients whose parent artifact already exists (`.claude/`, `.cursor/`, `.windsurf/`, `.github/`, `AGENTS.md`) — the `--setup` precedent |
 | `--json` | Machine-readable list / install results (`installed` \| `updated` \| `already`) |
+
+---
+
+## lines
+
+Print an exact range of a file — the CLI twin of the `get_lines` MCP tool (v8.31.0). Where MCP is unavailable, `sigmap ask` hands an agent precise `:start-end` anchors and, without this, no sanctioned way to spend them: it falls back to reading whole files and throws the saving away. Measured on a real Copilot session, an agent read 2,659 tokens via `sed -n '1,220p'` where the anchored window needed 217.
+
+```bash
+sigmap lines src/graph/builder.js 447-451     # an explicit range
+sigmap lines src/graph/builder.js :447         # a window around one line
+sigmap lines src/graph/builder.js :447 --context 20
+```
+
+````text
+$ sigmap lines src/graph/builder.js :447 --context 2
+# src/graph/builder.js:445-449
+```
+ * @returns { forward: Map<string,string[]>, reverse: Map<string,string[]> }
+ */
+function buildFromCwd(cwd, opts) {
+  // R-package layouts use `R/` and `inst/`; Shiny apps put helpers in `R/`.
+```
+````
+
+The `:447` form takes an anchor **pasted straight off a signature** — `ask` prints `buildFromCwd(cwd, opts) → { forward: …  :447-501`, and that string is the argument.
+
+It delegates to the same handler as MCP, so both paths share the project-root sandbox, the end-of-file clamping and the secret redaction. A range beyond the end of the file clamps rather than failing; a path resolving outside the project is refused.
+
+| Option | Description |
+|--------|-------------|
+| `--context <n>` | Lines either side of a `:<line>` anchor (default 10). Ignored for an explicit range |
+
+Exit codes: `0` printed · `1` missing file, refused path, or a start past end-of-file · `2` usage error or an unparsable range.
 
 ---
 
@@ -1335,7 +1385,7 @@ sigmap compare --json
 ────────────────────────────────────────────
  SigMap vs Baseline
 ────────────────────────────────────────────
- hit@5         82.2% vs 44.0% grep   (1.73× lift)
+ hit@5         82.2% vs 44.0% grep   (1.79× lift)
  Avg prompts   1.53 vs 2.84
  Token story   96.8% overall reduction
 ────────────────────────────────────────────
@@ -1353,7 +1403,7 @@ sigmap share
 
 ```
 Generated with SigMap — the deterministic, verifiable grounding layer for AI code work
-96.8% fewer tokens · 81.1% retrieval hit@5 · 45.7% fewer prompts
+96.8% fewer tokens · 78.9% retrieval hit@5 · 44.4% fewer prompts
 https://sigmap.io
 [sigmap] Copied to clipboard.
 ```

@@ -1,13 +1,13 @@
 ---
 title: Roadmap
-description: SigMap version history and roadmap. From v0.0 to v8.29.0, with recent releases completing the grounded-codegen plan — a realistic §9 ablation (real-symbol corpus, exact-signature grounding, --verbose), a Gemini (AI Studio) provider for the §9 ablation, the init Creation-workflow CLAUDE.md block, scaffold persistence, the LLM A/B hallucination ablation harness, the sigmap create orchestrator and its four guard stages (scaffold, verify-plan, verify-ai-output, review-pr), the conventions command with its full flag set (--conflicts, --inject, --report, --ci, --fix, --update), the grounding benchmark, read-time self-heal, live-index MCP write hooks, the get_callee_signatures MCP tool (exact callee signatures), realistic per-query savings, release-pipeline robustness (bundle integrity + version.json gates, standalone-bundle smoke test), the sigmap gain token-savings dashboard, supply-chain hardening (zero system-shell access), Squeeze input minimization with symbol enrichment, source-of-truth llms.txt, the verify-ai-output Hallucination Guard, and Memory tools (note, status, read_memory MCP tool).
+description: SigMap version history and roadmap. From v0.0 to v8.32.0, with recent releases completing the grounded-codegen plan — a realistic §9 ablation (real-symbol corpus, exact-signature grounding, --verbose), a Gemini (AI Studio) provider for the §9 ablation, the init Creation-workflow CLAUDE.md block, scaffold persistence, the LLM A/B hallucination ablation harness, the sigmap create orchestrator and its four guard stages (scaffold, verify-plan, verify-ai-output, review-pr), the conventions command with its full flag set (--conflicts, --inject, --report, --ci, --fix, --update), the grounding benchmark, read-time self-heal, live-index MCP write hooks, the get_callee_signatures MCP tool (exact callee signatures), realistic per-query savings, release-pipeline robustness (bundle integrity + version.json gates, standalone-bundle smoke test), the sigmap gain token-savings dashboard, supply-chain hardening (zero system-shell access), Squeeze input minimization with symbol enrichment, source-of-truth llms.txt, the verify-ai-output Hallucination Guard, and Memory tools (note, status, read_memory MCP tool).
 head:
   - - meta
     - property: og:title
       content: "SigMap Roadmap — version history and upcoming features"
   - - meta
     - property: og:description
-      content: "101 versions shipped. See what changed in each release and what is coming next."
+      content: "173 versions shipped. See what changed in each release and what is coming next."
   - - meta
     - property: og:url
       content: "https://sigmap.io/guide/roadmap"
@@ -20,9 +20,9 @@ head:
 ---
 # Roadmap
 
-One hundred one versions shipped. MIT open source from day one.
+One hundred seventy-three versions shipped. MIT open source from day one.
 
-**Stats:** 96.8% overall token reduction · 81.1% retrieval hit@5 (1.73× measured lift vs single-shot grep) · 98.0% test-discovery F1 · installed-library grounding (JS/TS + Python) · method-level call-graph (JS/TS, Python, Java, Go, Rust) · 21 MCP tools · 33 languages · 17-language source resolver · 0 npm deps
+**Stats:** 96.8% overall token reduction · 78.9% retrieval hit@5 (1.79× measured lift vs single-shot grep) · 98.0% test-discovery F1 · installed-library grounding (JS/TS + Python) · method-level call-graph (JS/TS, Python, Java, Go, Rust) · 21 MCP tools · 32 languages · 17-language source resolver · 0 npm deps
 
 ## Token reduction by version
 
@@ -837,6 +837,78 @@ Two milestones in one release. **`verify-ai-output` Reliable MVP** (#232) grows 
 **Impact:** the credibility gap a skeptical reviewer finds first is closed in writing; 6 new guard checks (133 files); zero runtime changes.
 
 ---
+
+### v8.33.0 — the same bug, four times, finally named ✓ (2026-09-13)
+
+**Minor release — four issues that turned out to be one bug wearing different clothes: something omitted, with nothing saying so.** v8.32.1 fixed extractors that truncated silently. This release finishes the pattern one level up. The generated artifact drops files to fit the token budget and said so only on **stderr** — which an agent reading the file never sees. On flask that meant 25 of 51 files present with no indication the other 26 existed, indistinguishable from a 25-file repo. `applyTokenBudget` now attaches a summary to what it returns, so every call site gains a footer naming the counts, the reason, and where to get the rest. The wording is deliberate about what is *not* true: the omitted files remain in the retrieval index, so the notice says so, and a test asserts it does not overstate — replacing a misleading silence with a misleading warning would be no improvement.
+
+The same shape appeared in the test tooling. `--diagnose-extractors` had been printing a silent `SKIP` for `vue_sfc`, because `test/expected/vue.txt` outlived the `vue.js` deleted in v8.32.1 — and a SKIP reads like a pass at a glance. Eight languages had no fixture at all, which is *why* v8.32.0 shipped undisclosed caps in `markdown`, `properties` and `toml`: no test could observe output nobody generated. Every language now has a fixture and a guard that fails when one is missing. The guard earned itself immediately by finding a **ninth** the issue had not listed — `typescript_react`, which is `.tsx`, every React component, and the extractor that shipped a silent cap. The diagnostic went from 21 passing with an unnoticed SKIP to 32 passing with none.
+
+Underneath both sat a structural cause. Three places decided which extractor module to load, and two had drifted: `analyzer.js` carried a dead duplicate `.vue` key hidden by JavaScript's last-key-wins, and the `--diagnose-extractors` map still pointed at a module that had been deleted. That is how an unreachable extractor survived unnoticed long enough to receive a fix in v8.32.0. The hand-maintained copy was also simply incomplete — no `.gd` entry — so gdscript was never diagnosed despite having both a fixture and recorded output. Resolution now has one source. `language-detector.js` and `dashboard.js` stay separate on purpose: they map `.tsx` for language *statistics* and display *labels*, and folding them in would miscount languages. A test pins that distinction so a future cleanup cannot quietly break it.
+
+Finally, NestJS route paths compose their `@Controller` prefix. `@Controller('cats')` + `@Get(':id')` emitted `:id`, a path matching nothing a user would ask about — which defeats the entire point of route pseudo-signatures, since they exist so a route-worded query can reach a controller whose signatures never mention the path. The prefix is attributed per controller rather than per file, because a file may declare several. The other six claimed frameworks were verified unchanged in the same run.
+
+**Tags:** `applyTokenBudget` · `__omissions` · `formatOutput` · `extractor-fixture-coverage.test.js` · `extension-map-single-source.test.js` · `nestjs-route-prefix.test.js` · `nestControllerPrefixes` · `#585` · `#587` · `#588` · `#591` · `PR #595` · `#597` · `#598` · `#599`
+
+**Impact:** `--diagnose-extractors` 21 → 32 passing, no SKIPs; every one of 32 language extractors now has a fixture and recorded expected output; extractor resolution reduced from three drifting copies to one; 146 test files passing, 0 failed. Headline metrics unchanged — 96.8% token reduction, 78.9% hit@5 — as expected for a release that touches no ranking code.
+
+---
+
+### v8.32.1 — the audit that read its own release notes ✓ (2026-09-13)
+
+**Patch release — v8.32.0 claimed "every extractor now discloses what a ceiling dropped". It did not.** An end-to-end audit — generate 80 symbols per language, run the *real dispatched* extractor, check for a marker — found three ways the claim was false. `vue.js` was registered in the dispatcher but **unreachable**: `.vue` resolves to `vue_sfc`, so the previous release added disclosure to dead code while the live handler kept truncating silently. Four reachable extractors still cut output with a bare `slice()` — `.tsx` (every React component), `.properties`, `.toml` and `.md`. And `r.js` called `capWithNotice` but **eight** inner caps stopped collection at the ceiling, so it never fired; forced to fire, it reported `+1 more` where 50 signatures were hidden. The root cause was not carelessness but coverage: three of those languages have no test fixture, so no test could observe their output.
+
+The same audit found something larger. Installing the actual competitors — repomix, universal-ctags, gitingest — and running them head-to-head on `spring-petclinic/src` showed SigMap at 292 characters per covered file against repomix `--compress` at 2,868, roughly **ten times denser**. But it also showed SigMap indexing **6 of 47** Java files. `maxDepth: 6` suits the JS/Python-shaped trees it was tuned on; Java puts one directory per package segment, so `OwnerController.java` and every other file one package deep was invisible. v8.31.0 had already raised the *dependency-graph* walk to 12 for exactly this reason — extraction was the shallower half of an inconsistent pair, resolving edges into files the signature index had never seen. The walk now deepens to 12 for JVM layouts only; deepening globally was measured first and rejected, because it added candidates to every repo for no gain.
+
+That fix moved a published number, and the movement is the honest part. Headline hit@5 goes **81.1% → 78.9%**, and exactly one of eighteen repos accounts for it: spring-petclinic falls 100% → 60%. That 100% was measured against an index holding 6 of 47 Java files — ranking five hand-written tasks is easy when 87% of the repo is missing. The leak-free `mined` corpus stayed flat and the leak-free `jvm` corpus rose 16.4% → 23.0% on the same change, so the prior figure was inflated by under-indexing rather than this being a ranking regression. The two regressed tasks are tracked as a ranking weakness the missing files were concealing.
+
+Four guard tests were de-hardcoded along the way, each of which had begun failing on a *correct* value: one pinned the banner to `81.1%` while its own title said 75.6%, and another required `81.1%` while blocklisting `78.9%` — doubly self-invalidating once the benchmark legitimately returned to it.
+
+**Tags:** `vue_sfc` · `typescript_react` · `capWithNotice` · `_isJvmLayout` · `_applyJvmDepth` · `JVM_MAX_DEPTH` · `extractor-reachability.test.js` · `jvm-walk-depth.test.js` · `#582` · `#583` · `#584` · `#590` · `PR #589` · `#593`
+
+**Impact:** JVM corpus 16.4% → 23.0% (+6.6pp); spring-petclinic Java coverage 6/47 → 42/47; 4 reachable extractors gained disclosure and `r.js` now reports the true overflow (`+50`, not `+1`); a reachability test fails CI if any registered extractor becomes unreachable. 142 test files passing, 0 failed.
+
+---
+
+### v8.32.0 — The gate cried wolf, so we built one that doesn't ✓ (2026-09-12)
+
+**Minor release — the retrieval gate was measuring the repository it was defending.** The `hard` corpus scores SigMap against its own source, so its BM25 statistics shift whenever the indexed file set changes — including when the change cannot possibly affect ranking. This was not argued, it was proven: a probe branch containing **one two-assertion test file and no source change** scored 75.6% → 74.4% and failed the gate. A gate that fails honest work is worse than no gate, because it teaches you to override it. `hard` is now held to its **70% floor** rather than to the previous run; the floor, the leak assertions, and `--no-regress` on `mined` and `jvm` remain enforced.
+
+Underneath that sat a plainer defect: the gate reused `.context/sig-index.json`, which is gitignored. A stale artifact was therefore indistinguishable from a regression — a trap that consumed **three separate false investigations**, one of which ended in an unnecessary re-baseline. Every index the gate scores is now regenerated, including one per JVM repo, driven from `benchmarks/config-overrides.json` rather than a hand-written config dropped into the repo under test (the exact cross-suite skew #522 established). A re-run now reproduces all four corpora at +0.0pp.
+
+The structural fix is a corpus that sits **outside the feedback loop**: 61 tasks mined from `spring-petclinic` (32) and `akka` (29), verified leak-free, scoring against repositories SigMap's source cannot move. It earned its place the day it landed by catching a real one-task regression (18.0% → 16.4%) in the same release's extractor change — and the cause was identified rather than absorbed. `akka:m018` expects `Logging.scala`, which holds a class the 8-member ceiling truncates, so disclosing the truncation adds one `… +N more methods` line and BM25's document-length normalisation drops it from rank 5 to 6. A fix excluding markers from the scored term space did not move the number and was reverted rather than left in as unexplained complexity.
+
+That extractor change closes a documentation lie. `KNOWN_LIMITATIONS.md` has long promised that caps are "cut with a `… +N more signatures` notice" — but only the JS/TS/Java paths actually did it. **20 extractors** truncated silently, so an eight-method class and a forty-method class were indistinguishable in the output, and the drift-guard test never caught it because it only checks that the tier names are named. All 23 were believed to disclose — **that was wrong, and a later audit corrected it**: `vue.js` was dead code (`.vue` dispatches to `vue_sfc`), so one of the 20 was unreachable; `.tsx`, `.properties`, `.toml` and `.md` still truncated silently; and `r.js`'s own disclosure was defeated by eight inner caps. Fixed in #589. The ceilings themselves are deliberately unchanged: raising them is a separate decision that needs its own measurement, and this release built the corpus that can measure it. Finally, a markdown guard closes the hole that broke the v8.31.0 Pages deploy *after* the tag was pushed — an unbalanced fence or a stray Vue interpolation outside a code block now fails a test instead of a release.
+
+**Tags:** `run-retrieval-gate.mjs` · `retrieval-jvm-spring-petclinic.jsonl` · `retrieval-jvm-akka.jsonl` · `mine-corpus.mjs --repo` · `config-overrides.json` · `capWithNotice` · `capMembersWithNotice` · `docs-markdown.test.js` · `#573` · `#575` · `#576` · `PR #574` · `#577` · `#578` · `#579`
+
+**Impact:** 61 new gated tasks against external repos, 0 leaking; 19 reachable extractors gained disclosure (4 more were missed and fixed later in #589); the gate is reproducible — a clean re-run reports hard 75.6%, mined 60.9%, easy 90.0%, jvm 16.4% at +0.0pp on every corpus. 140 test files passing, 0 failed.
+
+---
+
+### v8.31.0 — The Java graph was empty, and nothing noticed ✓ (2026-09-08)
+
+**Minor release — three hard-coded assumptions that a repo is JS-shaped and shallow.** `buildFromCwd` pinned `srcDirs` to `src`/`app`/`lib`/`R`/`inst` and never consulted the project config, then capped its walk at 8 directories. On a 524-file Spring repo that produced a **completely empty dependency graph** — 0 nodes. Java package-import resolution already worked (`com.macro.mall.X` → `com/macro/mall/X.java`); it was simply never reached. With the config honoured and the cap lifted: 524 nodes, 341 with importers. Because `imported_by_count` was 0 for every Java file, everything downstream was silently dead: `--impact` reported no importers, centrality contributed nothing, and any blast-radius scoring weighted by caller centrality degenerated to zero.
+
+The call graph carried its own copies of both caps plus a third defect: `callsInRange` discarded every `receiver.method(` call as unresolvable. In Java that is essentially all inter-object calls — **1,461 of 2,516 call sites (58%)** in one Spring module — so controller→service edges did not exist. Receiver types are now resolved from field and local declarations and mapped to a file by the JVM convention that a public type lives in a like-named file. Interface method *declarations* are indexed as nodes: they emit no calls, but in Spring the declared interface is what callers name, so without them every edge had no target. Unresolvable receivers still produce no edge — chained and computed receivers are skipped rather than guessed. Spring goes one hop further: a single implementation, or a single `@Primary` among several, links the caller to the code that actually runs; anything still ambiguous is left alone.
+
+None of this was gated. Every gated retrieval corpus is JavaScript, and a retrieval corpus measures ranking, not edges — so a JVM call-graph gate was added instead, asserting named caller→callee pairs and edge volume, and verified by simulating a revert. Separately, `sigmap lines` closes the loop for MCP-less agents: `ask` was handing out precise anchors with no sanctioned way to spend them, and a measured Copilot session read 2,659 tokens where the anchored window needed 217.
+
+**Tags:** `buildFromCwd` · `_configuredSrcDirs` · `callsInRange` · `receiverCallsInRange` · `buildTypeMap` · `javaTypeDecl` · `edgeConfidence` · `sigmap lines` · `validate:callgraph-jvm` · `#560` · `#562` · `#564` · `#566` · `PR #561` · `#563` · `#565` · `#567` · `#568`
+
+**Impact:** on macrozheng/mall (524 Java files) the call graph went from **0 symbols and 0 edges to 13,417 and 10,492** (9,837 high / 376 medium confidence), and blast radius on an implementation stopped being empty. 38 new tests across four files, each verified to fail against its pre-fix implementation. The retrieval baseline was re-recorded: the hard split moved 76.7% → 74.4% purely because the index is regenerated under a token budget and this release added ~1,000 lines — holding the index fixed, pre- and post-merge code give identical results and the same 23 misses, and MRR rose 0.639 → 0.644.
+
+### v8.30.0 — Java made visible, and an invokable loop for MCP-less agents ✓ (2026-09-07)
+
+**Minor release — three hard-coded caps were hiding most of a Java codebase, and the fix exposed a second problem.** The Java extractor capped every class at 8 members *silently* (JS/TS disclose omissions via `capMembersWithNotice`; Java just dropped them), hard-capped each file at 25 signatures regardless of `maxSigsPerFile`, and stopped scanning a class body after 5,000 characters. On `macrozheng/mall` that hid **10,415 of 12,250 public methods — 85% of the API surface**; `search_signatures setNote` returned nothing even though the symbol existed, so agents fell back to bulk-reading whole files instead of jumping to a line anchor. Lifting the caps took the index from 3,768 to 8,468 symbols.
+
+Making every member visible then surfaced a ranking problem it had been masking. Each generated MyBatis/JPA entity carries an accessor per column, so it matches a query on any column name it happens to have — and path-based penalties cannot see them, because generated entities live in ordinary source trees. Generated entities took ranks 1, 3 and 4 on an order-notes query, including one unrelated to orders, while neither file implementing the feature reached the top six. Data holders are now detected by **content** (≥80% trivial accessors, above a minimum member count) and demoted with the existing `generatedCode` multiplier, with the established escape hatch when the query asks for an entity, model, DTO or accessor. Entities stay retrievable by their own symbols — a test guards that the demotion does not undo the extractor fix.
+
+Two client-integration fixes round it out. `mcp install vscode` wrote a top-level `mcpServers` key where VS Code requires `servers` with an explicit transport `type`: the file was written, the command reported success, and VS Code silently ignored it, so Copilot never saw the server. Older configs are now migrated rather than left in place. And `sigmap skills` gained **sigmap-task**, an invokable prompt skill for environments where MCP is unavailable — where the usage-maximizer is an always-on playbook that mostly names MCP tools, this one is called deliberately and every step is a shell command: `ask` → read the query context → open only the anchored ranges → change → `verify-ai-output` → regenerate → report.
+
+**Tags:** `java.js` · `capMembersWithNotice` · `_isDataHolder` · `PENALTY_SIGNALS.dataHolder` · `WANTS_MODELS` · `_installVscode` · `sigmap-task` · `.github/prompts` · `#551` · `#553` · `#556` · `#558` · `PR #552` · `PR #554` · `PR #557`
+
+**Impact:** 8,468 symbols indexed on a 524-file Java repo where 3,768 were reachable before; both target files return to the top 5 on the query that regressed. Retrieval corpus unchanged — hard +0.0pp, mined +0.0pp, MRR +0.002, gate `PASS`. 22 new tests across four files, each verified to fail against its pre-fix implementation (140 test files).
 
 ### v8.29.0 — Retrieval Index Split: the ranker stops reading the prompt ✓ (2026-09-01)
 

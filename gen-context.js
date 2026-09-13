@@ -1791,6 +1791,55 @@ __factories["./src/config/loader"] = function(module, exports) {
   }
 
   /**
+   * Directory depth needed to reach source under a JVM package layout.
+   *
+   * `maxDepth: 6` is right for the JS/Python-shaped trees it was tuned on, but a
+   * JVM project puts one directory per package segment — real code in
+   * `src/main/java/com/company/project/module/Class.java` sits 8-10 levels down.
+   * At depth 6 only the top-level package was indexed: on spring-petclinic, 6 of
+   * 47 Java files (#590).
+   *
+   * #561 already raised the dependency-graph walk to 12 for exactly this reason,
+   * so extraction was the shallower half of an inconsistent pair.
+   *
+   * Deepening globally is not free — it adds candidates to every repo and cost
+   * 2.2pp on the (filename-leaky) 105-task matrix corpus while the unbiased
+   * `mined` corpus stayed flat. So the depth is raised only where the layout
+   * demands it, leaving non-JVM repos byte-identical.
+   *
+   * @param {string} cwd
+   * @returns {boolean} true when the repo looks like a Maven/Gradle/sbt project
+   */
+  function _isJvmLayout(cwd) {
+    const MARKERS = ['pom.xml', 'build.gradle', 'build.gradle.kts', 'build.sbt', 'settings.gradle', 'settings.gradle.kts'];
+    for (const m of MARKERS) {
+      try { if (fs.existsSync(path.join(cwd, m))) return true; } catch { /* unreadable cwd */ }
+    }
+    for (const d of ['src/main/java', 'src/main/kotlin', 'src/main/scala']) {
+      try { if (fs.existsSync(path.join(cwd, d))) return true; } catch { /* ignore */ }
+    }
+    return false;
+  }
+
+  /** Walk depth for a JVM package layout — matches the graph walk from #561. */
+  const JVM_MAX_DEPTH = 12;
+
+  /**
+   * Raise `maxDepth` to the JVM depth when the layout needs it (#590).
+   * An explicit user value always wins, including a deliberately shallow one.
+   * @param {object} cfg   resolved config (mutated and returned)
+   * @param {string} cwd
+   * @param {boolean} userSetDepth
+   * @returns {object} cfg
+   */
+  function _applyJvmDepth(cfg, cwd, userSetDepth) {
+    if (!userSetDepth && cfg.maxDepth < JVM_MAX_DEPTH && _isJvmLayout(cwd)) {
+      cfg.maxDepth = JVM_MAX_DEPTH;
+    }
+    return cfg;
+  }
+
+  /**
    * Load and merge configuration for a given working directory.
    *
    * @param {string} cwd - Project root directory
@@ -1802,7 +1851,7 @@ __factories["./src/config/loader"] = function(module, exports) {
       const cfg = deepClone(DEFAULTS);
       const detected = detectAutoSrcDirs(cwd, cfg.exclude);
       if (detected.length > 0) cfg.srcDirs = detected;
-      return cfg;
+      return _applyJvmDepth(cfg, cwd, false);
     }
 
     let userConfig;
@@ -1814,7 +1863,7 @@ __factories["./src/config/loader"] = function(module, exports) {
       const cfg = deepClone(DEFAULTS);
       const detected = detectAutoSrcDirs(cwd, cfg.exclude);
       if (detected.length > 0) cfg.srcDirs = detected;
-      return cfg;
+      return _applyJvmDepth(cfg, cwd, false);
     }
 
     // Warn on unknown keys (helps catch typos)
@@ -1866,7 +1915,8 @@ __factories["./src/config/loader"] = function(module, exports) {
     } else if (Array.isArray(merged.adapters) && !userConfig.outputs) {
       merged.outputs = merged.adapters.filter((a) => ['copilot','claude','cursor','windsurf'].includes(a));
     }
-    return merged;
+
+    return _applyJvmDepth(merged, cwd, userConfig.maxDepth !== undefined);
   }
 
   function deepClone(obj) {
@@ -4111,49 +4161,13 @@ __factories["./src/eval/analyzer"] = function(module, exports) {
   const path = require('path');
 
   // Extension → extractor name (mirrors EXT_MAP in gen-context.js)
-  const EXT_MAP = {
-    '.ts': 'typescript', '.tsx': 'typescript',
-    '.js': 'javascript', '.jsx': 'javascript', '.mjs': 'javascript', '.cjs': 'javascript',
-    '.py': 'python',     '.pyw': 'python',
-    '.java': 'java',
-    '.kt': 'kotlin',     '.kts': 'kotlin',
-    '.go': 'go',
-    '.rs': 'rust',
-    '.cs': 'csharp',
-    '.cpp': 'cpp', '.c': 'cpp', '.h': 'cpp', '.hpp': 'cpp', '.cc': 'cpp',
-    '.rb': 'ruby',       '.rake': 'ruby',
-    '.php': 'php',
-    '.swift': 'swift',
-    '.dart': 'dart',
-    '.scala': 'scala',   '.sc': 'scala',
-    '.lua': 'lua',
-    '.gd': 'gdscript',
-    '.r': 'r',           '.R': 'r',
-    '.vue': 'vue',
-    '.svelte': 'svelte',
-    '.html': 'html',     '.htm': 'html',
-    '.css': 'css',       '.scss': 'css', '.sass': 'css', '.less': 'css',
-    '.yml': 'yaml',      '.yaml': 'yaml',
-    '.sh': 'shell',      '.bash': 'shell', '.zsh': 'shell', '.fish': 'shell',
-    '.toml': 'toml',
-    '.properties': 'properties',
-    '.xml': 'xml',
-    '.md': 'markdown',
-    // Phase C specialized extractors
-    '.tsx': 'typescript_react',
-    '.vue': 'vue_sfc',
-  };
-
-  function isDockerfile(name) {
-    return name === 'Dockerfile' || name.startsWith('Dockerfile.');
-  }
+  // Extractor resolution goes through the dispatcher — the single source of
+  // truth (#591). This file previously kept its own copy, which had drifted to
+  // a dead duplicate `.vue` key.
+  const { langFor } = __require('./src/extractors/dispatch');
 
   function getExtractorName(filePath) {
-    const base = path.basename(filePath);
-    const ext  = path.extname(base).toLowerCase();
-    if (EXT_MAP[ext]) return EXT_MAP[ext];
-    if (isDockerfile(base)) return 'dockerfile';
-    return null;
+    return langFor(filePath);
   }
 
   /** Rough token estimate: chars / 4 */
@@ -5450,6 +5464,14 @@ __factories["./src/extractors/coverage"] = function(module, exports) {
 // ── ./src/extractors/cpp ──
 __factories["./src/extractors/cpp"] = function(module, exports) {
   
+  const { capWithNotice, capMembersWithNotice } = __require('./src/util/truncate');
+
+  // Ceilings sit above the default `maxSigsPerFile` so the configured budget
+  // governs output rather than a literal buried here, and omissions are disclosed
+  // — an undisclosed cap looks like a class that simply has eight methods (#576).
+  const MEMBER_LIMIT = 8;
+  const PER_FILE_LIMIT = 25;
+
   /**
    * Extract signatures from C/C++ source code.
    * @param {string} src - Raw file content
@@ -5480,7 +5502,7 @@ __factories["./src/extractors/cpp"] = function(module, exports) {
       sigs.push(`${m[2]}(${normalizeParams(m[3])})${retStr}`);
     }
 
-    return sigs.slice(0, 25);
+    return capWithNotice(sigs, PER_FILE_LIMIT, 'signatures');
   }
 
   function extractBlock(src, startIndex) {
@@ -5503,7 +5525,7 @@ __factories["./src/extractors/cpp"] = function(module, exports) {
       const retStr = ret ? ` → ${ret}` : '';
       members.push(`${m[2]}(${normalizeParams(m[3])})${retStr}`);
     }
-    return members.slice(0, 8);
+    return capWithNotice(members, MEMBER_LIMIT, 'members');
   }
 
   function normalizeParams(params) {
@@ -5524,6 +5546,13 @@ __factories["./src/extractors/cpp"] = function(module, exports) {
 __factories["./src/extractors/csharp"] = function(module, exports) {
   
   const { lineAt, withAnchor } = __require('./src/extractors/line-anchor');
+  const { capWithNotice, capMembersWithNotice } = __require('./src/util/truncate');
+
+  // Ceilings sit above the default `maxSigsPerFile` so the configured budget
+  // governs output rather than a literal buried here, and omissions are disclosed
+  // — an undisclosed cap looks like a class that simply has eight methods (#576).
+  const MEMBER_LIMIT = 8;
+  const PER_FILE_LIMIT = 25;
 
   /**
    * Extract signatures from C# source code.
@@ -5548,11 +5577,12 @@ __factories["./src/extractors/csharp"] = function(module, exports) {
       const block = extractBlock(stripped, bodyStart);
       sigs.push(withAnchor(`${m[1]} ${m[2]}`, lineAt(stripped, declIdx), lineAt(stripped, bodyStart + block.length)));
       for (const meth of extractMembers(block)) {
-        sigs.push(withAnchor(`  ${meth.text}`, lineAt(stripped, bodyStart + meth.declIdx), lineAt(stripped, bodyStart + meth.endIdx)));
+        // The disclosure marker carries no offsets; anchor it at the class body.
+        sigs.push(withAnchor(`  ${meth.text}`, lineAt(stripped, bodyStart + (meth.declIdx || 0)), lineAt(stripped, bodyStart + (meth.endIdx || 0))));
       }
     }
 
-    return sigs.slice(0, 25);
+    return capWithNotice(sigs, PER_FILE_LIMIT, 'signatures');
   }
 
   function extractBlock(src, startIndex) {
@@ -5578,7 +5608,7 @@ __factories["./src/extractors/csharp"] = function(module, exports) {
         endIdx: m.index + m[0].length,
       });
     }
-    return members.slice(0, 8);
+    return capMembersWithNotice(members, MEMBER_LIMIT);
   }
 
   function normalizeParams(params) {
@@ -5598,6 +5628,12 @@ __factories["./src/extractors/csharp"] = function(module, exports) {
 // ── ./src/extractors/css ──
 __factories["./src/extractors/css"] = function(module, exports) {
   
+  const { capWithNotice } = __require('./src/util/truncate');
+
+  // Ceiling sits above the default `maxSigsPerFile` so the configured budget
+  // governs output rather than a literal buried here, and omissions are disclosed (#576).
+  const PER_FILE_LIMIT = 25;
+
   /**
    * Extract signatures from CSS/SCSS/SASS/Less source code.
    * @param {string} src - Raw file content
@@ -5661,7 +5697,7 @@ __factories["./src/extractors/css"] = function(module, exports) {
       for (const name of selected) sigs.push(`.${name}`);
     }
 
-    return sigs.slice(0, 25);
+    return capWithNotice(sigs, PER_FILE_LIMIT, 'signatures');
   }
 
   module.exports = { extract };
@@ -5672,6 +5708,13 @@ __factories["./src/extractors/css"] = function(module, exports) {
 __factories["./src/extractors/dart"] = function(module, exports) {
   
   const { lineAt, withAnchor } = __require('./src/extractors/line-anchor');
+  const { capWithNotice, capMembersWithNotice } = __require('./src/util/truncate');
+
+  // Ceilings sit above the default `maxSigsPerFile` so the configured budget
+  // governs output rather than a literal buried here, and omissions are disclosed
+  // — an undisclosed cap looks like a class that simply has eight methods (#576).
+  const MEMBER_LIMIT = 8;
+  const PER_FILE_LIMIT = 25;
 
   /**
    * Extract signatures from Dart source code.
@@ -5707,7 +5750,8 @@ __factories["./src/extractors/dart"] = function(module, exports) {
       const block = extractBlock(stripped, bodyStart);
       sigs.push(withAnchor(`${abs}class ${m[1]}`, lineAt(stripped, m.index), lineAt(stripped, bodyStart + block.length)));
       for (const meth of extractMembers(block)) {
-        sigs.push(withAnchor(`  ${meth.text}`, lineAt(stripped, bodyStart + meth.declIdx), lineAt(stripped, bodyStart + meth.endIdx)));
+        // The disclosure marker carries no offsets; anchor it at the class body.
+        sigs.push(withAnchor(`  ${meth.text}`, lineAt(stripped, bodyStart + (meth.declIdx || 0)), lineAt(stripped, bodyStart + (meth.endIdx || 0))));
       }
     }
 
@@ -5719,7 +5763,7 @@ __factories["./src/extractors/dart"] = function(module, exports) {
       sigs.push(withAnchor(`${m[2]}(${normalizeParams(m[3])})${retStr}`, s, e));
     }
 
-    return sigs.slice(0, 25);
+    return capWithNotice(sigs, PER_FILE_LIMIT, 'signatures');
   }
 
   function extractBlock(src, startIndex) {
@@ -5744,7 +5788,7 @@ __factories["./src/extractors/dart"] = function(module, exports) {
         endIdx: m.index + m[0].length,
       });
     }
-    return members.slice(0, 8);
+    return capMembersWithNotice(members, MEMBER_LIMIT);
   }
 
   function normalizeParams(params) {
@@ -5926,7 +5970,6 @@ __factories["./src/extractors/dispatch"] = function(module, exports) {
     lua: __require('./src/extractors/lua'),
     gdscript: __require('./src/extractors/gdscript'),
     r: __require('./src/extractors/r'),
-    vue: __require('./src/extractors/vue'),
     vue_sfc: __require('./src/extractors/vue_sfc'),
     svelte: __require('./src/extractors/svelte'),
     html: __require('./src/extractors/html'),
@@ -5945,6 +5988,21 @@ __factories["./src/extractors/dispatch"] = function(module, exports) {
     generic: __require('./src/extractors/generic'),
   };
 
+  /**
+   * Extension → extractor module name. **The single source of truth for
+   * extractor resolution** (#591).
+   *
+   * Anything that decides *which extractor module to load* must go through
+   * `langFor` rather than declaring its own copy. Three copies existed and two
+   * had drifted: `src/eval/analyzer.js` carried a dead duplicate `.vue` key, and
+   * the `--diagnose-extractors` map pointed at `vue.js` after that module was
+   * deleted — which is how an unreachable extractor survived unnoticed (#582).
+   *
+   * Not every extension map in the codebase belongs here. `language-detector.js`
+   * maps `.tsx → typescript` for language *statistics*, and `dashboard.js` keeps
+   * short display *labels*. Both are correct for their purpose and deliberately
+   * differ from resolution — folding them in would miscount languages.
+   */
   const EXT_MAP = {
     '.ts': 'typescript', '.tsx': 'typescript_react',
     '.js': 'javascript', '.jsx': 'javascript', '.mjs': 'javascript', '.cjs': 'javascript',
@@ -6006,13 +6064,19 @@ __factories["./src/extractors/dispatch"] = function(module, exports) {
     }
   }
 
-  module.exports = { extractFile, langFor };
+  module.exports = { extractFile, langFor, EXT_MAP };
   
 };
 
 // ── ./src/extractors/dockerfile ──
 __factories["./src/extractors/dockerfile"] = function(module, exports) {
   
+  const { capWithNotice } = __require('./src/util/truncate');
+
+  // Ceiling sits above the default `maxSigsPerFile` so the configured budget
+  // governs output rather than a literal buried here, and omissions are disclosed (#576).
+  const PER_FILE_LIMIT = 25;
+
   /**
    * Extract signatures from Dockerfiles.
    * @param {string} src - Raw file content
@@ -6056,7 +6120,7 @@ __factories["./src/extractors/dockerfile"] = function(module, exports) {
       if (m) sigs.push(`ARG ${m[1]}`);
     }
 
-    return sigs.slice(0, 25);
+    return capWithNotice(sigs, PER_FILE_LIMIT, 'signatures');
   }
 
   module.exports = { extract };
@@ -6066,6 +6130,16 @@ __factories["./src/extractors/dockerfile"] = function(module, exports) {
 // ── ./src/extractors/gdscript ──
 __factories["./src/extractors/gdscript"] = function(module, exports) {
   
+  const { capWithNotice } = __require('./src/util/truncate');
+
+  // Ceiling sits above the default `maxSigsPerFile` so the configured budget
+  // governs output rather than a literal buried here, and omissions are disclosed (#576).
+  const PER_FILE_LIMIT = 25;
+
+  // Ceilings disclose what they drop rather than truncating silently (#576).
+  const MEMBER_LIMIT = 6;
+  const ENUM_LIMIT = 24;
+
   /**
    * Extract signatures from Godot GDScript source code.
    * @param {string} src - Raw file content
@@ -6110,7 +6184,7 @@ __factories["./src/extractors/gdscript"] = function(module, exports) {
         .split(',')
         .map((s) => s.trim().split(/\s*=/)[0].trim())
         .filter(Boolean);
-      sigs.push(`${indent}enum ${m[1]} { ${members.slice(0, 6).join(', ')} }`);
+      sigs.push(`${indent}enum ${m[1]} { ${capWithNotice(members, ENUM_LIMIT, 'values').join(', ')} }`);
     }
 
     let constCount = 0;
@@ -6158,7 +6232,7 @@ __factories["./src/extractors/gdscript"] = function(module, exports) {
       }
     }
 
-    return sigs.slice(0, 25);
+    return capWithNotice(sigs, PER_FILE_LIMIT, 'signatures');
   }
 
   function extractInnerMembers(stripped, startIndex) {
@@ -6176,7 +6250,7 @@ __factories["./src/extractors/gdscript"] = function(module, exports) {
         members.push(`${staticKw}func ${fm[2]}(${params})${retStr}`);
       }
     }
-    return members.slice(0, 6);
+    return capWithNotice(members, MEMBER_LIMIT, 'members');
   }
 
   function normalizeParams(params) {
@@ -6233,6 +6307,11 @@ __factories["./src/extractors/generic"] = function(module, exports) {
 __factories["./src/extractors/go"] = function(module, exports) {
   
   const { lineAt, withAnchor } = __require('./src/extractors/line-anchor');
+  const { capWithNotice } = __require('./src/util/truncate');
+
+  // Ceiling sits above the default `maxSigsPerFile` so the configured budget
+  // governs output rather than a literal buried here, and omissions are disclosed (#576).
+  const PER_FILE_LIMIT = 25;
 
   /**
    * Extract signatures from Go source code.
@@ -6281,7 +6360,7 @@ __factories["./src/extractors/go"] = function(module, exports) {
       sigs.push(hinted(withAnchor(`func ${receiver}${m[2]}(${normalizeParams(m[3])})${retStr}`, lineAt(stripped, m.index), lineAt(stripped, end)), m[2]));
     }
 
-    return sigs.slice(0, 25);
+    return capWithNotice(sigs, PER_FILE_LIMIT, 'signatures');
   }
 
   function extractBlock(src, startIndex) {
@@ -6415,6 +6494,12 @@ __factories["./src/extractors/graphql"] = function(module, exports) {
 // ── ./src/extractors/html ──
 __factories["./src/extractors/html"] = function(module, exports) {
   
+  const { capWithNotice } = __require('./src/util/truncate');
+
+  // Ceiling sits above the default `maxSigsPerFile` so the configured budget
+  // governs output rather than a literal buried here, and omissions are disclosed (#576).
+  const PER_FILE_LIMIT = 25;
+
   /**
    * Extract signatures from HTML files.
    * Focuses on id/class attributes, forms, and script tags.
@@ -6448,7 +6533,7 @@ __factories["./src/extractors/html"] = function(module, exports) {
       sigs.push(`data-${m[0].match(/data-(\w[\w-]*)/i)[1]}: ${m[1]}`);
     }
 
-    return sigs.slice(0, 25);
+    return capWithNotice(sigs, PER_FILE_LIMIT, 'signatures');
   }
 
   module.exports = { extract };
@@ -6459,6 +6544,19 @@ __factories["./src/extractors/html"] = function(module, exports) {
 __factories["./src/extractors/java"] = function(module, exports) {
   
   const { lineAt, withAnchor } = __require('./src/extractors/line-anchor');
+  const { capWithNotice, capMembersWithNotice } = __require('./src/util/truncate');
+
+  // Class bodies are scanned to this many characters. Generated JVM sources
+  // (MyBatis/JPA entities) routinely run past 10KB, so the ceiling only guards
+  // against pathological input rather than trimming ordinary classes.
+  const MAX_CLASS_BODY_CHARS = 200000;
+
+  // Per-class member ceiling. Sits above the default `maxSigsPerFile` so the
+  // caller's configured budget governs the output rather than this file.
+  const MAX_MEMBERS_PER_CLASS = 120;
+
+  // Per-file signature ceiling, likewise above the configured default.
+  const MAX_SIGS_PER_FILE = 200;
 
   /**
    * Extract signatures from Java source code.
@@ -6486,17 +6584,20 @@ __factories["./src/extractors/java"] = function(module, exports) {
       const block = extractBlock(stripped, bodyStart);
       sigs.push(hinted(withAnchor(`${m[1]} ${m[2]}`, lineAt(stripped, m.index), lineAt(stripped, bodyStart + block.length)), m[2]));
       for (const meth of extractMembers(block)) {
-        sigs.push(hinted(withAnchor(`  ${meth.text}`, lineAt(stripped, bodyStart + meth.declIdx), lineAt(stripped, bodyStart + meth.endIdx)), meth.name));
+        // The disclosure marker carries no offsets; anchor it at the class body.
+        const declIdx = meth.declIdx || 0;
+        const endIdx = meth.endIdx || 0;
+        sigs.push(hinted(withAnchor(`  ${meth.text}`, lineAt(stripped, bodyStart + declIdx), lineAt(stripped, bodyStart + endIdx)), meth.name));
       }
     }
 
-    return sigs.slice(0, 25);
+    return capWithNotice(sigs, MAX_SIGS_PER_FILE, 'signatures');
   }
 
   function extractBlock(src, startIndex) {
     let depth = 1;
     let i = startIndex;
-    const end = Math.min(src.length, startIndex + 5000);
+    const end = Math.min(src.length, startIndex + MAX_CLASS_BODY_CHARS);
     while (i < end && depth > 0) {
       if (src[i] === '{') depth++;
       else if (src[i] === '}') depth--;
@@ -6518,7 +6619,7 @@ __factories["./src/extractors/java"] = function(module, exports) {
         endIdx: m.index + m[0].length,
       });
     }
-    return members.slice(0, 8);
+    return capMembersWithNotice(members, MAX_MEMBERS_PER_CLASS);
   }
 
   function normalizeParams(params) {
@@ -6791,6 +6892,13 @@ __factories["./src/extractors/javascript"] = function(module, exports) {
 __factories["./src/extractors/kotlin"] = function(module, exports) {
   
   const { lineAt, withAnchor } = __require('./src/extractors/line-anchor');
+  const { capWithNotice, capMembersWithNotice } = __require('./src/util/truncate');
+
+  // Ceilings sit above the default `maxSigsPerFile` so the configured budget
+  // governs output rather than a literal buried here, and omissions are disclosed
+  // — an undisclosed cap looks like a class that simply has eight methods (#576).
+  const MEMBER_LIMIT = 8;
+  const PER_FILE_LIMIT = 25;
 
   /**
    * Extract signatures from Kotlin source code.
@@ -6825,7 +6933,8 @@ __factories["./src/extractors/kotlin"] = function(module, exports) {
       const block = extractBlock(stripped, bodyStart);
       sigs.push(withAnchor(`${m[1]} ${m[2]}`, lineAt(stripped, m.index), lineAt(stripped, bodyStart + block.length)));
       for (const meth of extractMembers(block)) {
-        sigs.push(withAnchor(`  ${meth.text}`, lineAt(stripped, bodyStart + meth.declIdx), lineAt(stripped, bodyStart + meth.endIdx)));
+        // The disclosure marker carries no offsets; anchor it at the class body.
+        sigs.push(withAnchor(`  ${meth.text}`, lineAt(stripped, bodyStart + (meth.declIdx || 0)), lineAt(stripped, bodyStart + (meth.endIdx || 0))));
       }
     }
 
@@ -6838,7 +6947,7 @@ __factories["./src/extractors/kotlin"] = function(module, exports) {
       sigs.push(withAnchor(`${suspend}fun ${m[1]}(${normalizeParams(m[2])})${retStr}`, s, e));
     }
 
-    return sigs.slice(0, 25);
+    return capWithNotice(sigs, PER_FILE_LIMIT, 'signatures');
   }
 
   function extractBlock(src, startIndex) {
@@ -6865,7 +6974,7 @@ __factories["./src/extractors/kotlin"] = function(module, exports) {
         endIdx: m.index + m[0].length,
       });
     }
-    return members.slice(0, 8);
+    return capMembersWithNotice(members, MEMBER_LIMIT);
   }
 
   function normalizeParams(params) {
@@ -6940,6 +7049,13 @@ __factories["./src/extractors/line-anchor"] = function(module, exports) {
 // ── ./src/extractors/lua ──
 __factories["./src/extractors/lua"] = function(module, exports) {
   
+  const { capWithNotice } = __require('./src/util/truncate');
+
+  // Ceiling discloses what it drops rather than truncating silently (#583).
+  // Collection runs to completion so the marker reports the true overflow —
+  // stopping early made r.js report "+1 more" where 50 were hidden (#584).
+  const PER_FILE_LIMIT = 30;
+
   /**
    * Extract signatures from Lua source code.
    *
@@ -6967,14 +7083,12 @@ __factories["./src/extractors/lua"] = function(module, exports) {
     // local foo = require('bar.baz') — useful module-surface hint, capped low.
     for (const m of stripped.matchAll(/^\s*(?:local\s+)?([A-Za-z_]\w*)\s*=\s*require\s*\(\s*['"]([A-Za-z0-9_.\/-]+)['"]\s*\)/gm)) {
       pushUnique(sigs, seen, `require ${m[2]} as ${m[1]}`);
-      if (sigs.length >= 30) return sigs.slice(0, 30);
     }
 
     // local function name(args)
     for (const m of stripped.matchAll(/^\s*local\s+function\s+([A-Za-z_]\w*)\s*\(([^)]*)\)/gm)) {
       if (m[1].startsWith('_')) continue;
       pushUnique(sigs, seen, `local function ${m[1]}(${normalizeParams(m[2])})${applyHint(hints, m[1])}`);
-      if (sigs.length >= 30) return sigs.slice(0, 30);
     }
 
     // function name(args), function M.name(args), function M:name(args)
@@ -6982,7 +7096,6 @@ __factories["./src/extractors/lua"] = function(module, exports) {
       const name = m[1];
       if (name.startsWith('_')) continue;
       pushUnique(sigs, seen, `function ${name}(${normalizeParams(m[2])})${applyHint(hints, name)}`);
-      if (sigs.length >= 30) return sigs.slice(0, 30);
     }
 
     // name = function(args), M.name = function(args), M:name = function(args)
@@ -6990,10 +7103,9 @@ __factories["./src/extractors/lua"] = function(module, exports) {
       const name = m[1];
       if (name.startsWith('_')) continue;
       pushUnique(sigs, seen, `${name} = function(${normalizeParams(m[2])})${applyHint(hints, name)}`);
-      if (sigs.length >= 30) return sigs.slice(0, 30);
     }
 
-    return sigs.slice(0, 30);
+    return capWithNotice(sigs, PER_FILE_LIMIT, 'signatures');
   }
 
   function pushUnique(out, seen, sig) {
@@ -7093,6 +7205,11 @@ __factories["./src/extractors/lua"] = function(module, exports) {
 // ── ./src/extractors/markdown ──
 __factories["./src/extractors/markdown"] = function(module, exports) {
   
+  const { capWithNotice } = __require('./src/util/truncate');
+
+  // Ceiling discloses what it drops rather than truncating silently (#583).
+  const PER_FILE_LIMIT = 40;
+
   /**
    * Lightweight markdown technical indexer.
    * Captures headings and fenced code block language hints only.
@@ -7117,7 +7234,7 @@ __factories["./src/extractors/markdown"] = function(module, exports) {
       sigs.push(`code-fence ${lang}`);
     }
 
-    return Array.from(new Set(sigs)).slice(0, 40);
+    return capWithNotice(Array.from(new Set(sigs)), PER_FILE_LIMIT, 'headings');
   }
 
   module.exports = { extract };
@@ -7267,6 +7384,13 @@ __factories["./src/extractors/patterns"] = function(module, exports) {
 __factories["./src/extractors/php"] = function(module, exports) {
   
   const { lineAt, withAnchor } = __require('./src/extractors/line-anchor');
+  const { capWithNotice, capMembersWithNotice } = __require('./src/util/truncate');
+
+  // Ceilings sit above the default `maxSigsPerFile` so the configured budget
+  // governs output rather than a literal buried here, and omissions are disclosed
+  // — an undisclosed cap looks like a class that simply has eight methods (#576).
+  const MEMBER_LIMIT = 8;
+  const PER_FILE_LIMIT = 25;
 
   /**
    * Extract signatures from PHP source code.
@@ -7306,7 +7430,8 @@ __factories["./src/extractors/php"] = function(module, exports) {
       const block = extractBlock(stripped, bodyStart);
       sigs.push(withAnchor(`${kind} ${m[1]}`, lineAt(stripped, m.index), lineAt(stripped, bodyStart + block.length)));
       for (const meth of extractMembers(block)) {
-        sigs.push(withAnchor(`  ${meth.text}`, lineAt(stripped, bodyStart + meth.declIdx), lineAt(stripped, bodyStart + meth.endIdx)));
+        // The disclosure marker carries no offsets; anchor it at the class body.
+        sigs.push(withAnchor(`  ${meth.text}`, lineAt(stripped, bodyStart + (meth.declIdx || 0)), lineAt(stripped, bodyStart + (meth.endIdx || 0))));
       }
     }
 
@@ -7318,7 +7443,7 @@ __factories["./src/extractors/php"] = function(module, exports) {
       sigs.push(withAnchor(`function ${m[1]}(${normalizeParams(m[2])})${retStr}`, s, e));
     }
 
-    return sigs.slice(0, 25);
+    return capWithNotice(sigs, PER_FILE_LIMIT, 'signatures');
   }
 
   function extractBlock(src, startIndex) {
@@ -7346,7 +7471,7 @@ __factories["./src/extractors/php"] = function(module, exports) {
         endIdx: m.index + m[0].length,
       });
     }
-    return members.slice(0, 8);
+    return capMembersWithNotice(members, MEMBER_LIMIT);
   }
 
   function normalizeParams(params) {
@@ -7440,6 +7565,11 @@ __factories["./src/extractors/prdiff"] = function(module, exports) {
 // ── ./src/extractors/properties ──
 __factories["./src/extractors/properties"] = function(module, exports) {
   
+  const { capWithNotice } = __require('./src/util/truncate');
+
+  // Ceiling discloses what it drops rather than truncating silently (#583).
+  const PER_FILE_LIMIT = 50;
+
   /**
    * Extract signatures from .properties configuration files.
    * Captures key names, grouped by prefixes where possible.
@@ -7471,7 +7601,7 @@ __factories["./src/extractors/properties"] = function(module, exports) {
       sigs.push(`key ${key}`);
     }
 
-    return Array.from(new Set(sigs)).slice(0, 50);
+    return capWithNotice(Array.from(new Set(sigs)), PER_FILE_LIMIT, 'keys');
   }
 
   module.exports = { extract };
@@ -7550,6 +7680,11 @@ __factories["./src/extractors/python"] = function(module, exports) {
   
   const path = require('path');
   const { lineAt } = __require('./src/extractors/line-anchor');
+  const { capWithNotice } = __require('./src/util/truncate');
+
+  // Ceiling sits above the default `maxSigsPerFile` so the configured budget
+  // governs output rather than a literal buried here, and omissions are disclosed (#576).
+  const PER_FILE_LIMIT = 30;
 
   /**
    * 1-based line of the last source line belonging to a top-level (indent 0)
@@ -7684,7 +7819,7 @@ __factories["./src/extractors/python"] = function(module, exports) {
       }
     }
 
-    return sigs.slice(0, 30);
+    return capWithNotice(sigs, PER_FILE_LIMIT, 'signatures');
   }
 
   function extractClassMethods(stripped, startIndex) {
@@ -7895,6 +8030,12 @@ __factories["./src/extractors/python_dataclass"] = function(module, exports) {
 // ── ./src/extractors/r ──
 __factories["./src/extractors/r"] = function(module, exports) {
   
+  const { capWithNotice } = __require('./src/util/truncate');
+
+  // Ceiling sits above the default `maxSigsPerFile` so the configured budget
+  // governs output rather than a literal buried here, and omissions are disclosed (#576).
+  const PER_FILE_LIMIT = 30;
+
   /**
    * Extract signatures from R source code.
    *
@@ -7933,7 +8074,7 @@ __factories["./src/extractors/r"] = function(module, exports) {
     //   ClassName <- R6::R6Class(...)
     const r6Re = /([\w.]+)\s*(?:<<-|<-|=)\s*(?:R6::)?R6Class\s*\(/g;
     let m;
-    while ((m = r6Re.exec(stripped)) !== null && sigs.length < 30) {
+    while ((m = r6Re.exec(stripped)) !== null) {
       const name = m[1];
       if (name.startsWith('.')) continue;
       const openIdx = r6Re.lastIndex - 1;
@@ -7944,7 +8085,6 @@ __factories["./src/extractors/r"] = function(module, exports) {
       sigs.push(`${name} <- R6Class("${classNameLit}")` + applyHint(docHints, name));
       for (const memberSig of extractListMethods(body, 8)) {
         sigs.push('  ' + memberSig);
-        if (sigs.length >= 30) break;
       }
       consumedRanges.push([m.index, closeIdx]);
       r6Re.lastIndex = closeIdx;
@@ -7954,7 +8094,7 @@ __factories["./src/extractors/r"] = function(module, exports) {
     //   ClassName <- new_class("ClassName", properties = list(...))
     const s7Classes = new Set();
     const s7Re = /([\w.]+)\s*(?:<<-|<-|=)\s*(?:S7::)?new_class\s*\(/g;
-    while ((m = s7Re.exec(stripped)) !== null && sigs.length < 30) {
+    while ((m = s7Re.exec(stripped)) !== null) {
       const name = m[1];
       if (name.startsWith('.')) continue;
       const openIdx = s7Re.lastIndex - 1;
@@ -7971,7 +8111,7 @@ __factories["./src/extractors/r"] = function(module, exports) {
 
     // S7 method dispatch: `method(generic, ClassName) <- function(args)`
     const s7MethodRe = /^[ \t]*method\s*\(\s*([\w.]+)\s*,\s*([\w.]+)\s*\)\s*(?:<<-|<-|=)\s*function\s*\(/gm;
-    while ((m = s7MethodRe.exec(stripped)) !== null && sigs.length < 30) {
+    while ((m = s7MethodRe.exec(stripped)) !== null) {
       if (!s7Classes.has(m[2])) continue;
       const argsStart = s7MethodRe.lastIndex - 1;
       const args = readBalancedParens(stripped, argsStart);
@@ -7984,7 +8124,7 @@ __factories["./src/extractors/r"] = function(module, exports) {
     // Skip matches whose position falls inside an R6/S7 class body — those have
     // already been emitted as indented members.
     const funcRe = /^(?:[ \t]*)([\w.]+)\s*(?:<<-|<-|=)\s*function\s*\(/gm;
-    while ((m = funcRe.exec(stripped)) !== null && sigs.length < 30) {
+    while ((m = funcRe.exec(stripped)) !== null) {
       const name = m[1];
       if (name.startsWith('.')) continue;
       if (inAnyRange(m.index, consumedRanges)) continue;
@@ -7996,19 +8136,16 @@ __factories["./src/extractors/r"] = function(module, exports) {
 
     // ── S4 ────────────────────────────────────────────────────────────────────
     for (const sm of stripped.matchAll(/^[ \t]*setGeneric\s*\(\s*["']([\w.]+)["']/gm)) {
-      if (sigs.length >= 30) break;
       sigs.push(`setGeneric("${sm[1]}")`);
     }
     for (const sm of stripped.matchAll(/^[ \t]*setMethod\s*\(\s*["']([\w.]+)["']\s*,\s*["']([\w.]+)["']/gm)) {
-      if (sigs.length >= 30) break;
       sigs.push(`setMethod("${sm[1]}", "${sm[2]}")`);
     }
     for (const sm of stripped.matchAll(/^[ \t]*setClass\s*\(\s*["']([\w.]+)["']/gm)) {
-      if (sigs.length >= 30) break;
       sigs.push(`setClass("${sm[1]}")`);
     }
 
-    return sigs.slice(0, 30);
+    return capWithNotice(sigs, PER_FILE_LIMIT, 'signatures');
   }
 
   /**
@@ -8172,6 +8309,12 @@ __factories["./src/extractors/r"] = function(module, exports) {
 // ── ./src/extractors/ruby ──
 __factories["./src/extractors/ruby"] = function(module, exports) {
   
+  const { capWithNotice } = __require('./src/util/truncate');
+
+  // Ceiling sits above the default `maxSigsPerFile` so the configured budget
+  // governs output rather than a literal buried here, and omissions are disclosed (#576).
+  const PER_FILE_LIMIT = 25;
+
   /**
    * Extract signatures from Ruby source code.
    * @param {string} src - Raw file content
@@ -8206,7 +8349,7 @@ __factories["./src/extractors/ruby"] = function(module, exports) {
       sigs.push(`def ${m[1]}${params}${retStr}`);
     }
 
-    return sigs.slice(0, 25);
+    return capWithNotice(sigs, PER_FILE_LIMIT, 'signatures');
   }
 
   function normalizeParams(params) {
@@ -8231,6 +8374,11 @@ __factories["./src/extractors/ruby"] = function(module, exports) {
 __factories["./src/extractors/rust"] = function(module, exports) {
   
   const { lineAt, withAnchor } = __require('./src/extractors/line-anchor');
+  const { capWithNotice } = __require('./src/util/truncate');
+
+  // Ceiling sits above the default `maxSigsPerFile` so the configured budget
+  // governs output rather than a literal buried here, and omissions are disclosed (#576).
+  const PER_FILE_LIMIT = 25;
 
   /**
    * Extract signatures from Rust source code.
@@ -8300,7 +8448,7 @@ __factories["./src/extractors/rust"] = function(module, exports) {
       sigs.push(hinted(withAnchor(`pub ${asyncKw}fn ${m[1]}(${normalizeParams(m[2])})${retStr}`, s, e), m[1]));
     }
 
-    return sigs.slice(0, 25);
+    return capWithNotice(sigs, PER_FILE_LIMIT, 'signatures');
   }
 
   function extractBlock(src, startIndex) {
@@ -8373,6 +8521,13 @@ __factories["./src/extractors/rust"] = function(module, exports) {
 __factories["./src/extractors/scala"] = function(module, exports) {
   
   const { lineAt, withAnchor } = __require('./src/extractors/line-anchor');
+  const { capWithNotice, capMembersWithNotice } = __require('./src/util/truncate');
+
+  // Ceilings sit above the default `maxSigsPerFile` so the configured budget
+  // governs output rather than a literal buried here, and omissions are disclosed
+  // — an undisclosed cap looks like a class that simply has eight methods (#576).
+  const MEMBER_LIMIT = 8;
+  const PER_FILE_LIMIT = 25;
 
   /**
    * Extract signatures from Scala source code.
@@ -8399,7 +8554,8 @@ __factories["./src/extractors/scala"] = function(module, exports) {
       const block = extractBlock(stripped, bodyStart);
       sigs.push(withAnchor(`${kind} ${m[1]}`, lineAt(stripped, m.index), lineAt(stripped, bodyStart + block.length)));
       for (const fn of extractMembers(block)) {
-        sigs.push(withAnchor(`  ${fn.text}`, lineAt(stripped, bodyStart + fn.declIdx), lineAt(stripped, bodyStart + fn.endIdx)));
+        // The disclosure marker carries no offsets; anchor it at the class body.
+        sigs.push(withAnchor(`  ${fn.text}`, lineAt(stripped, bodyStart + (fn.declIdx || 0)), lineAt(stripped, bodyStart + (fn.endIdx || 0))));
       }
     }
 
@@ -8413,7 +8569,7 @@ __factories["./src/extractors/scala"] = function(module, exports) {
       sigs.push(withAnchor(`def ${m[1]}${params}${retStr}`, line, line));
     }
 
-    return sigs.slice(0, 25);
+    return capWithNotice(sigs, PER_FILE_LIMIT, 'signatures');
   }
 
   function extractBlock(src, startIndex) {
@@ -8440,7 +8596,7 @@ __factories["./src/extractors/scala"] = function(module, exports) {
         endIdx: m.index + m[0].length,
       });
     }
-    return members.slice(0, 8);
+    return capMembersWithNotice(members, MEMBER_LIMIT);
   }
 
   function normalizeParams(params) {
@@ -8559,6 +8715,12 @@ __factories["./src/extractors/scan"] = function(module, exports) {
 // ── ./src/extractors/shell ──
 __factories["./src/extractors/shell"] = function(module, exports) {
   
+  const { capWithNotice } = __require('./src/util/truncate');
+
+  // Ceiling sits above the default `maxSigsPerFile` so the configured budget
+  // governs output rather than a literal buried here, and omissions are disclosed (#576).
+  const PER_FILE_LIMIT = 25;
+
   /**
    * Extract signatures from shell scripts (bash, zsh, fish).
    * @param {string} src - Raw file content
@@ -8596,7 +8758,7 @@ __factories["./src/extractors/shell"] = function(module, exports) {
       }
     }
 
-    return sigs.slice(0, 25);
+    return capWithNotice(sigs, PER_FILE_LIMIT, 'signatures');
   }
 
   module.exports = { extract };
@@ -8703,6 +8865,12 @@ __factories["./src/extractors/sql"] = function(module, exports) {
 // ── ./src/extractors/svelte ──
 __factories["./src/extractors/svelte"] = function(module, exports) {
   
+  const { capWithNotice } = __require('./src/util/truncate');
+
+  // Ceiling sits above the default `maxSigsPerFile` so the configured budget
+  // governs output rather than a literal buried here, and omissions are disclosed (#576).
+  const PER_FILE_LIMIT = 25;
+
   /**
    * Extract signatures from Svelte components.
    * @param {string} src - Raw file content
@@ -8745,7 +8913,7 @@ __factories["./src/extractors/svelte"] = function(module, exports) {
       sigs.push(`$: ${m[1]}`);
     }
 
-    return sigs.slice(0, 25);
+    return capWithNotice(sigs, PER_FILE_LIMIT, 'signatures');
   }
 
   function normalizeParams(params) {
@@ -8766,6 +8934,13 @@ __factories["./src/extractors/svelte"] = function(module, exports) {
 __factories["./src/extractors/swift"] = function(module, exports) {
   
   const { lineAt, withAnchor } = __require('./src/extractors/line-anchor');
+  const { capWithNotice, capMembersWithNotice } = __require('./src/util/truncate');
+
+  // Ceilings sit above the default `maxSigsPerFile` so the configured budget
+  // governs output rather than a literal buried here, and omissions are disclosed
+  // — an undisclosed cap looks like a class that simply has eight methods (#576).
+  const MEMBER_LIMIT = 8;
+  const PER_FILE_LIMIT = 25;
 
   /**
    * Extract signatures from Swift source code.
@@ -8801,7 +8976,8 @@ __factories["./src/extractors/swift"] = function(module, exports) {
       const block = extractBlock(stripped, bodyStart);
       sigs.push(withAnchor(`${m[1]} ${m[2]}`, lineAt(stripped, m.index), lineAt(stripped, bodyStart + block.length)));
       for (const fn of extractMembers(block)) {
-        sigs.push(withAnchor(`  ${fn.text}`, lineAt(stripped, bodyStart + fn.declIdx), lineAt(stripped, bodyStart + fn.endIdx)));
+        // The disclosure marker carries no offsets; anchor it at the class body.
+        sigs.push(withAnchor(`  ${fn.text}`, lineAt(stripped, bodyStart + (fn.declIdx || 0)), lineAt(stripped, bodyStart + (fn.endIdx || 0))));
       }
     }
 
@@ -8813,7 +8989,7 @@ __factories["./src/extractors/swift"] = function(module, exports) {
       sigs.push(withAnchor(`${asyncKw}func ${m[1]}(${normalizeParams(m[2])})${retStr}`, s, e));
     }
 
-    return sigs.slice(0, 25);
+    return capWithNotice(sigs, PER_FILE_LIMIT, 'signatures');
   }
 
   function extractBlock(src, startIndex) {
@@ -8839,7 +9015,7 @@ __factories["./src/extractors/swift"] = function(module, exports) {
         endIdx: m.index + m[0].length,
       });
     }
-    return members.slice(0, 8);
+    return capMembersWithNotice(members, MEMBER_LIMIT);
   }
 
   function normalizeParams(params) {
@@ -8974,6 +9150,11 @@ __factories["./src/extractors/todos"] = function(module, exports) {
 // ── ./src/extractors/toml ──
 __factories["./src/extractors/toml"] = function(module, exports) {
   
+  const { capWithNotice } = __require('./src/util/truncate');
+
+  // Ceiling discloses what it drops rather than truncating silently (#583).
+  const PER_FILE_LIMIT = 40;
+
   /**
    * Extract signatures from TOML configuration files.
    * Focuses on section/table names and high-value keys.
@@ -9010,7 +9191,7 @@ __factories["./src/extractors/toml"] = function(module, exports) {
       }
     }
 
-    return Array.from(new Set(sigs)).slice(0, 40);
+    return capWithNotice(Array.from(new Set(sigs)), PER_FILE_LIMIT, 'entries');
   }
 
   module.exports = { extract };
@@ -9350,6 +9531,11 @@ __factories["./src/extractors/typescript"] = function(module, exports) {
 // ── ./src/extractors/typescript_react ──
 __factories["./src/extractors/typescript_react"] = function(module, exports) {
   
+  const { capWithNotice } = __require('./src/util/truncate');
+
+  // Ceiling discloses what it drops rather than truncating silently (#583).
+  const PER_FILE_LIMIT = 50;
+
   /**
    * Extract React component signatures from .tsx files.
    * Captures component props interfaces, hooks usage, and exports.
@@ -9404,91 +9590,7 @@ __factories["./src/extractors/typescript_react"] = function(module, exports) {
       sigs.push(`handler on${h}`);
     }
 
-    return Array.from(new Set(sigs)).slice(0, 50);
-  }
-
-  module.exports = { extract };
-  
-};
-
-// ── ./src/extractors/vue ──
-__factories["./src/extractors/vue"] = function(module, exports) {
-  
-  /**
-   * Extract signatures from Vue single-file components.
-   * @param {string} src - Raw file content
-   * @returns {string[]} Array of signature strings
-   */
-  function extract(src) {
-    if (!src || typeof src !== 'string') return [];
-    const sigs = [];
-
-    // Extract component name from filename hint if present or defineComponent
-    const nameMatch = src.match(/name\s*:\s*['"](\w+)['"]/);
-    if (nameMatch) sigs.push(`component ${nameMatch[1]}`);
-
-    // Extract <script> block
-    const scriptMatch = src.match(/<script(?:\s[^>]*)?>(?:\s*)([\s\S]*?)<\/script>/i);
-    if (!scriptMatch) return sigs;
-
-    const script = scriptMatch[1]
-      .replace(/\/\/.*$/gm, '')
-      .replace(/\/\*[\s\S]*?\*\//g, '');
-
-    // Props
-    const propsMatch = script.match(/props\s*:\s*(\{[\s\S]*?\})/);
-    if (propsMatch) {
-      const propNames = [];
-      for (const m of propsMatch[1].matchAll(/^\s+(\w+)\s*:/gm)) {
-        propNames.push(m[1]);
-      }
-      if (propNames.length > 0) sigs.push(`props: [${propNames.join(', ')}]`);
-    }
-
-    // Methods in options API
-    const methodsMatch = script.match(/methods\s*:\s*\{([\s\S]*?)\},?\s*(?:computed|watch|mounted|created|data|\})/);
-    if (methodsMatch) {
-      for (const m of methodsMatch[1].matchAll(/^\s+(?:async\s+)?(\w+)\s*\(([^)]*)\)(?:\s*:\s*([^{=\n]+))?/gm)) {
-        if (m[1].startsWith('_')) continue;
-        const asyncKw = m[0].includes('async') ? 'async ' : '';
-        const retStr = m[3] ? ` → ${normalizeType(m[3])}` : '';
-        sigs.push(`  ${asyncKw}${m[1]}(${normalizeParams(m[2])})${retStr}`);
-      }
-    }
-
-    // Top-level functions in <script> (e.g., composition API helpers)
-    for (const m of script.matchAll(/^(?:export\s+)?(?:async\s+)?function\s+(\w+)\s*\(([^)]*)\)(?:\s*:\s*([^{=\n]+))?/gm)) {
-      if (m[1].startsWith('_')) continue;
-      const asyncKw = m[0].includes('async') ? 'async ' : '';
-      const retStr = m[3] ? ` → ${normalizeType(m[3])}` : '';
-      sigs.push(`${asyncKw}function ${m[1]}(${normalizeParams(m[2])})${retStr}`);
-    }
-
-    // defineProps (Composition API)
-    const definePropsMatch = script.match(/defineProps(?:<[^>]*>)?\s*\(\s*(\{[\s\S]*?\})\s*\)/);
-    if (definePropsMatch) {
-      const propNames = [];
-      for (const m of definePropsMatch[1].matchAll(/^\s+(\w+)\s*:/gm)) {
-        propNames.push(m[1]);
-      }
-      if (propNames.length > 0) sigs.push(`defineProps: [${propNames.join(', ')}]`);
-    }
-
-    // Emits
-    const emitsMatch = script.match(/(?:defineEmits|emits)\s*(?::\s*|\(\s*)(\[[\s\S]*?\])/);
-    if (emitsMatch) sigs.push(`emits: ${emitsMatch[1].replace(/\s+/g, ' ')}`);
-
-    return sigs.slice(0, 25);
-  }
-
-  function normalizeParams(params) {
-    if (!params) return '';
-    return params.trim().replace(/\s+/g, ' ');
-  }
-
-  function normalizeType(type) {
-    if (!type) return '';
-    return type.trim().replace(/[;\s]+$/g, '').replace(/\s+/g, ' ').slice(0, 25);
+    return capWithNotice(Array.from(new Set(sigs)), PER_FILE_LIMIT, 'signatures');
   }
 
   module.exports = { extract };
@@ -9651,6 +9753,12 @@ __factories["./src/extractors/xml"] = function(module, exports) {
 // ── ./src/extractors/yaml ──
 __factories["./src/extractors/yaml"] = function(module, exports) {
   
+  const { capWithNotice } = __require('./src/util/truncate');
+
+  // Ceiling sits above the default `maxSigsPerFile` so the configured budget
+  // governs output rather than a literal buried here, and omissions are disclosed (#576).
+  const PER_FILE_LIMIT = 25;
+
   /**
    * Extract signatures from YAML configuration files.
    * @param {string} src - Raw file content
@@ -9704,7 +9812,7 @@ __factories["./src/extractors/yaml"] = function(module, exports) {
       }
     }
 
-    return sigs.slice(0, 25);
+    return capWithNotice(sigs, PER_FILE_LIMIT, 'signatures');
   }
 
   module.exports = { extract };
@@ -11924,24 +12032,60 @@ __factories["./src/graph/builder"] = function(module, exports) {
     return { forward, reverse };
   }
 
+  // Directory names assumed when neither the caller nor the project config says
+  // otherwise. A Maven/Gradle module (`mall-portal/`, `service-api/`) matches none
+  // of them, which is why the config is consulted first.
+  const DEFAULT_SRC_DIRS = ['src', 'app', 'lib', 'R', 'inst'];
+
+  // Walk depth measured from EACH srcDir root, not from cwd — so this is not the
+  // same quantity as the extractor's cwd-relative `maxDepth` and must not be read
+  // from it. A standard Maven tree reaches `src/main/java/<group>/<artifact>/…`
+  // nine directories below its module root, so the previous ceiling of 8 silently
+  // dropped the deepest packages (on macrozheng/mall: every `service/impl/` class).
+  const DEFAULT_WALK_DEPTH = 12;
+
+  /**
+   * Source directories declared in the project's own config, or null when there
+   * is no readable config. Read directly rather than through `loadConfig`, which
+   * can fetch `extends` over the network and spawn a child process — neither is
+   * acceptable inside a graph build.
+   */
+  function _configuredSrcDirs(cwd) {
+    try {
+      const raw = fs.readFileSync(path.join(cwd, 'gen-context.config.json'), 'utf8');
+      const cfg = JSON.parse(raw);
+      if (Array.isArray(cfg.srcDirs) && cfg.srcDirs.length > 0) return cfg.srcDirs;
+    } catch (_) { /* absent or unparsable — fall back to the defaults */ }
+    return null;
+  }
+
   /**
    * Build a dependency graph scoped to a single cwd by walking all JS/TS/Py/Go
    * files under srcDirs. Useful for the MCP tool handler.
+   *
+   * srcDirs resolution order: explicit `opts.srcDirs` → `gen-context.config.json`
+   * → DEFAULT_SRC_DIRS. Without the config step the graph is empty on any repo
+   * whose sources do not sit under a conventionally-named directory.
    *
    * @param {string} cwd
    * @param {object} [opts]
    * @param {string[]} [opts.srcDirs]
    * @param {string[]} [opts.exclude]
+   * @param {number}   [opts.maxDepth] - walk depth from each srcDir root
    * @returns {{ forward: Map<string,string[]>, reverse: Map<string,string[]> }}
    */
   function buildFromCwd(cwd, opts) {
     // R-package layouts use `R/` and `inst/`; Shiny apps put helpers in `R/`.
     // The existence check below makes these no-ops in non-R projects.
-    const { srcDirs = ['src', 'app', 'lib', 'R', 'inst'], exclude = ['node_modules', '.git', 'dist', 'build'] } = opts || {};
+    const {
+      srcDirs = _configuredSrcDirs(cwd) || DEFAULT_SRC_DIRS,
+      exclude = ['node_modules', '.git', 'dist', 'build'],
+      maxDepth = DEFAULT_WALK_DEPTH,
+    } = opts || {};
     const excludeSet = new Set(exclude);
 
     function walkDir(dir, depth) {
-      if (depth > 8) return [];
+      if (depth > maxDepth) return [];
       let entries;
       try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return []; }
       const out = [];
@@ -11990,7 +12134,7 @@ __factories["./src/graph/builder"] = function(module, exports) {
     return build(files, cwd, ctx);
   }
 
-  module.exports = { build, buildFromCwd, extractFileDeps, normalizePath, loadAliasMap, resolveAlias };
+  module.exports = { build, buildFromCwd, extractFileDeps, normalizePath, loadAliasMap, resolveAlias, _configuredSrcDirs, DEFAULT_SRC_DIRS, DEFAULT_WALK_DEPTH };
   
 };
 
@@ -12245,6 +12389,44 @@ __factories["./src/graph/call-graph"] = function(module, exports) {
   // Java: methods + constructors with braced bodies. Statement-shaped matches
   // (calls, control flow) are rejected because their `)` is followed by `;`,
   // and keyword headers (`if`, `while`, …) fall to the NON_CALL guard.
+  // Words that can precede `name(` in a STATEMENT, so their presence means the
+  // line is not a method declaration.
+  const STMT_KEYWORDS = new Set([
+    'return', 'throw', 'else', 'do', 'try', 'case', 'yield', 'assert', 'new',
+    'if', 'while', 'for', 'switch', 'catch', 'synchronized', 'instanceof', 'await',
+  ]);
+
+  // Types a Java class declares it implements or extends, with generic arguments
+  // stripped and any package qualifier dropped: `implements Foo<Bar, Baz>` yields
+  // ['Foo'], never 'Baz>'. Also records whether the class is a Spring bean and
+  // whether it is @Primary, which is what disambiguates several implementations.
+  function javaTypeDecl(masked) {
+    const m = /(?:^|\n)[^\n]*?\bclass\s+([A-Za-z_$][\w$]*)([^{]*)\{/.exec(masked);
+    if (!m) return null;
+    const [, className, tail] = m;
+    const supers = [];
+    for (const kw of ['implements', 'extends']) {
+      const k = new RegExp('\\b' + kw + '\\s+([^{]*?)(?=\\b(?:implements|extends)\\b|$)').exec(tail);
+      if (!k) continue;
+      let depth = 0;
+      let cur = '';
+      for (const ch of k[1]) {
+        if (ch === '<') { depth++; continue; }
+        if (ch === '>') { depth--; continue; }
+        if (ch === ',' && depth === 0) { if (cur.trim()) supers.push(cur.trim()); cur = ''; continue; }
+        if (depth === 0) cur += ch;
+      }
+      if (cur.trim()) supers.push(cur.trim());
+    }
+    const head = masked.slice(0, m.index + m[0].length);
+    return {
+      className,
+      supers: supers.map((t) => t.split('.').pop().trim()).filter(Boolean),
+      isBean: /@(Service|Component|Repository|Controller|RestController)\b/.test(head),
+      isPrimary: /@Primary\b/.test(head),
+    };
+  }
+
   function javaDefs(masked) {
     const defs = [];
     const seen = new Set();
@@ -12261,11 +12443,24 @@ __factories["./src/graph/call-graph"] = function(module, exports) {
       // skip `throws A, B` up to the body `{` (same line — multi-line headers are skipped)
       let k = close + 1;
       while (k < masked.length && masked[k] !== '{' && masked[k] !== ';' && masked[k] !== '\n' && masked[k] !== '=') k++;
-      if (masked[k] !== '{') continue;
+      // A `;` here is an interface or abstract method DECLARATION. It owns no body,
+      // so it emits no calls — but in Spring the declared interface is what callers
+      // name, so without it as a node every controller→service edge has no target.
+      // Recorded with an empty body range: can receive edges, never produces them.
+      // `before` is everything between line start and the method name. A real
+      // declaration has modifiers or a return type there (`void chargeCard(`);
+      // a call statement has only whitespace (`identity(1);`) or a statement
+      // keyword (`return helper(a);`) — neither may be read as a declaration,
+      // or the call resolves to a phantom local def instead of the real target.
+      const headWord = (before.match(/([A-Za-z_$][\w$]*)\s*$/) || [])[1];
+      const isDecl = masked[k] === ';' && /\S/.test(before) && !STMT_KEYWORDS.has(headWord);
+      if (masked[k] !== '{' && !isDecl) continue;
       const key = name + ':' + k;
       if (seen.has(key)) continue;
       seen.add(key);
-      defs.push({ name, line: lineAt(masked, m.index + 1), bodyStart: k, bodyEnd: matchDelim(masked, k, '{', '}') });
+      defs.push(isDecl
+        ? { name, line: lineAt(masked, m.index + 1), bodyStart: k, bodyEnd: k }
+        : { name, line: lineAt(masked, m.index + 1), bodyStart: k, bodyEnd: matchDelim(masked, k, '{', '}') });
     }
     return defs;
   }
@@ -12319,7 +12514,7 @@ __factories["./src/graph/call-graph"] = function(module, exports) {
     const re = /([A-Za-z_$][\w$]*)\s*\(/g;
     let m;
     while ((m = re.exec(slice)) !== null) {
-      // skip a `.name(` method access (can't resolve the receiver deterministically)
+      // skip a `.name(` method access — resolved separately via receiverCallsInRange
       const before = slice[m.index - 1];
       if (before === '.') continue;
       if (!NON_CALL.has(m[1])) names.add(m[1]);
@@ -12327,16 +12522,75 @@ __factories["./src/graph/call-graph"] = function(module, exports) {
     return names;
   }
 
+  // Collect `receiver.method(` pairs within [start,end). A chained or computed
+  // receiver (`a.b().c(`, `arr[0].c(`) is skipped: only a plain identifier can be
+  // looked up in the declaration map, and guessing is worse than no edge.
+  function receiverCallsInRange(masked, start, end) {
+    const slice = masked.slice(start, end);
+    const out = [];
+    const re = /([A-Za-z_$][\w$]*)\s*\.\s*([A-Za-z_$][\w$]*)\s*\(/g;
+    let m;
+    while ((m = re.exec(slice)) !== null) {
+      const before = slice[m.index - 1];
+      if (before === '.' || before === ')' || before === ']') continue;
+      if (NON_CALL.has(m[2])) continue;
+      out.push({ receiver: m[1], method: m[2] });
+    }
+    return out;
+  }
+
+  // `private UserService userService;` / `UserService svc = new UserService();`
+  // / `for (OmsOrderItem item : list)` → { userService: 'UserService', … }.
+  // Declarations only: a bare assignment carries no type and is not inferred.
+  const DECL_RE = /(?:^|[;{}(,\n])\s*(?:(?:public|private|protected|static|final|volatile|transient)\s+)*([A-Z][\w$]*)(?:\s*<[^>;=(){}]*>)?(?:\s*\[\s*\])?\s+([a-z_$][\w$]*)\s*(?=[;=:)])/g;
+
+  function buildTypeMap(masked) {
+    const map = new Map();
+    let m;
+    DECL_RE.lastIndex = 0;
+    while ((m = DECL_RE.exec(masked)) !== null) {
+      const [, type, name] = m;
+      if (JVM_KEYWORDS.has(type) || JVM_KEYWORDS.has(name)) continue;
+      if (!map.has(name)) map.set(name, type);   // first declaration wins — deterministic
+    }
+    return map;
+  }
+
+  // Type names that are never a user class, so never a resolvable receiver type.
+  const JVM_KEYWORDS = new Set([
+    'return', 'new', 'if', 'else', 'for', 'while', 'switch', 'case', 'throw', 'catch',
+    'String', 'Integer', 'Long', 'Boolean', 'Double', 'Float', 'Object', 'List', 'Map',
+    'Set', 'Collection', 'Optional', 'Override', 'Autowired', 'Resource', 'Deprecated',
+  ]);
+
   // ── Public API ───────────────────────────────────────────────────────────────
 
-  function _walk(dir, excludeSet, out, depth) {
-    if (depth > 8) return;
+  // Walk depth from each srcDir root (not from cwd). A Maven module reaches
+  // `src/main/java/<group>/<artifact>/service/impl` nine directories down, so the
+  // previous ceiling of 8 never saw the classes that own the method bodies.
+  const DEFAULT_WALK_DEPTH = 12;
+
+  /**
+   * Source directories declared in the project's own config, or null. Read
+   * directly rather than through `loadConfig`, which can fetch `extends` over the
+   * network and spawn a child process — neither belongs inside a graph build.
+   */
+  function _configuredSrcDirs(cwd) {
+    try {
+      const cfg = JSON.parse(fs.readFileSync(path.join(cwd, 'gen-context.config.json'), 'utf8'));
+      if (Array.isArray(cfg.srcDirs) && cfg.srcDirs.length > 0) return cfg.srcDirs;
+    } catch (_) { /* absent or unparsable — fall back to the defaults */ }
+    return null;
+  }
+
+  function _walk(dir, excludeSet, out, depth, maxDepth) {
+    if (depth > (maxDepth === undefined ? DEFAULT_WALK_DEPTH : maxDepth)) return;
     let entries;
     try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return; }
     for (const e of entries) {
       if (excludeSet.has(e.name) || e.name.startsWith('.')) continue;
       const full = path.join(dir, e.name);
-      if (e.isDirectory()) _walk(full, excludeSet, out, depth + 1);
+      if (e.isDirectory()) _walk(full, excludeSet, out, depth + 1, maxDepth);
       else if (e.isFile()) {
         const ext = path.extname(e.name).toLowerCase();
         if (JS_EXTS.has(ext) || PY_EXTS.has(ext) || JAVA_EXTS.has(ext) || GO_EXTS.has(ext) || RS_EXTS.has(ext)) out.push(full);
@@ -12362,9 +12616,13 @@ __factories["./src/graph/call-graph"] = function(module, exports) {
     const excludeSet = new Set(opts.exclude || ['node_modules', '.git', 'dist', 'build', 'coverage', 'vendor']);
     let files = opts.files ? opts.files.map((f) => path.resolve(f)) : [];
     if (!opts.files) {
-      for (const sd of (opts.srcDirs || ['src', 'app', 'lib'])) {
+      // Same resolution order as the dependency graph (#560): explicit opts →
+      // the project's own config → the historical defaults. Without the config
+      // step this is empty on any repo whose sources are not under src/app/lib.
+      const srcDirs = opts.srcDirs || _configuredSrcDirs(cwd) || ['src', 'app', 'lib'];
+      for (const sd of srcDirs) {
         const abs = path.resolve(cwd, sd);
-        if (fs.existsSync(abs)) _walk(abs, excludeSet, files, 0);
+        if (fs.existsSync(abs)) _walk(abs, excludeSet, files, 0, opts.maxDepth);
       }
     }
 
@@ -12377,6 +12635,44 @@ __factories["./src/graph/call-graph"] = function(module, exports) {
     const defsByName = new Map();     // absFile → Map<name, symbolId[]>
     const normToAbs = new Map();      // normalized abs → abs
     const defs = new Map();           // symbolId → {file,name,line}
+
+    // JVM convention: a public type lives in a file of the same name. This is the
+    // deterministic type→file mapping receiver resolution needs, with no AST.
+    const fileByTypeName = new Map();   // 'UserService' → [absFile]
+    for (const f of files) {
+      const ext = path.extname(f).toLowerCase();
+      if (JAVA_EXTS.has(ext)) {
+        const base = path.basename(f, path.extname(f));
+        if (!fileByTypeName.has(base)) fileByTypeName.set(base, []);
+        fileByTypeName.get(base).push(f);
+      }
+    }
+
+    // interface/superclass name → implementing files, for the Spring hop below.
+    const implsByType = new Map();     // 'PaymentService' → [{ file, isBean, isPrimary }]
+    for (const f of files) {
+      if (!JAVA_EXTS.has(path.extname(f).toLowerCase())) continue;
+      let decl;
+      try { decl = javaTypeDecl(maskJs(fs.readFileSync(f, 'utf8'))); } catch (_) { continue; }
+      if (!decl) continue;
+      for (const sup of decl.supers) {
+        if (!implsByType.has(sup)) implsByType.set(sup, []);
+        implsByType.get(sup).push({ file: f, isBean: decl.isBean, isPrimary: decl.isPrimary });
+      }
+    }
+
+    /**
+     * The single implementing file for a type, or null when it is ambiguous.
+     * One implementation resolves outright; several resolve only via @Primary.
+     * Anything still ambiguous yields no edge — polymorphism is not guessed.
+     */
+    const soleImpl = (typeName) => {
+      const cands = implsByType.get(typeName) || [];
+      if (cands.length === 1) return cands[0].file;
+      const primary = cands.filter((c) => c.isPrimary);
+      if (primary.length === 1) return primary[0].file;
+      return null;
+    };
 
     for (const f of files) {
       normToAbs.set(normalizePath(path.resolve(f)), path.resolve(f));
@@ -12397,12 +12693,20 @@ __factories["./src/graph/call-graph"] = function(module, exports) {
 
     const forward = new Map();
     const reverse = new Map();
-    const addEdge = (from, to) => {
+    // Additive: `forward`/`reverse` keep their existing shape, so every current
+    // consumer is unaffected. Confidence is looked up by "from\u0000to".
+    const edgeConfidence = new Map();
+    const addEdge = (from, to, confidence) => {
       if (from === to) return;
       if (!forward.has(from)) forward.set(from, new Set());
       forward.get(from).add(to);
       if (!reverse.has(to)) reverse.set(to, new Set());
       reverse.get(to).add(from);
+      if (confidence) {
+        const k = from + '\u0000' + to;
+        // A 'high' resolution never loses to a later 'medium' one.
+        if (edgeConfidence.get(k) !== 'high') edgeConfidence.set(k, confidence);
+      }
     };
 
     for (const [f, fileDefs] of perFileDefs.entries()) {
@@ -12420,16 +12724,59 @@ __factories["./src/graph/call-graph"] = function(module, exports) {
           .sort();
         importedAbs.push(...siblings);
       }
+      // Receiver types come from declarations anywhere in the file: fields are
+      // declared outside any method body, locals inside one.
+      const typeMap = JAVA_EXTS.has(ext) ? buildTypeMap(masked) : null;
+      // Types reachable from this file, by name — imports first, then same-package
+      // siblings, so an import always wins over a coincidental sibling name.
+      const scopeByTypeName = new Map();
+      if (typeMap) {
+        for (const imp of importedAbs) {
+          const base = path.basename(imp, path.extname(imp));
+          if (!scopeByTypeName.has(base)) scopeByTypeName.set(base, imp);
+        }
+      }
+
       for (const d of fileDefs) {
         const callerId = symId(cwd, f, d.name);
         if (!forward.has(callerId)) forward.set(callerId, new Set()); // ensure node exists
         const callees = callsInRange(masked, d.bodyStart, d.bodyEnd);
         for (const nm of callees) {
           const local = (defsByName.get(f) || new Map()).get(nm);
-          if (local && local.length) { for (const id of local) addEdge(callerId, id); continue; }
+          if (local && local.length) { for (const id of local) addEdge(callerId, id, 'high'); continue; }
           for (const imp of importedAbs) {
             const ids = (defsByName.get(imp) || new Map()).get(nm);
-            if (ids && ids.length) { for (const id of ids) addEdge(callerId, id); break; }
+            if (ids && ids.length) { for (const id of ids) addEdge(callerId, id, 'high'); break; }
+          }
+        }
+
+        // `receiver.method(` — resolve the receiver's declared type to a file.
+        if (!typeMap) continue;
+        for (const { receiver, method } of receiverCallsInRange(masked, d.bodyStart, d.bodyEnd)) {
+          // A receiver that is itself a type name is a static call: `Foo.bar()`.
+          const typeName = typeMap.get(receiver)
+            || (fileByTypeName.has(receiver) ? receiver : null);
+          if (!typeName) continue;                 // unknown receiver → no edge, never a guess
+
+          let target = scopeByTypeName.get(typeName);
+          let confidence = 'high';                 // typed receiver, resolved in scope
+          if (!target) {
+            const candidates = fileByTypeName.get(typeName) || [];
+            if (candidates.length !== 1) continue; // ambiguous or absent → no edge
+            target = candidates[0];
+            confidence = 'medium';                 // type known, but not in this file's scope
+          }
+          const ids = (defsByName.get(target) || new Map()).get(method);
+          if (ids && ids.length) for (const id of ids) addEdge(callerId, id, confidence);
+
+          // Spring: the call names the interface, but the code that runs — and
+          // that a reviewer changes — lives in the implementation. Both edges are
+          // true, so both are recorded; without the second, blast radius on an
+          // implementation is empty.
+          const implFile = soleImpl(typeName);
+          if (implFile && implFile !== target) {
+            const implIds = (defsByName.get(implFile) || new Map()).get(method);
+            if (implIds && implIds.length) for (const id of implIds) addEdge(callerId, id, confidence);
           }
         }
       }
@@ -12440,7 +12787,7 @@ __factories["./src/graph/call-graph"] = function(module, exports) {
       for (const [k, set] of mapOfSets.entries()) out.set(k, [...set]);
       return out;
     };
-    return { forward: toArr(forward), reverse: toArr(reverse), defs };
+    return { forward: toArr(forward), reverse: toArr(reverse), defs, edgeConfidence };
   }
 
   /**
@@ -12562,7 +12909,7 @@ __factories["./src/graph/call-graph"] = function(module, exports) {
   }
 
   module.exports = {
-    buildCallGraph, buildCallFileGraph, methodImpact, methodCallees,
+    buildCallGraph, buildTypeMap, receiverCallsInRange, javaTypeDecl, DEFAULT_WALK_DEPTH, buildCallFileGraph, methodImpact, methodCallees,
     formatCallGraph, formatCallGraphJSON,
     extractDefs, maskJs, maskPy, maskRust,
   };
@@ -14278,6 +14625,45 @@ __factories["./src/map/route-table"] = function(module, exports) {
   }
 
   /**
+   * Byte offsets and prefixes of every `@Controller(...)` in a file.
+   * A file may declare several controllers, so each route is attributed to the
+   * nearest one above it rather than to a single file-wide prefix.
+   * @param {string} content
+   * @returns {Array<{index:number, prefix:string}>} ascending by index
+   */
+  function nestControllerPrefixes(content) {
+    const out = [];
+    const re = /@Controller\s*\(\s*(?:['"`]([^'"`]*)['"`])?/g;
+    let m;
+    while ((m = re.exec(content)) !== null) {
+      out.push({ index: m.index, prefix: m[1] || '' });
+    }
+    return out;
+  }
+
+  /** Prefix of the nearest `@Controller` above `index`, or '' when there is none. */
+  function prefixBefore(controllers, index) {
+    let prefix = '';
+    for (const c of controllers) {
+      if (c.index > index) break;
+      prefix = c.prefix;
+    }
+    return prefix;
+  }
+
+  /**
+   * Join a controller prefix and a method path into one route path.
+   * Either side may be empty, absent, or carry its own slashes.
+   * @returns {string} always slash-prefixed; never a trailing slash except '/'
+   */
+  function joinRoute(prefix, methodPath) {
+    const parts = [prefix, methodPath]
+      .map((p) => String(p || '').trim().replace(/^\/+|\/+$/g, ''))
+      .filter(Boolean);
+    return parts.length ? '/' + parts.join('/') : '/';
+  }
+
+  /**
    * Structured route rows across the supported frameworks — the data behind
    * `analyze`, exposed for retrieval surface-enrichment (#488).
    * @param {string[]} files absolute paths
@@ -14305,16 +14691,14 @@ __factories["./src/map/route-table"] = function(module, exports) {
           routes.push({ method: m[1].toUpperCase(), path: m[2], file: rel });
         }
 
-        // NestJS decorators: @Get('/path') @Post('/path')
-        const re2 = /@(Get|Post|Put|Patch|Delete|Head|Options|All)\s*\(\s*['"`]([^'"`]+)['"`]\s*\)/g;
+        // NestJS: @Get(':id') / @Post() — composed with the enclosing
+        // @Controller('prefix'). Without the prefix the emitted path matches
+        // nothing real, which defeats the point of route pseudo-signatures (#585).
+        const controllers = nestControllerPrefixes(content);
+        const re2 = /@(Get|Post|Put|Patch|Delete|Head|Options|All)\s*\(\s*(?:['"`]([^'"`]*)['"`])?\s*\)/g;
         while ((m = re2.exec(content)) !== null) {
-          routes.push({ method: m[1].toUpperCase(), path: m[2], file: rel });
-        }
-
-        // NestJS: @Get() with no path
-        const re3 = /@(Get|Post|Put|Patch|Delete)\s*\(\s*\)/g;
-        while ((m = re3.exec(content)) !== null) {
-          routes.push({ method: m[1].toUpperCase(), path: '/', file: rel });
+          const prefix = prefixBefore(controllers, m.index);
+          routes.push({ method: m[1].toUpperCase(), path: joinRoute(prefix, m[2]), file: rel });
         }
       }
 
@@ -15438,6 +15822,7 @@ __factories["./src/mcp/install"] = function(module, exports) {
 
   // Config shapes the supported clients use.
   //  - 'json'  → { mcpServers: { sigmap: { command, args } } }
+  //  - 'vscode'→ { servers: { sigmap: { type: 'stdio', command, args } } }
   //  - 'zed'   → { context_servers: { sigmap: { command: { path, args } } } }
   //  - 'yaml'  → Codex CLI ~/.codex/config.yaml (mcpServers block, appended)
   const CLIENTS = {
@@ -15446,7 +15831,7 @@ __factories["./src/mcp/install"] = function(module, exports) {
     windsurf: { label: 'Windsurf',     format: 'json', scope: 'both',
                 project: ['.windsurf', 'mcp.json'],
                 global:  ['.codeium', 'windsurf', 'mcp_config.json'] },
-    vscode:   { label: 'VS Code',      format: 'json', scope: 'project', project: ['.vscode', 'mcp.json'] },
+    vscode:   { label: 'VS Code',      format: 'vscode', scope: 'project', project: ['.vscode', 'mcp.json'] },
     opencode: { label: 'OpenCode',     format: 'json', scope: 'both',
                 project: ['opencode.json'],
                 global:  ['.config', 'opencode', 'config.json'] },
@@ -15501,6 +15886,31 @@ __factories["./src/mcp/install"] = function(module, exports) {
     return 'installed';
   }
 
+  /**
+   * Install into VS Code's `.vscode/mcp.json`, which keys servers under `servers`
+   * (not `mcpServers`) and expects an explicit transport `type`. A config written
+   * by an older SigMap under `mcpServers` is migrated rather than left in place,
+   * so re-running repairs it instead of leaving two entries VS Code cannot read.
+   */
+  function _installVscode(filePath, scriptPath) {
+    let settings = {};
+    if (fs.existsSync(filePath)) {
+      try { settings = JSON.parse(fs.readFileSync(filePath, 'utf8')) || {}; }
+      catch (_) { settings = {}; }
+    }
+    const stale = settings.mcpServers && settings.mcpServers.sigmap;
+    if (stale) {
+      delete settings.mcpServers.sigmap;
+      if (Object.keys(settings.mcpServers).length === 0) delete settings.mcpServers;
+    }
+    if (!settings.servers) settings.servers = {};
+    if (settings.servers.sigmap && !stale) return 'already';
+    settings.servers.sigmap = { type: 'stdio', command: 'node', args: serverArgs(scriptPath) };
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, JSON.stringify(settings, null, 2) + '\n');
+    return stale ? 'updated' : 'installed';
+  }
+
   /** Install into Zed's `context_servers` config (create file/dir if absent). */
   function _installZed(filePath, scriptPath) {
     let settings = {};
@@ -15553,7 +15963,8 @@ __factories["./src/mcp/install"] = function(module, exports) {
     const filePath   = resolveTarget(spec, cwd, home, opts.global);
 
     let status;
-    if (spec.format === 'zed')       status = _installZed(filePath, scriptPath);
+    if (spec.format === 'vscode')    status = _installVscode(filePath, scriptPath);
+    else if (spec.format === 'zed')  status = _installZed(filePath, scriptPath);
     else if (spec.format === 'yaml') status = _installYaml(filePath, scriptPath);
     else                             status = _installJson(filePath, scriptPath);
 
@@ -15585,7 +15996,7 @@ __factories["./src/mcp/server"] = function(module, exports) {
 
   const SERVER_INFO = {
     name: 'sigmap',
-    version: '8.29.0',
+    version: '8.33.0',
     description: 'SigMap MCP server — code signatures on demand',
   };
 
@@ -16948,7 +17359,18 @@ __factories["./src/retrieval/ranker"] = function(module, exports) {
     generatedCode: 0.3,    // dist/build/.next in path
     docsFile:      0.2,    // docs/doc/README in path
     nodeModules:   0.0,    // node_modules (zero score)
+    dataHolder:    0.3,    // generated POJO/entity: almost entirely accessors
   };
+
+  // A file whose members are overwhelmingly trivial accessors is a data holder,
+  // not logic. Path-based detection cannot see these: generated JPA/MyBatis
+  // entities live in ordinary source trees. They match a query on any column
+  // name they happen to carry (`getNote`/`setNote` matches "note" as strongly as
+  // the service that actually implements order notes), so on an entity-heavy
+  // repo they crowd real code out of the top results.
+  const ACCESSOR_RE = /^\s*(get|set|is)[A-Z]\w*\s*\(/;
+  const DATA_HOLDER_RATIO = 0.8;
+  const DATA_HOLDER_MIN_MEMBERS = 6;
 
   // Query terms that mean the penalised category IS the target. Read from the
   // query tokens directly, NOT via detectIntent: that classifier is first-match-
@@ -16956,18 +17378,33 @@ __factories["./src/retrieval/ranker"] = function(module, exports) {
   // test" classifies as debug and never reaches the test branch.
   const WANTS_TESTS = new Set(['test', 'tests', 'spec', 'specs', 'unit', 'integration', 'e2e', 'assertion', 'assert', 'mock', 'fixture', 'coverage', 'testing']);
   const WANTS_DOCS = new Set(['doc', 'docs', 'documentation', 'readme', 'changelog', 'guide', 'tutorial']);
+  const WANTS_MODELS = new Set(['entity', 'entities', 'model', 'models', 'pojo', 'dto', 'bean', 'getter', 'getters', 'setter', 'setters', 'accessor', 'accessors', 'field', 'fields', 'column', 'columns', 'schema']);
 
   /** Which penalised categories the query is explicitly asking for. */
   function _queryWants(queryTokens) {
-    const wants = { tests: false, docs: false };
+    const wants = { tests: false, docs: false, models: false };
     for (const t of queryTokens || []) {
       if (WANTS_TESTS.has(t)) wants.tests = true;
       if (WANTS_DOCS.has(t)) wants.docs = true;
+      if (WANTS_MODELS.has(t)) wants.models = true;
     }
     return wants;
   }
 
-  function _computePenalty(filePath, wants) {
+  /**
+   * True when a file's members are overwhelmingly trivial accessors — a generated
+   * entity or POJO rather than logic. Type declarations are excluded from the
+   * ratio so a small class is not misjudged by its own `class X` line.
+   */
+  function _isDataHolder(sigs) {
+    if (!Array.isArray(sigs)) return false;
+    const members = sigs.filter((line) => /^\s/.test(line) || !/^(class|interface|enum|struct|function|module\.exports)\b/.test(line));
+    if (members.length < DATA_HOLDER_MIN_MEMBERS) return false;
+    const accessors = members.filter((line) => ACCESSOR_RE.test(line)).length;
+    return accessors / members.length >= DATA_HOLDER_RATIO;
+  }
+
+  function _computePenalty(filePath, wants, sigs) {
     const pathLower = filePath.toLowerCase();
     if (pathLower.includes('node_modules')) return PENALTY_SIGNALS.nodeModules;
     // A penalty must never fire on the very thing the user asked for. Before
@@ -16979,6 +17416,11 @@ __factories["./src/retrieval/ranker"] = function(module, exports) {
     if (/(^|\/)(dist|build|\.next|\.nuxt|out|\.venv|venv)($|\/)/.test(pathLower)) return PENALTY_SIGNALS.generatedCode;
     if (/(^|\/)(docs|doc|readme|changelog)($|\/)/.test(pathLower)) {
       return (wants && wants.docs) ? 1.0 : PENALTY_SIGNALS.docsFile;
+    }
+    // Content-based, and last: a data holder is still a real source file, so it
+    // is only demoted once the path-based categories have had their say.
+    if (_isDataHolder(sigs)) {
+      return (wants && wants.models) ? 1.0 : PENALTY_SIGNALS.dataHolder;
     }
     return 1.0;
   }
@@ -17037,7 +17479,7 @@ __factories["./src/retrieval/ranker"] = function(module, exports) {
     if (!sigs || sigs.length === 0) return { score: 0, signals: { exactToken: 0, symbolMatch: 0, prefixMatch: 0, pathMatch: 0, penalty: 1.0 } };
 
     const w = weights || DEFAULT_WEIGHTS;
-    const signals = { exactToken: 0, symbolMatch: 0, prefixMatch: 0, pathMatch: 0, penalty: _computePenalty(filePath, wants) };
+    const signals = { exactToken: 0, symbolMatch: 0, prefixMatch: 0, pathMatch: 0, penalty: _computePenalty(filePath, wants, sigs) };
 
     // Module-doc prose is excluded here on purpose. This signal measures overlap
     // with DECLARED IDENTIFIERS; prose relevance is BM25's job, where it is scored
@@ -17633,7 +18075,7 @@ __factories["./src/retrieval/ranker"] = function(module, exports) {
     return detectIntents(query)[0];
   }
 
-  module.exports = { rank, buildSigIndex, scoreFile, _queryWants, detectIntents, formatRankTable, formatRankJSON, DEFAULT_WEIGHTS, GRAPH_BOOST_AMOUNTS, CENTRALITY_BLEND_WEIGHT, detectIntent };
+  module.exports = { rank, buildSigIndex, scoreFile, _queryWants, _isDataHolder, detectIntents, formatRankTable, formatRankJSON, DEFAULT_WEIGHTS, GRAPH_BOOST_AMOUNTS, CENTRALITY_BLEND_WEIGHT, detectIntent };
   
 };
 
@@ -18919,11 +19361,29 @@ __factories["./src/skills/skills"] = function(module, exports) {
         'Follow this loop before any file exploration in a repo with SigMap installed.',
         '',
         '1. **Ask before reading.** `sigmap ask "<task>"` (or the `query_context` MCP tool) ranks the relevant files as ~hundreds of tokens of signatures instead of thousands of raw-file tokens. Never open files to "look around".',
-        '2. **Read ranges, not files.** Use the `get_lines` MCP tool with the `:start-end` line anchors carried on every signature to pull only the lines you need.',
+        '2. **Read ranges, not files.** Use the `get_lines` MCP tool — or `sigmap lines <file> :<line> --context <n>` where MCP is unavailable — with the `:start-end` line anchors carried on every signature to pull only the lines you need.',
         '3. **Ground before trusting.** Run the `verify_suggestion` MCP tool (or `sigmap verify-ai-output`) on generated code before applying it — it flags fabricated files, imports, symbols, and npm scripts against the live index.',
         '4. **Squeeze big pastes.** Any stack trace, CI/build log, or JSON blob goes through `sigmap squeeze` (or the `squeeze_output` MCP tool) before it enters context — the signal survives, the noise does not.',
         '5. **Checkpoint progress.** Use the `create_checkpoint` MCP tool or `sigmap note "<decision>"` so a follow-up session resumes without re-deriving state.',
         '6. **Watch the budget.** Check the `get_budget` MCP tool or `sigmap budget` (estimates from SigMap\'s local ledger — no LLM calls). Near the budget: summarize-then-drop older context instead of accumulating, and prefer terse output.',
+      ].join('\n'),
+    },
+    'sigmap-task': {
+      title: 'SigMap task loop',
+      kind: 'prompt',
+      description: 'Do a coding task grounded in SigMap: look up before reading, edit by line anchor, verify before reporting.',
+      argumentHint: 'the change you want, in plain words',
+      body: [
+        'Work through these steps **in order**. Do not open any file before step 2.',
+        'Every command runs from the integrated terminal — do not ask the user to run them for you.',
+        '',
+        '1. **Look up, do not search.** `npx sigmap ask "<the task>"` — this writes `.context/query-context.md`.',
+        '2. **Read the map.** `cat .context/query-context.md`. It ranks the relevant files and lists their signatures with `:start-end` line anchors — a few hundred tokens where the same files read whole are tens of thousands. Say which files it surfaced before continuing. If nothing relevant appears, re-run step 1 with different wording; fall back to search only after two attempts, and say so.',
+        '3. **Read the anchored range, by command.** A signature ending `:425-425` means line 425, not the 547-line file. Run `npx sigmap lines <file> :425 --context 10` — paste the anchor straight off the signature. Never `cat` a whole file when you hold an anchor for it: on a real repo a 220-line span costs ~2,700 tokens where the anchored window costs ~220.',
+        '4. **Make the change.** Follow the conventions visible in the signatures — same layering, same response wrapper, same annotation style. Add no dependencies.',
+        '5. **Verify before reporting.** Write what you changed to `.sigmap-notes.md`, naming every file by its **full repository-relative path** (a bare filename is reported as fake), then run `npx sigmap verify-ai-output .sigmap-notes.md`. It checks every name against the real index, offline, with no model call. Fix anything it flags and re-run before you reply.',
+        '6. **Refresh the map.** `npx sigmap` — your edits made it stale.',
+        '7. **Report.** The files you changed, the ranges you actually read, the step-1 token count, and the step-5 verify result. Say so if you fell back to searching or if verify flagged something.',
       ].join('\n'),
     },
     'sigmap-config-optimizer': {
@@ -18950,7 +19410,9 @@ __factories["./src/skills/skills"] = function(module, exports) {
     windsurf: { label: 'Windsurf',       parent: ['.windsurf'],
                 target: (cwd, skill) => path.join(cwd, '.windsurf', 'rules', `${skill}.md`) },
     copilot:  { label: 'GitHub Copilot', parent: ['.github'],
-                target: (cwd, skill) => path.join(cwd, '.github', 'instructions', `${skill}.instructions.md`) },
+                target: (cwd, skill) => (SKILLS[skill] && SKILLS[skill].kind === 'prompt'
+                  ? path.join(cwd, '.github', 'prompts', `${skill}.prompt.md`)
+                  : path.join(cwd, '.github', 'instructions', `${skill}.instructions.md`)) },
     codex:    { label: 'Codex CLI (AGENTS.md)', parent: ['AGENTS.md'],
                 target: (cwd) => path.join(cwd, 'AGENTS.md'), inject: true },
   };
@@ -18971,6 +19433,10 @@ __factories["./src/skills/skills"] = function(module, exports) {
       return `---\ndescription: ${skill.description}\nalwaysApply: false\n---\n\n${body}`;
     }
     if (client === 'copilot') {
+      if (skill.kind === 'prompt') {
+        return `---\nname: ${skillName}\nagent: 'agent'\ndescription: ${skill.description}\n`
+          + `argument-hint: ${skill.argumentHint}\n---\n\n${body}`;
+      }
       return `---\napplyTo: "**"\n---\n\n${body}`;
     }
     return body; // windsurf: plain markdown
@@ -21824,7 +22290,7 @@ function __tryGit(args, opts = {}) {
   catch (_) { return ''; }
 }
 
-const VERSION = '8.29.0';
+const VERSION = '8.33.0';
 const MARKER = '\n\n## Auto-generated signatures\n<!-- Updated by gen-context.js -->\n';
 
 function requireSourceOrBundled(key) {
@@ -21860,7 +22326,6 @@ const EXT_MAP = {
   '.swift': 'swift',
   '.dart': 'dart',
   '.scala': 'scala', '.sc': 'scala',
-  '.lua': 'lua',
   '.r': 'r', '.R': 'r',
   '.vue': 'vue_sfc',
   '.svelte': 'svelte',
@@ -22065,12 +22530,11 @@ function detectAndExtract(filePath, content, maxSigsPerFile) {
 function extractFileDeps(filePath, content, config) {
   if (config && config.depMap === false) return [];
   try {
-    const { extractPythonDeps, extractTSDeps, extractRDeps, extractLuaDeps } = requireSourceOrBundled('./src/extractors/deps');
+    const { extractPythonDeps, extractTSDeps, extractRDeps } = requireSourceOrBundled('./src/extractors/deps');
     const ext = path.extname(filePath).toLowerCase();
     if (ext === '.py' || ext === '.pyw') return extractPythonDeps(content);
     if (['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'].includes(ext)) return extractTSDeps(content);
     if (ext === '.r') return extractRDeps ? extractRDeps(content) : [];
-    if (ext === '.lua') return extractLuaDeps ? extractLuaDeps(content) : [];
   } catch (_) {}
   return [];
 }
@@ -22275,6 +22739,17 @@ function applyTokenBudget(fileEntries, maxTokens) {
   }
   // Restore the original file order for stable output.
   const kept = withPriority.filter((e) => finalByPath.has(e.filePath)).map((e) => finalByPath.get(e.filePath));
+
+  // Record what was omitted so the artifact itself can say so (#587). The
+  // stderr warning below is invisible to an agent that only reads the file:
+  // 25 sections with no notice is indistinguishable from a 25-file repo.
+  // Non-enumerable so every existing consumer still sees a plain array.
+  if (verboseDropped.length > 0 || collapsedCount > 0) {
+    Object.defineProperty(kept, '__omissions', {
+      value: { dropped: verboseDropped.length, collapsed: collapsedCount, maxTokens },
+      enumerable: false, writable: false, configurable: true,
+    });
+  }
 
   if (verboseDropped.length > 0 || collapsedCount > 0) {
     const parts = [];
@@ -22602,6 +23077,20 @@ function formatOutput(fileEntries, cwd, routingEnabled, config, extras) {
     } catch (err) {
       console.warn(`[sigmap] routing hints skipped: ${err.message}`);
     }
+  }
+
+  // Say what the budget left out — an omission the reader cannot see is the
+  // same failure as an undisclosed truncation cap (#587, cf. #576).
+  const omitted = fileEntries && fileEntries.__omissions;
+  if (omitted && (omitted.dropped > 0 || omitted.collapsed > 0)) {
+    const bits = [];
+    if (omitted.dropped) bits.push(`${omitted.dropped} file(s) omitted`);
+    if (omitted.collapsed) bits.push(`${omitted.collapsed} collapsed to anchors`);
+    lines.push('');
+    lines.push(`> **Not everything is here.** ${bits.join(', ')} to stay under the `
+      + `${omitted.maxTokens}-token budget (tests and configs go first). `
+      + 'The retrieval index still has them all — run `sigmap ask "<question>"` '
+      + 'to pull in anything missing.');
   }
 
   return lines.join('\n');
@@ -23832,6 +24321,8 @@ Usage:
   ${cmd} tune --apply                      Write the recommendations into gen-context.config.json (merges; your keys preserved)
   ${cmd} skills list                       List skill clients (Claude/Cursor/Windsurf/Copilot/AGENTS.md) and install state (--json)
   ${cmd} skills install                    Install the SigMap agent playbooks for detected clients (--client <name> | --all)
+  ${cmd} lines <file> <start>-<end>        Print an exact line range — CLI twin of get_lines (secrets redacted)
+  ${cmd} lines <file> :<line> --context <n>  Window around one signature anchor (default ±10)
   ${cmd} note "<text>"                     Append a note to the cross-session decision log
   ${cmd} note                              List recent notes (also: note --list <N>)
   ${cmd} status                            Show repo state — branch, dirty files, index freshness, notes
@@ -25435,6 +25926,55 @@ function main() {
     process.exit(0);
   }
 
+  // `sigmap lines <file> <start>-<end>` — the CLI twin of the get_lines MCP
+  // tool. Without it, an agent in an MCP-less environment receives precise
+  // `:start-end` anchors from `ask` and has no sanctioned way to spend them,
+  // so it falls back to reading whole files and throws the saving away.
+  // Delegates to the same handler as MCP so both paths share the sandbox,
+  // the bounds clamping and the secret redaction.
+  if (args[0] === 'lines') {
+    const valOf = (f) => { const i = args.indexOf(f); return i >= 0 && args[i + 1] ? args[i + 1] : null; };
+    const positional = [];
+    const VALUE_FLAGS = new Set(['--cwd', '--context']);
+    for (let i = 1; i < args.length; i++) {
+      const a = args[i];
+      if (a.startsWith('--')) { if (VALUE_FLAGS.has(a)) i++; continue; }
+      positional.push(a);
+    }
+    const file = positional[0];
+    const range = positional[1];
+    if (!file || !range) {
+      console.error('[sigmap] usage: sigmap lines <file> <start>-<end>   (or :<line> --context <n>)');
+      process.exit(2);
+    }
+
+    // Accept `84-104`, a bare `94`, or the `:94` form copied straight off a
+    // signature anchor — the whole point is to paste what `ask` printed.
+    const ctx = Math.max(0, parseInt(valOf('--context') || '10', 10));
+    let start;
+    let end;
+    const span = /^:?(\d+)\s*-\s*(\d+)$/.exec(range);
+    const single = /^:?(\d+)$/.exec(range);
+    if (span) { start = parseInt(span[1], 10); end = parseInt(span[2], 10); }
+    else if (single) { const n = parseInt(single[1], 10); start = Math.max(1, n - ctx); end = n + ctx; }
+    else {
+      console.error(`[sigmap] lines: could not read range "${range}" — expected <start>-<end> or :<line>`);
+      process.exit(2);
+    }
+
+    const { getLines } = requireSourceOrBundled('./src/mcp/handlers');
+    const out = getLines({ file, start, end }, cwd);
+    // The handler reports its own failures as prose; surface them on stderr
+    // with a non-zero exit so a script can tell a hit from a miss.
+    if (/^(Missing required argument|Refused:|File not found:|Could not read |Arguments )/.test(out)
+        || /has only \d+ lines; requested/.test(out)) {
+      console.error('[sigmap] ' + out);
+      process.exit(1);
+    }
+    process.stdout.write(out + '\n');
+    process.exit(0);
+  }
+
   if (args[0] === 'note') {
     const jsonOut = args.includes('--json');
     const { addNote, readNotes, formatNotes } = requireSourceOrBundled('./src/session/notes');
@@ -26542,23 +27082,16 @@ function main() {
         process.exit(1);
       }
 
-      const EXT_TO_LANG = {
-        '.ts': 'typescript', '.js': 'javascript', '.py': 'python',
-        '.java': 'java', '.kt': 'kotlin', '.go': 'go', '.rs': 'rust',
-        '.cs': 'csharp', '.cpp': 'cpp', '.rb': 'ruby', '.php': 'php',
-        '.swift': 'swift', '.dart': 'dart', '.scala': 'scala',
-        '.r': 'r', '.R': 'r',
-        '.vue': 'vue', '.svelte': 'svelte', '.html': 'html',
-        '.css': 'css', '.yml': 'yaml', '.sh': 'shell',
-      };
-      const SPECIAL = { 'Dockerfile': 'dockerfile' };
+      // Resolution goes through the dispatcher — the single source of truth
+      // (#591). This map was a third copy, and it still pointed at `vue.js`
+      // after that module was deleted, which is how a dead extractor survived.
+      const { langFor } = requireSourceOrBundled('./src/extractors/dispatch');
 
       let passed = 0; let failed = 0;
       const entries = fs.readdirSync(fixturesDir).sort();
 
       for (const filename of entries) {
-        const ext  = path.extname(filename).toLowerCase();
-        const lang = EXT_TO_LANG[ext] || SPECIAL[filename];
+        const lang = langFor(filename);
         if (!lang) continue;
 
         const fixturePath = path.join(fixturesDir, filename);
