@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-13T09:49:06.049Z",
+  "generated": "2026-09-13T15:10:47.536Z",
   "methodology": {
     "promptWeights": {
       "correct": 1,
@@ -27,7 +27,7 @@
     "hitAt5With": 78.9,
     "avgImprovement": 60,
     "totalGroundedSymbols": 9557,
-    "totalDarkSymbols": 57975,
+    "totalDarkSymbols": 57976,
     "hallucinationRiskPct": 85.8
   },
   "repos": [
@@ -70,8 +70,8 @@
       "promptsWithout": 2.94,
       "reductionPct": 57.5,
       "groundedSymbols": 433,
-      "darkSymbols": 673,
-      "hallucinationRiskPct": 60.8
+      "darkSymbols": 674,
+      "hallucinationRiskPct": 60.9
     },
     {
       "repo": "spring-petclinic",

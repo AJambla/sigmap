@@ -78,7 +78,7 @@ features:
 
 <div style="max-width:840px;margin:0 auto;padding:18px 24px 0;text-align:center">
 <div style="display:inline-flex;flex-wrap:wrap;gap:.5rem;justify-content:center;background:var(--vp-c-brand-soft,#ede9fe);border:1px solid rgba(124,106,247,.25);border-radius:999px;padding:.55rem .9rem;font-size:.9rem;color:var(--vp-c-text-1)">
-  <span><strong>Release:</strong> v8.33.0</span>
+  <span><strong>Release:</strong> v8.34.0</span>
   <span>·</span>
   <span><strong>New — a retrieval gate you can trust:</strong> the benchmark now regenerates every index it scores, so a stale artifact can no longer read as a regression. A new 61-task JVM corpus mined from <code>spring-petclinic</code> and <code>akka</code> scores against <em>other</em> repos — outside the feedback loop that shifts scores whenever SigMap's own source changes — and it immediately caught a real one-task regression the previous gate would have missed. Separately, every extractor now discloses what a ceiling dropped instead of truncating silently. Zero dependencies, offline, deterministic.</span>
 </div>
@@ -176,7 +176,7 @@ See the full [end-to-end walkthrough](/guide/walkthrough) to watch this in actio
 | Overall token reduction | — | **96.8%** |
 | GPT-4o overflow repos | 16/21 | **0/21** |
 
-Latest saved benchmark run: **2026-09-12 (v8.33.0)**.
+Latest saved benchmark run: **2026-09-12 (v8.34.0)**.
 
 </div>
 

@@ -35,6 +35,10 @@ To ensure proper attribution:
 
 We welcome contributions! See [Contributing](./docs/CONTRIBUTING.md) for guidelines.
 
+### Recent Contributors (v8.34.0)
+- **@zerone0x** — feat(extractors): Lua extractor (Tier 3) — functions, module-table methods, `require` hints and LDoc doc comments, shipped with its own fixture and expected output (#540, PR #550)
+- **@manojmallick** — feat(graph): call-graph definitions for Kotlin and Scala, where the graph had been silently empty and blast radius read zero (#586, PR #602); fix(context): prune `context-*.md` splits left by a previous strategy, which were being merged into the retrieval index and steering every query (#555, PR #601)
+
 ### Recent Contributors (v8.33.0)
 - **@manojmallick** — feat(context): the artifact now states what the token budget omitted, with the counts, the reason, and a pointer to `sigmap ask` — the drop warning had only ever gone to stderr (#587, PR #599); test(extractors): a fixture for every language plus a guard that fails when one is missing, which immediately found a ninth the issue had not listed (`typescript_react`) and a stale expected file causing a silent `--diagnose-extractors` SKIP (#588, PR #595); fix(routes): NestJS paths compose the `@Controller` prefix, attributed per controller (#585, PR #598); refactor(extractors): one source of truth for extractor resolution — two of three copies had drifted, and the third was missing `.gd` so gdscript was never diagnosed (#591, PR #597)
 

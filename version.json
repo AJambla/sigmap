@@ -1,7 +1,7 @@
 {
-  "version": "8.33.0",
+  "version": "8.34.0",
   "benchmark_date": "2026-09-13",
-  "benchmark_id": "sigmap-v8.33-main",
+  "benchmark_id": "sigmap-v8.34-main",
   "languages": 33,
   "extractors": 43,
   "mcp_tools": 21,

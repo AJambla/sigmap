@@ -838,6 +838,20 @@ Two milestones in one release. **`verify-ai-output` Reliable MVP** (#232) grows 
 
 ---
 
+### v8.34.0 — Lua, and two graphs that were silently empty ✓ (2026-09-13)
+
+**Minor release — the first community language extractor, plus two more instances of the release's recurring theme.** [@zerone0x](https://github.com/zerone0x) contributed a Tier-3 **Lua** extractor: global and local functions, module-table methods (`function M.name` / `function M:name`), assigned functions, `require` module hints, and LDoc `---` comments as first-sentence hints. It arrived with its own fixture *and* recorded expected output — precisely what the #588 fixture guard requires, contributed before that guard existed. Preparing it for merge needed only conflict resolution against three releases it predated, plus bringing its caps up to the disclosure convention it was written before: they now report the true overflow instead of truncating silently, ceiling unchanged.
+
+The **Kotlin and Scala call graphs were empty** — not degraded, empty. `extractDefs` returned null for both and the file walk did not collect them at all, so every symbol and every edge was missing. An empty graph returns no error, so `--impact` and blast radius silently read zero: the same failure that cost a release in v8.31.0. It survived because akka (Scala) sits in the gated JVM retrieval corpus, which measures *ranking*, not edges — CI exercised Scala daily in a way that could never detect the gap. Both languages now produce definitions, including expression bodies (`fun f() = expr`, `def f: Int = expr`) that Java has no equivalent of. The scope is pinned by an explicit test rather than described optimistically: same-file calls resolve, cross-file *receiver* calls do not yet, because receiver typing is Java-shaped and does not read `private val repo: Repo`.
+
+Finally, generated `context-*.md` splits from a previous `strategy` stopped polluting retrieval. They are discovered by filename pattern at read time, never checked against the current config, so a file left by an earlier strategy — or by a module since dropped from `srcDirs` — kept being merged into the index. On a 524-file Java repo a stale 376 KB split held ranks 1, 3 and 4 with generated entities, one of them unrelated to the query, while both files implementing the feature fell outside the top 6 — and `sig-index.json` held zero entries for that module the whole time. Deleting the file was the only change needed to fix the ranking. The read side could not simply ignore splits, because under `per-module` they are the only place signatures live, so each strategy now declares what it wrote and the rest is pruned — reported, not silent.
+
+**Tags:** `lua.js` · `ktDefs` · `scalaDefs` · `jvmBodyRange` · `pruneStaleContextSplits` · `#540` · `#555` · `#586` · `PR #550` · `#601` · `#602`
+
+**Impact:** 33 languages / 43 extractors (Lua added); Kotlin+Scala call graph 0 symbols and 0 edges → 8 and 2 on a small tree; stale-split pollution removed at generate time. 148 test files passing, 0 failed. Headline metrics unchanged — 96.8% token reduction, 78.9% hit@5.
+
+---
+
 ### v8.33.0 — the same bug, four times, finally named ✓ (2026-09-13)
 
 **Minor release — four issues that turned out to be one bug wearing different clothes: something omitted, with nothing saying so.** v8.32.1 fixed extractors that truncated silently. This release finishes the pattern one level up. The generated artifact drops files to fit the token budget and said so only on **stderr** — which an agent reading the file never sees. On flask that meant 25 of 51 files present with no indication the other 26 existed, indistinguishable from a 25-file repo. `applyTokenBudget` now attaches a summary to what it returns, so every call site gains a footer naming the counts, the reason, and where to get the rest. The wording is deliberate about what is *not* true: the omitted files remain in the retrieval index, so the notice says so, and a test asserts it does not overstate — replacing a misleading silence with a misleading warning would be no improvement.
