@@ -376,9 +376,15 @@ function rank(query, sigIndex, opts) {
     const hop1Files = new Set(); // normalised keys that received a hop1 boost
     const hop1Seeds = [];        // original (un-normalised) paths, for hop-2 lookup
 
-    // Hop 1: direct neighbors of scored files
-    for (const entry of scored) {
-      if (entry.score <= 0) continue;
+    // Hop 1: direct neighbors of scored files. Seeds snapshotted BEFORE the
+    // loop (as the call-graph block below already does) so boosts never
+    // cascade: a file whose only score is a hop-1 boost must not become a seed
+    // itself mid-loop, or the effective seed set — and every boost total —
+    // depends on index insertion order, which git history changes via the
+    // recent-commits hoist. That made gate scores differ between a shallow CI
+    // checkout and a developer clone of the same commit (#596).
+    const hop1SeedEntries = scored.filter((e) => e.score > 0);
+    for (const entry of hop1SeedEntries) {
       const neighbors = _graphGet(graph.forward, path.resolve(cwd, entry.file)) || [];
       for (const neighborAbs of neighbors) {
         const nk = path.normalize(neighborAbs);
@@ -393,7 +399,10 @@ function rank(query, sigIndex, opts) {
       }
     }
 
-    // Hop 2: neighbors of hop1 files (only if they didn't get a direct score)
+    // Hop 2: neighbors of hop1 files (only if they didn't get a direct score).
+    // Eligibility frozen after hop-1 for the same reason: a file whose first
+    // score is a hop-2 boost must not become hop-2-eligible mid-loop (#596).
+    const hop2Eligible = scored.map((e) => e.score > 0);
     for (const hop1Key of hop1Seeds) {
       if (_graphGet(keyToIdx, hop1Key) === undefined) continue; // skip files not in index
       const neighbors = _graphGet(graph.forward, hop1Key) || [];
@@ -402,7 +411,7 @@ function rank(query, sigIndex, opts) {
         if (_isHub(nk) || hubs.has(nk) || hubs.has(nk.toLowerCase())) continue;
         if (hop1Files.has(nk)) continue; // skip already hop1-boosted
         const idx = _graphGet(keyToIdx, nk);
-        if (idx !== undefined && scored[idx].score > 0) {
+        if (idx !== undefined && hop2Eligible[idx]) {
           // Only boost files that have some baseline score (not noise)
           scored[idx].score += GRAPH_BOOST_AMOUNTS.hop2;
           scored[idx].signals.graphBoost = (scored[idx].signals.graphBoost || 0) + GRAPH_BOOST_AMOUNTS.hop2;
