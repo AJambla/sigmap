@@ -21,6 +21,7 @@ const EXT_TO_LANG = {
   '.dart': 'dart', '.scala': 'scala', '.php': 'php',
   '.lua': 'lua',
   '.ex': 'elixir', '.exs': 'elixir',
+  '.astro': 'astro',
   '.gd': 'gdscript',
   '.r': 'r', '.R': 'r',
 };

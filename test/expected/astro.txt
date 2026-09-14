@@ -1,0 +1,9 @@
+export interface Props  :6-10
+  title: string  :7-7
+  description?: string  :8-8
+  tags: string[]  :9-9
+export function formatDate(date) → string  :17-19  # Formats a date for display
+props { title, description, tags }  :12-12
+function slugify(text) → string  :21-21
+const posts = await getCollection()  :14-14
+uses Card, Layout
