@@ -1,13 +1,13 @@
 ---
 title: MCP server setup
-description: Set up the SigMap MCP server for Claude Code, Cursor, and Windsurf. On-demand codebase access with 21 tools over stdio. Zero npm install.
+description: Set up the SigMap MCP server for Claude Code, Cursor, and Windsurf. On-demand codebase access with 22 tools over stdio. Zero npm install.
 head:
   - - meta
     - property: og:title
       content: "SigMap MCP Server — on-demand codebase context"
   - - meta
     - property: og:description
-      content: "Give Claude Code, Cursor, and Windsurf on-demand access to your codebase signatures. 18 MCP tools over stdio."
+      content: "Give Claude Code, Cursor, and Windsurf on-demand access to your codebase signatures. 22 MCP tools over stdio."
   - - meta
     - property: og:url
       content: "https://sigmap.io/guide/mcp"
@@ -22,7 +22,7 @@ head:
 
 Give Claude Code, Cursor, and Windsurf on-demand access to your codebase signatures. Zero npm install.
 
-The SigMap MCP server exposes 21 tools over the stdio Model Context Protocol. Your AI agent calls only what it needs — keeping token costs low.
+The SigMap MCP server exposes 22 tools over the stdio Model Context Protocol. Your AI agent calls only what it needs — keeping token costs low.
 
 > **Setup time: under 2 minutes.** Use `sigmap --setup` for automatic configuration.
 
@@ -104,10 +104,10 @@ The server is verified against the black-box [`@hasmcp/mcp-spec-test`](https://w
 - `server/discover` (spec 2026-07-28) is answered session-less, before any handshake, with the honest version list, capabilities, identity, and cache hints — so clients can discover instead of offer-and-hope.
 - `tools/list` rejects pagination cursors it never issued with `-32602` rather than silently restarting from page one.
 
-## 11 available tools
+## 22 available tools
 
 ::: tip New in v6.3.0 — native tool registration
-Claude Code and Codex now receive the full tool list at MCP startup without a discovery round-trip. The server declares all 21 tools in the `initialize` response, so your AI sees them immediately. No config change needed — upgrade via `npm install -g sigmap@latest`.
+Claude Code and Codex now receive the full tool list at MCP startup without a discovery round-trip. The server declares all 22 tools in the `initialize` response, so your AI sees them immediately. No config change needed — upgrade via `npm install -g sigmap@latest`.
 :::
 
 All tools are available on-demand — your AI agent calls only what it needs.
@@ -131,6 +131,11 @@ All tools are available on-demand — your AI agent calls only what it needs.
 | `verify_suggestion` | Ground an AI code suggestion before writing it — verify a snippet against the repo **and the libraries actually installed** in `node_modules` (the grounding moat); flags fake files/imports/symbols/scripts and reports the installed libraries verified against with pinned versions. New in v8.2. | `code` (required string) | `verify_suggestion(code="const r = Router()")` |
 | `squeeze_output` | Compress noisy tool/command/agent output — a stack trace, CI/build log, or JSON payload — before it enters context. Same deterministic, offline engine as `sigmap squeeze`: keeps the signal, strips the noise, enriches the top stack frame. Passes the input through unchanged when nothing is squeezable. New in v8.8. | `content` (required string) | `squeeze_output(content="Traceback…")` |
 | `get_budget` | Session spend ledger — estimated tokens SigMap emitted this session (chars/4, from the local gain log), optional budget remaining, and context freshness. Counts only SigMap output, not the whole chat. Advises degrade-gracefully tactics (terse, squeeze, summarize-then-drop) at ≥80% budget. New in v8.23. | `session` (optional string) · `budgetTokens` (optional number) | `get_budget(budgetTokens=50000)` |
+| `get_callee_signatures` | Returns the **exact current signature(s)** of named symbols from the index — so the model never guesses a callee’s parameters from training memory. Unknown names get a closest-match suggestion. New in v7.19. | `symbols` (required string[]) | `get_callee_signatures(symbols=["loadConfig"])` |
+| `sigmap_notify_file_created` | Live-index write hook: tells SigMap a file was created or modified so its signatures are indexed for the rest of the session — new symbols become resolvable by `search_signatures` / `get_callee_signatures` immediately. New in v7.21. | `path` (required string), `content` (optional string) | `sigmap_notify_file_created(path="src/new.js")` |
+| `sigmap_notify_symbol_added` | Fast path: registers a single new symbol signature in the live index without re-reading the whole file. New in v7.21. | `signature` (required string), `file` (required string), `line` (optional number) | `sigmap_notify_symbol_added(signature="function retry(fn, n)", file="src/util/retry.js")` |
+| `sigmap_notify_file_deleted` | Live-index write hook: drops a deleted file’s symbols from the live index. New in v7.21. | `path` (required string) | `sigmap_notify_file_deleted(path="src/old.js")` |
+| `query_knowledge_map` | **Unified knowledge map** — typed nodes (file, symbol, library@version, route) and edges (imports, calls, defines, tests, uses-lib, exposes-route) assembled from SigMap’s existing graphs. `library` answers upgrade impact (lib → importing files → their dependents → covering tests); `file` returns every typed edge touching one file; no args returns the node/edge summary. New in v8.41. | `library` (optional string) · `file` (optional string) | `query_knowledge_map(library="express")` |
 
 ## Your agent's live loop
 
@@ -175,7 +180,7 @@ Use `ask` to create `.context/query-context.md`, let the model answer, then run 
 
 ## Test the server
 
-Send a raw JSON-RPC request to confirm the server starts and returns all 18 tool definitions.
+Send a raw JSON-RPC request to confirm the server starts and returns all 22 tool definitions.
 
 ```bash
 echo '{"jsonrpc":"2.0","method":"tools/list","id":1}' | node gen-context.js --mcp

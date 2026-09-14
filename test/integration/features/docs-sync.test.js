@@ -123,10 +123,10 @@ test('docs/index.html: structured-data description uses 29 languages', () => {
 
 // ── MCP tool count ────────────────────────────────────────────────────────────
 
-test('mcp.md: description mentions 21 tools (not 12)', () => {
+test('mcp.md: description mentions 22 tools (not 12)', () => {
   const src = readGuide('mcp.md');
   assert.ok(!src.includes('with 9 tools'), 'found "9 tools" in mcp.md description');
-  assert.ok(src.includes('21 tools'), 'missing "21 tools" in mcp.md');
+  assert.ok(src.includes('22 tools'), 'missing "22 tools" in mcp.md');
 });
 
 // ── Troubleshooting v5.5 coverage entry ───────────────────────────────────────

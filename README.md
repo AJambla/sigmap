@@ -122,7 +122,7 @@ Ask → Rank → Context → Validate → Judge → Learn
 
 <!--SM:benchmarkBlock-->
 ```
-Benchmark : sigmap-v8.40-main (21 repositories, including R language)
+Benchmark : sigmap-v8.41-main (21 repositories, including R language)
 Date      : 2026-09-14
 
 Hit@5          : 78.6%   (grep-agent baseline 44.0%  — 1.73× lift)
@@ -269,7 +269,7 @@ SigMap treats coding agents as **consumers, not competitors**: it hands them a d
 
 | Agent | One-time setup | How it consumes SigMap |
 |---|---|---|
-| **Claude Code** | `sigmap mcp install claude` | 21 MCP tools (`search_signatures`, `get_lines`, `get_diff_context`, `squeeze_output`…) |
+| **Claude Code** | `sigmap mcp install claude` | 22 MCP tools (`search_signatures`, `get_lines`, `get_diff_context`, `squeeze_output`…) |
 | **Cursor** | `sigmap mcp install cursor` | MCP tools, plus the `cursor` adapter writes `.cursorrules` |
 | **Cline** | `sigmap mcp install cursor` | Reads `.cursorrules`; same MCP server |
 | **Continue** | `sigmap mcp install vscode` | MCP tools inside the Continue extension |

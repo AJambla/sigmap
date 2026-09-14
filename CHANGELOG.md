@@ -10,6 +10,13 @@ Format: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [8.41.0] — 2026-09-14
+
+### Added
+- **Unified knowledge map — increment 1 of the #543 epic** (#626, PR #627) — `src/map/knowledge-map.js` builds one typed store over what SigMap already extracts, instead of a new scan: **nodes** (`file`, `symbol`, `lib@version`, `route`) and **edges** (`imports`, `calls`, `defines`, `tests`, `uses-lib`, `exposes-route`) assembled from the signature index, dependency graph, call graph, library index, and route table. Serialization is canonical (sorted keys, NUL-delimited edge identity so route ids with spaces survive), cached at `.context/knowledge-map.json` keyed on context mtime, and schema-versioned (`SCHEMA_VERSION: 1`). Path identity is realpath-normalized with lowercased abs→rel matching, so macOS symlinked tmpdirs and the graph builder's lowercased keys resolve to the same node. A new **`query_knowledge_map` MCP tool (22nd tool)** answers `upgrade-impact` ("what breaks if I bump `zod`?" — lib → importing files → their dependents), `neighbors` (every typed edge touching one file), and `summary` (node/edge counts by kind) — the first cross-source query surface; later increments re-base `get_impact`/`get_architecture_overview`/evidence packs as views over the same store
+
+---
+
 ## [8.40.0] — 2026-09-14
 
 ### Added
