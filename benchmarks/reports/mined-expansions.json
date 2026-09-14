@@ -4,11 +4,11 @@
     "A": "rank baseline",
     "B": "rank + repo-mined query expansion"
   },
-  "tasks": 105,
-  "hitAt5A": 89.5,
-  "hitAt5B": 90.5,
-  "mrrA": 0.715,
-  "mrrB": 0.72,
+  "tasks": 299,
+  "hitAt5A": 69.2,
+  "hitAt5B": 69.6,
+  "mrrA": 0.562,
+  "mrrB": 0.559,
   "deltaTasks": 1,
   "perRepo": [
     {
@@ -100,6 +100,46 @@
       "delta": 0
     },
     {
+      "repo": "retrieval",
+      "tasks": 20,
+      "minedTokens": 1334,
+      "hitA": 18,
+      "hitB": 18,
+      "delta": 0
+    },
+    {
+      "repo": "retrieval-hard",
+      "tasks": 90,
+      "minedTokens": 1334,
+      "hitA": 67,
+      "hitB": 66,
+      "delta": -1
+    },
+    {
+      "repo": "retrieval-jvm-akka",
+      "tasks": 29,
+      "minedTokens": 462,
+      "hitA": 7,
+      "hitB": 8,
+      "delta": 1
+    },
+    {
+      "repo": "retrieval-jvm-spring-petclinic",
+      "tasks": 32,
+      "minedTokens": 113,
+      "hitA": 7,
+      "hitB": 7,
+      "delta": 0
+    },
+    {
+      "repo": "retrieval-mined",
+      "tasks": 23,
+      "minedTokens": 1334,
+      "hitA": 14,
+      "hitB": 14,
+      "delta": 0
+    },
+    {
       "repo": "riverpod",
       "tasks": 5,
       "minedTokens": 511,
@@ -156,26 +196,5 @@
       "delta": 0
     }
   ],
-  "skipped": [
-    {
-      "repo": "retrieval",
-      "reason": "repo not cloned"
-    },
-    {
-      "repo": "retrieval-hard",
-      "reason": "repo not cloned"
-    },
-    {
-      "repo": "retrieval-jvm-akka",
-      "reason": "repo not cloned"
-    },
-    {
-      "repo": "retrieval-jvm-spring-petclinic",
-      "reason": "repo not cloned"
-    },
-    {
-      "repo": "retrieval-mined",
-      "reason": "repo not cloned"
-    }
-  ]
+  "skipped": []
 }
