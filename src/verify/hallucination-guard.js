@@ -319,7 +319,7 @@ function verify(answerText, cwd, opts = {}) {
   // variadic signatures only flag too-few; dotted calls never flag.
   if (arityIndex && arityIndex.size > 0) {
     for (const block of parsers.extractCodeBlocks(answerText)) {
-      if (block.lang && !/^(js|jsx|ts|tsx|javascript|typescript|python|py)$/i.test(block.lang)) continue;
+      if (block.lang && !/^(js|jsx|ts|tsx|javascript|typescript|python|py|go|golang)$/i.test(block.lang)) continue;
       for (const call of extractCallArgCounts(block.content)) {
         if (!symbolSet.has(call.name)) continue; // unknown symbols stay fake-symbol territory
         const entry = checkArity(call.name, call.args, arityIndex);

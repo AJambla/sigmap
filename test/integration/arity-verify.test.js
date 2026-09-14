@@ -33,6 +33,14 @@ test('parseParams: required, defaults, nested defaults, TS optionals, rest, dest
   assert.deepStrictEqual(parseParams(''), { min: 0, max: 0, variadic: false });
 });
 
+test('parseParams: Go shapes — grouped params, type variadics, nested func types (#643)', () => {
+  assert.deepStrictEqual(parseParams('a, b int'), { min: 2, max: 2, variadic: false });
+  assert.deepStrictEqual(parseParams('nums ...int'), { min: 0, max: 0, variadic: true });
+  assert.deepStrictEqual(parseParams('s []T, f func(T) U'), { min: 2, max: 2, variadic: false });
+  assert.deepStrictEqual(parseParams('f func(a ...int), n int'), { min: 2, max: 2, variadic: false },
+    'a nested func param’s ... must not mark the outer signature variadic');
+});
+
 // ── buildArityIndex ─────────────────────────────────────────────────────────
 
 function sampleIndex() {
@@ -40,7 +48,7 @@ function sampleIndex() {
     ['src/a.js', ['export function add(a, b) → number  :5-5  # Adds two numbers', 'function only(x)  :9-9', 'export const spread = (...args) =>  :12-12']],
     ['src/b.py', ['def greet(name, greeting="hi")  :3-8']],
     ['src/c.js', ['function add(a, b, c)  :1-1']],
-    ['src/d.go', ['func Skip(a int)  :1-1']],
+    ['src/d.go', ['func Skip(a int)  :1-1', 'func (s) Push(v T)  :3-5', 'func Sum(nums ...int) → int  :7-9']],
     ['src/e.js', ['class Thing', '  method(a, b)  :4-6']],
   ]));
 }
@@ -51,7 +59,11 @@ test('buildArityIndex: exact-param languages only; conflicts → ambiguous; memb
   assert.deepStrictEqual({ min: idx.get('only').min, max: idx.get('only').max }, { min: 1, max: 1 });
   assert.deepStrictEqual({ min: idx.get('greet').min, max: idx.get('greet').max }, { min: 1, max: 2 });
   assert.strictEqual(idx.get('spread').variadic, true);
-  assert.strictEqual(idx.get('Skip'), undefined, 'Go sigs must not enter the arity index');
+  // Go joined the exact-param languages in G4 #643: top-level funcs enter the
+  // index, receiver methods stay out (dotted calls are never flagged).
+  assert.deepStrictEqual({ min: idx.get('Skip').min, max: idx.get('Skip').max }, { min: 1, max: 1 });
+  assert.strictEqual(idx.get('Sum').variadic, true, 'Go type-variadic must index as variadic');
+  assert.strictEqual(idx.get('Push'), undefined, 'Go receiver methods must not enter the index');
   assert.strictEqual(idx.get('method'), undefined, 'indented members must not enter the index');
 });
 
@@ -109,6 +121,27 @@ test('verify(): wrong-arity call flags arity-mismatch with the repo signature as
     assert.ok(issue.message.includes('3 argument(s)') && issue.message.includes('takes 2'), issue.message);
     assert.ok(issue.suggestion.includes('charge(amount, currency)'), issue.suggestion);
   });
+});
+
+test('verify(): Go block — wrong-arity call flags, in-range + variadic stay clean (#643)', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sigmap-arity-go-'));
+  fs.mkdirSync(path.join(dir, '.github'), { recursive: true });
+  fs.writeFileSync(path.join(dir, '.github', 'copilot-instructions.md'), [
+    '### src/pad.go',
+    '```',
+    'func Pad(s string, n int) → string  :3-9',
+    'func Sum(nums ...int) → int  :11-13',
+    '```',
+    '',
+  ].join('\n'));
+  try {
+    const bad = verify('Use it:\n```go\nPad("x", 2, true)\n```\n', dir, { libIndex: false });
+    const issue = bad.issues.find((i) => i.type === 'arity-mismatch');
+    assert.ok(issue, `Go arity-mismatch missing: ${JSON.stringify(bad.issues)}`);
+    assert.ok(issue.message.includes('3 argument(s)') && issue.message.includes('takes 2'), issue.message);
+    const clean = verify('```go\nPad("x", 2)\nSum(1, 2, 3, 4)\n```\n', dir, { libIndex: false });
+    assert.ok(!clean.issues.find((i) => i.type === 'arity-mismatch'), JSON.stringify(clean.issues));
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
 test('verify(): in-range call is clean; unknown symbol stays fake-symbol, not arity', () => {
