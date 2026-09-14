@@ -3,6 +3,7 @@
 const { lineAt, withAnchor } = require('./line-anchor');
 const { capWithNotice, capMembersWithNotice } = require('../util/truncate');
 const { stripComments, maskCode, readBalanced } = require('./scan');
+const { scanComponentMarkers, markersForClass, componentMembers } = require('./component-surface');
 
 // Class bodies are scanned to this many characters — guard against
 // pathological input only; the old 4KB window silently hid members (#576).
@@ -76,16 +77,34 @@ function extract(src) {
   }
 
   // Classes (exported and internal)
-  const classRegex = /^(export\s+)?(abstract\s+)?class\s+(\w+)(?:<[^{]*>)?(?:\s+extends\s+[\w<>, .]+)?(?:\s+implements\s+[\w<> ,]+)?\s*\{/gm;
+  const classRegex = /^(export\s+)?(abstract\s+)?class\s+(\w+)(?:<[^{]*>)?(?:\s+extends\s+([\w<>, .]+?))?(?:\s+implements\s+[\w<> ,]+)?\s*\{/gm;
+  // Web-component surface (#537): tag/selector + reactive fields + base are
+  // rendered ONLY when a component marker is detected, so every other class
+  // stays byte-identical.
+  const compMarkers = scanComponentMarkers(stripped);
   for (const m of stripped.matchAll(classRegex)) {
     const prefix = m[1] ? 'export ' : '';
     const abs = m[2] ? 'abstract ' : '';
     const bodyStart = m.index + m[0].length;
     const blockEnd = blockEndIdx(bodyStart);
-    sigs.push(`${prefix}${abs}class ${m[3]}`);
-    anchors.push([lineAt(stripped, m.index), lineAt(stripped, blockEnd)]);
+    const marker = markersForClass(compMarkers.decorated, stripped, m.index, m[0]);
+    const definedTag = compMarkers.defined.get(m[3]);
+    const isComponent = !!(marker || definedTag);
+    const base = isComponent && m[4] ? ` extends ${m[4].trim().replace(/\s+/g, ' ')}` : '';
+    sigs.push(`${prefix}${abs}class ${m[3]}${base}`);
+    const classStartLn = lineAt(stripped, m.index);
+    anchors.push([classStartLn, lineAt(stripped, blockEnd)]);
     const block = stripped.slice(bodyStart, blockEnd);
     const maskedBlock = masked.slice(bodyStart, blockEnd);
+    if (isComponent) {
+      const tag = (marker && marker.tag) || definedTag;
+      if (tag) { sigs.push(`  custom element <${tag}>`); anchors.push([classStartLn, classStartLn]); }
+      else if (marker && marker.selector) { sigs.push(`  selector '${marker.selector}'`); anchors.push([classStartLn, classStartLn]); }
+      for (const cm of componentMembers(block)) {
+        sigs.push(`  ${cm.text}`);
+        anchors.push([lineAt(stripped, bodyStart + cm.start), lineAt(stripped, bodyStart + cm.end)]);
+      }
+    }
     const methods = extractClassMembers(block, maskedBlock);
     for (const meth of methods) {
       sigs.push(`  ${meth.text}`);
