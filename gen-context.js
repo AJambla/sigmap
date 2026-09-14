@@ -14726,18 +14726,27 @@ __factories["./src/judge/judge-engine"] = function(module, exports) {
    *
    * Deterministic, offline, zero-dependency. Reuses `src/verify/parsers`.
    *
+   * Structural half (J1, #640): when `opts.cwd` is provided, the verify engine —
+   * the same `buildSymbolSet` + `buildLibraryIndex` map `sigmap verify` uses —
+   * clears any claim whose check class ran and did not flag it, so a real repo
+   * or installed-library symbol the context never quotes is grounded, while a
+   * fabricated one still fails. One grounding engine, two commands. Without a
+   * cwd, behavior is the original lexical context matching, byte-identical.
+   *
    * @param {string} response
    * @param {string} context
-   * @returns {{ total: number, grounded: number, ungrounded: Array<{kind:string, value:string}> }}
+   * @param {object} [opts]
+   * @param {string} [opts.cwd]  repo root for structural verification
+   * @returns {{ total: number, grounded: number, ungrounded: Array<{kind:string, value:string}>, structural: boolean }}
    */
-  function claimGrounding(response, context) {
-    if (!response || !context) return { total: 0, grounded: 0, ungrounded: [] };
+  function claimGrounding(response, context, opts = {}) {
+    if (!response || !context) return { total: 0, grounded: 0, ungrounded: [], structural: false };
     const ctxLower = context.toLowerCase();
 
     const raw = [];
     for (const s of parsers.extractSymbols(response)) raw.push({ kind: 'symbol', value: s.name });
     for (const f of parsers.extractFilePaths(response)) raw.push({ kind: 'file', value: f.path });
-    for (const i of parsers.extractImports(response)) raw.push({ kind: 'import', value: i.module });
+    for (const i of parsers.extractImports(response)) raw.push({ kind: 'import', value: i.module, relative: !!i.relative });
 
     const seen = new Set();
     const claims = raw.filter((c) => {
@@ -14747,6 +14756,31 @@ __factories["./src/judge/judge-engine"] = function(module, exports) {
       return true;
     });
 
+    let flagged = null;
+    let checks = null;
+    if (opts && typeof opts.cwd === 'string') {
+      try {
+        const { verify } = __require('./src/verify/hallucination-guard');
+        const v = verify(response, opts.cwd);
+        checks = (v.summary && v.summary.checks) || null;
+        flagged = new Set();
+        for (const i of v.issues) {
+          if (i.type === 'fake-symbol') flagged.add(`symbol::${i.value}`);
+          else if (i.type === 'fake-file' || i.type === 'fake-test-file') flagged.add(`file::${i.value}`);
+          else if (i.type === 'fake-import') flagged.add(`import::${i.value}`);
+        }
+      } catch (_) { flagged = null; checks = null; }
+    }
+    // A claim is only structurally clearable when its check class actually ran —
+    // "not flagged" means nothing if the symbol index is empty or there is no
+    // package.json to check bare imports against.
+    const structuralRan = (c) => {
+      if (!checks) return false;
+      if (c.kind === 'symbol') return !!checks.symbols;
+      if (c.kind === 'file') return !!checks.files;
+      return c.relative ? !!checks.relativeImports : !!checks.bareImports;
+    };
+
     const ungrounded = [];
     let grounded = 0;
     for (const c of claims) {
@@ -14755,11 +14789,13 @@ __factories["./src/judge/judge-engine"] = function(module, exports) {
       // are matched on the token itself.
       const needle = c.value.toLowerCase();
       const base = c.kind === 'file' ? (c.value.split('/').pop() || c.value).toLowerCase() : needle;
-      if (ctxLower.includes(base) || ctxLower.includes(needle)) grounded++;
+      const lexical = ctxLower.includes(base) || ctxLower.includes(needle);
+      const structural = flagged !== null && structuralRan(c) && !flagged.has(`${c.kind}::${c.value}`);
+      if (lexical || structural) grounded++;
       else ungrounded.push({ kind: c.kind, value: c.value });
     }
 
-    return { total: claims.length, grounded, ungrounded };
+    return { total: claims.length, grounded, ungrounded, structural: flagged !== null };
   }
 
   const GENERIC_MARKERS = [
@@ -14814,11 +14850,13 @@ __factories["./src/judge/judge-engine"] = function(module, exports) {
     }
 
     // Structural claim grounding: any concrete symbol/file/import the answer
-    // states that the context never mentions is a hallucination the lexical
-    // score above cannot detect. Each ungrounded claim fails the verdict.
-    const claims = claimGrounding(response, context);
+    // states that neither the context nor (with a cwd) the repo/installed-lib
+    // index grounds is a hallucination the lexical score above cannot detect.
+    // Each ungrounded claim fails the verdict.
+    const claims = claimGrounding(response, context, opts);
+    const where = claims.structural ? 'context or repo index' : 'context';
     for (const c of claims.ungrounded) {
-      reasons.push(`${c.kind} claim not grounded in context: ${c.value}${c.kind === 'symbol' ? '()' : ''}`);
+      reasons.push(`${c.kind} claim not grounded in ${where}: ${c.value}${c.kind === 'symbol' ? '()' : ''}`);
     }
 
     const verdict = score >= threshold && reasons.length === 0 ? 'pass' : 'fail';
@@ -23304,6 +23342,16 @@ __factories["./src/verify/hallucination-guard"] = function(module, exports) {
       withSuggestion: issues.filter((i) => i.suggestion).length,
       librariesIndexed: libraries.length,
       libraries: libraries.map((l) => ({ name: l.name, version: l.version, symbols: l.symbols, typed: l.typed })),
+      // Which claim classes actually ran (J1, #640): lets callers distinguish
+      // "checked and clean" from "check skipped" — a symbol NOT flagged means
+      // nothing when no symbol index exists.
+      checks: {
+        symbols: symbolSet.size > 0,
+        files: true,
+        relativeImports: true,
+        bareImports: !!hasPkg,
+        scripts: !!hasPkg && scripts.size > 0,
+      },
     };
 
     return { issues, summary };
@@ -27591,10 +27639,11 @@ function main() {
     if (typeof judgeCfg.learnPenalizeBelow === 'number') judgeOpts.learnPenalizeBelow = judgeCfg.learnPenalizeBelow;
     const thrIdx = args.indexOf('--threshold');
     if (thrIdx >= 0) judgeOpts.threshold = parseFloat(args[thrIdx + 1]) || 0.25;
-    if (args.includes('--learn')) {
-      judgeOpts.learn = true;
-      judgeOpts.cwd = cwd;
-    }
+    // Structural claim grounding (J1): the verify engine checks claims against
+    // the repo + installed-lib index, so cwd is always passed; --learn still
+    // gates the weights feedback loop.
+    judgeOpts.cwd = cwd;
+    if (args.includes('--learn')) judgeOpts.learn = true;
 
     const { judge: runJudge } = requireSourceOrBundled('./src/judge/judge-engine');
     const result = runJudge(responseText, contextText, judgeOpts);

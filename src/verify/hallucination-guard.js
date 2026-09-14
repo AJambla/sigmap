@@ -370,6 +370,16 @@ function verify(answerText, cwd, opts = {}) {
     withSuggestion: issues.filter((i) => i.suggestion).length,
     librariesIndexed: libraries.length,
     libraries: libraries.map((l) => ({ name: l.name, version: l.version, symbols: l.symbols, typed: l.typed })),
+    // Which claim classes actually ran (J1, #640): lets callers distinguish
+    // "checked and clean" from "check skipped" — a symbol NOT flagged means
+    // nothing when no symbol index exists.
+    checks: {
+      symbols: symbolSet.size > 0,
+      files: true,
+      relativeImports: true,
+      bareImports: !!hasPkg,
+      scripts: !!hasPkg && scripts.size > 0,
+    },
   };
 
   return { issues, summary };

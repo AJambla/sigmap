@@ -306,10 +306,98 @@ test('judge band: derived defaults separate 80%/30% grounded mixtures', () => {
     `band ordering violated: 0 < ${learnPenalizeBelow} < ${learnBoostAbove} < 1`);
 });
 
+// ── J1: structural claim grounding via the verify engine (#640) ──────────────
+
+/** Fixture repo with an indexed symbol and an installed, typed direct dep. */
+function structuralFixture() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sigmap-judge-struct-'));
+  fs.mkdirSync(path.join(dir, 'src'), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'node_modules', 'leftpad'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({
+    name: 'judge-fixture', version: '1.0.0', dependencies: { leftpad: '^9.1.0' },
+  }));
+  fs.writeFileSync(path.join(dir, 'node_modules', 'leftpad', 'package.json'),
+    JSON.stringify({ name: 'leftpad', version: '9.1.4', main: 'index.js', types: 'index.d.ts' }));
+  fs.writeFileSync(path.join(dir, 'node_modules', 'leftpad', 'index.js'), 'module.exports = (s) => s;\n');
+  fs.writeFileSync(path.join(dir, 'node_modules', 'leftpad', 'index.d.ts'),
+    'export declare function leftpad(s: string, n: number): string;\n');
+  fs.writeFileSync(path.join(dir, 'src', 'pad.js'),
+    "const leftpad = require('leftpad');\nfunction padded(s) {\n  return leftpad(s, 8);\n}\nmodule.exports = { padded };\n");
+  fs.writeFileSync(path.join(dir, 'gen-context.config.json'), JSON.stringify({ srcDirs: ['src'], changes: false }));
+  spawnSync(process.execPath, [SCRIPT], { cwd: dir, encoding: 'utf8', timeout: 120000 });
+  return dir;
+}
+
+const dirS = structuralFixture();
+const unrelatedCtx = 'completely unrelated prose about nothing in particular';
+
+// 18. repo symbol absent from context grounds structurally; fabricated fails
+test('claimGrounding: repo symbol grounds via the index; fabricated still fails (#640)', () => {
+  const real = claimGrounding('Call `padded()` to pad.', unrelatedCtx, { cwd: dirS });
+  assert.strictEqual(real.structural, true, 'structural pass did not run');
+  assert.strictEqual(real.grounded, 1, JSON.stringify(real));
+  const fake = claimGrounding('Call `fabricatedQuantumFn()` to pad.', unrelatedCtx, { cwd: dirS });
+  assert.strictEqual(fake.ungrounded.length, 1, JSON.stringify(fake));
+});
+
+// 19. installed-lib symbol, declared import, and real file ground; fakes fail
+test('claimGrounding: lib symbol + declared import + real file ground; fakes fail (#640)', () => {
+  const lib = claimGrounding('Use `leftpad()` here.', unrelatedCtx, { cwd: dirS });
+  assert.strictEqual(lib.grounded, 1, `lib symbol should ground via the .d.ts index: ${JSON.stringify(lib)}`);
+  const imp = claimGrounding("import leftpad from 'leftpad'", unrelatedCtx, { cwd: dirS });
+  assert.strictEqual(imp.ungrounded.length, 0, `declared import should ground: ${JSON.stringify(imp)}`);
+  const bad = claimGrounding("import x from 'not-a-real-dep-zzqx'", unrelatedCtx, { cwd: dirS });
+  assert.ok(bad.ungrounded.some((c) => c.kind === 'import'), JSON.stringify(bad));
+  const file = claimGrounding('See src/pad.js for the implementation.', unrelatedCtx, { cwd: dirS });
+  assert.strictEqual(file.grounded, 1, `real file should ground: ${JSON.stringify(file)}`);
+  const nofile = claimGrounding('See src/nonexistent-thing.js for the implementation.', unrelatedCtx, { cwd: dirS });
+  assert.ok(nofile.ungrounded.some((c) => c.kind === 'file'), JSON.stringify(nofile));
+});
+
+// 20. verify summary exposes which claim classes ran
+test('verify summary.checks reports which claim classes ran (#640)', () => {
+  const { verify } = require('../../../src/verify/hallucination-guard');
+  const withIndex = verify('nothing here', dirS);
+  assert.deepStrictEqual(withIndex.summary.checks,
+    { symbols: true, files: true, relativeImports: true, bareImports: true, scripts: false },
+    JSON.stringify(withIndex.summary.checks));
+  const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'sigmap-judge-nochecks-'));
+  const empty = verify('nothing here', bare);
+  assert.strictEqual(empty.summary.checks.symbols, false, 'no index → symbols check must not count as run');
+  assert.strictEqual(empty.summary.checks.bareImports, false, 'no package.json → bareImports must not count as run');
+  fs.rmSync(bare, { recursive: true, force: true });
+});
+
+// 21. with cwd the verdict still fails on fabricated symbols, reason names the index
+test('judge with cwd: fabricated symbol fails and the reason names the repo index (#640)', () => {
+  const response = 'The padded helper calls `fabricatedQuantumFn()` for padding things.';
+  const ctx = 'the padded helper pads things for padding';
+  const r = judge(response, ctx, { threshold: 0.1, cwd: dirS });
+  assert.strictEqual(r.verdict, 'fail', JSON.stringify(r));
+  assert.ok(r.reasons.some((x) => x.includes('context or repo index')), JSON.stringify(r.reasons));
+});
+
+// 22. CLI end-to-end: a repo-true symbol claim the context never quotes now passes
+test('sigmap judge: repo-true symbol claim passes end-to-end (#640)', () => {
+  const resp2 = path.join(dirS, 'r.txt');
+  const ctx2 = path.join(dirS, 'c.txt');
+  fs.writeFileSync(resp2, 'The padding helper calls `padded()` internally.');
+  fs.writeFileSync(ctx2, 'the padding helper lives in src and pads strings internally');
+  const pre = claimGrounding(fs.readFileSync(resp2, 'utf8'), fs.readFileSync(ctx2, 'utf8'));
+  assert.strictEqual(pre.ungrounded.length, 1, 'precondition: lexical-only must NOT ground this claim');
+  const r = spawnSync(process.execPath, [SCRIPT, 'judge', '--response', resp2, '--context', ctx2, '--json'], {
+    encoding: 'utf8', cwd: dirS, timeout: 120000,
+  });
+  const parsed = JSON.parse(r.stdout.trim());
+  assert.strictEqual(parsed.verdict, 'pass', r.stdout);
+  assert.strictEqual(r.status, 0, `expected exit 0, got ${r.status}`);
+});
+
 // Cleanup
 try {
   fs.rmSync(tmpDir, { recursive: true });
   fs.rmSync(extendsTmpDir, { recursive: true });
+  fs.rmSync(dirS, { recursive: true });
 } catch (_) {}
 
 // ── Summary ───────────────────────────────────────────────────────────────────
