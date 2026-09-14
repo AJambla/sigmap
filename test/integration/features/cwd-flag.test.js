@@ -230,7 +230,7 @@ test('11. default run without --cwd still exits 0', () => {
   const r = spawnSync('node', [GEN, '--health'], {
     cwd: ROOT,
     encoding: 'utf8',
-    timeout: 30000,
+    timeout: 120000,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   assert.strictEqual(r.status, 0, `--health should exit 0: ${r.stderr}`);

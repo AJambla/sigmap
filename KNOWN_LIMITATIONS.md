@@ -2,13 +2,14 @@
 
 SigMap's benchmark claims are honesty-audited (measured grep-agent baseline, retrieval-tier proxies labeled as proxies, leakage-gated hard corpus). This page extends the same standard to the **extraction layer**: what each extractor tier actually does, where it truncates, and what that means for verification. Every claim here is checkable against the code.
 
-Currently: **44 extractor modules covering 33 languages**. Counts are guarded against drift by `test/integration/known-limitations.test.js` (they must match `version.json`).
+Currently: **45 extractor modules covering 33 languages**. Counts are guarded against drift by `test/integration/known-limitations.test.js` (they must match `version.json`).
 
 ## Extractor tiers
 
 | Tier | Languages | How it works | What it can miss |
 |------|-----------|--------------|------------------|
 | **1 — AST** | Python | Native CPython AST parse via `src/extractors/python_ast.py` when `python3` is on PATH; falls back to Tier-2-style regex when it is not | With the fallback active: same gaps as Tier 2 |
+| **1 — LSP (opt-in)** | C/C++ (measured) · Go, Rust (designed) | `exactness.lsp: true` asks a language server already on the machine (clangd/gopls/rust-analyzer or `exactness.lspServers` overrides) for documentSymbol; results cached per content hash + server binary. A per-file quality guard accepts the LSP result only when it does not lose surface vs the regex tier — a server parsing standalone can be macro-blind (clangd saw 7 of fmt/format.h's symbols). Header labels `toolchain=<server>@<version>` when used | Guard-refused or failed files: same gaps as Tier 2. Symbol detail strings are server-rendered and vary per server |
 | **1 — AST (opt-in)** | TypeScript | `exactness.typescript: true` parses `.ts` with the TARGET repo's own `node_modules/typescript` (classic-API ≤5.x line; typescript@7's native compiler exposes no stable CJS API and falls back). Silent regex fallback; the generated header labels `toolchain=typescript@<version>` when active, so byte-stability is stated per toolchain version | Flag off or no usable typescript: same gaps as Tier 2. Hook return-shape sugar (`use*`) is regex-tier only |
 | **2 — anchored regex** | JavaScript, TypeScript, Go, Rust, Java, Kotlin, Swift, PHP, Scala, Dart, C# (11) | Newline-preserving comment strip → declaration regexes → brace-depth block matching. Signatures carry `:start-end` line anchors; 6 languages (Python, JS, TS, Go, Rust, Java) also carry first-sentence doc-comment hints | Exotic declaration syntax the regexes don't cover (see gaps below); no type resolution — signatures are textual |
 | **3 — pattern/heuristic** | Everything else — Ruby, C/C++, GDScript, Vue/Svelte SFCs, SQL, GraphQL, Terraform, Protobuf, shell, config formats (YAML/TOML/XML/HTML/CSS/Markdown/properties/Dockerfile), and a generic fallback | Line-oriented pattern matching tuned per format | Anything structurally nested or syntactically unusual; no anchors, no doc hints |

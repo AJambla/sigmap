@@ -35,6 +35,9 @@ To ensure proper attribution:
 
 We welcome contributions! See [Contributing](./docs/CONTRIBUTING.md) for guidelines.
 
+### Recent Contributors (v8.37.0)
+- **@manojmallick** — feat(lsp): zero-dep synchronous LSP client — documentSymbol via clangd/gopls/rust-analyzer behind exactness.lsp, per-file quality guard so the tier never loses surface to regex, content+binary-keyed cache, acceptance-gated toolchain labels; libuv +37% / spdlog +15% effective signatures with clangd (#612, PR #613)
+
 ### Recent Contributors (v8.36.0)
 - **@manojmallick** — feat(extractors): T2 exactness — .ts parsed with the target repo's own typescript behind exactness.typescript, silent byte-identical regex fallback, toolchain-labeled header; +54% signatures on zod with zero parse failures, typescript@7's API-less shape rejected by design (#609, PR #610)
 

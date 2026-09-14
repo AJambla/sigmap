@@ -240,6 +240,8 @@ sigmap --analyze          # files scanned, signatures per file
 | `retrieval.surfaceEnrichment` | `boolean` | `false` | **v8.18.0, opt-in.** Append `route METHOD /path` pseudo-signatures to the rankable index so route-worded queries can match controllers whose signatures never mention the path (Express/Fastify/NestJS/Flask/FastAPI/Gin/Spring). Measured on the 90-task A/B: **+0 delta** (the corpus never asks route-worded questions), so it stays off by default; enable it on API-heavy repos. Re-measure with `npm run benchmark:surface-enrichment`. |
 | `retrieval.centralityBlend` | `boolean` | `false` | **v8.21.0, opt-in.** Blend import-graph centrality (zero-dep power iteration over the forward dependency graph) into `ask`/`--query`/`query_context` ranking as a small additive prior (`0.3 × centrality`) on positively-scored files only — heavily-referenced files break ties above one-off helpers, and non-matching files are never surfaced. Measured on the 90-task A/B: **+0 delta** (both arms 77.8% hit@5), so it stays off by default; enable it on hub-and-spoke architectures and check the `centrality` signal in `--query --json`. Re-measure with `npm run benchmark:centrality-blend`. |
 | `exactness.typescript` | `boolean` | `false` | **v8.36.0, opt-in.** Parse `.ts` with the **target repo's own** `node_modules/typescript` (the user's install — nothing is bundled) for true-AST signatures: exact anchors across multiline declarations, constrained generics, and the typed arrow consts regex cannot see. Silent, byte-identical regex fallback when the flag is off, no typescript resolves, or the resolved package has no compiler API (typescript@7's Go-native compiler is rejected by design — its path is the future LSP tier). When native extraction fires, the generated header carries `toolchain=typescript@<version>`, so byte-stability is stated per toolchain version. Measured +54% signatures on zod with typescript@5.9.3, 0 parse failures. See [exactness.typescript](#exactness-typescript). |
+| `exactness.lsp` | `boolean` | `false` | **v8.37.0, opt-in.** Ask a language server already on the machine (clangd/gopls/rust-analyzer) for `documentSymbol` per file — server-typed details and exact multiline ranges, cached across runs by content hash + server binary. A per-file quality guard accepts the LSP result only when it does not lose surface vs the regex tier (a server parsing standalone can be macro-blind), so the tier is strictly non-losing. Header labels `toolchain=<server>@<version>` when used. Measured with clangd: libuv +37%, spdlog +15% effective signatures. See [exactness.lsp](#exactness-lsp). |
+| `exactness.lspServers` | `object` | `{}` | Extension → command-array overrides laid over the built-in server registry, e.g. `{ ".rs": ["rust-analyzer"] }`. Commands are spawned directly with an argument array — never a shell. |
 
 ### sigCache
 
@@ -268,6 +270,16 @@ Enable incremental signature caching with mtime-based validation. When enabled, 
 ```json
 {
   "exactness": { "typescript": true }
+}
+```
+
+### exactness.lsp
+
+**v8.37.0+ (#612, tier T3 of the host-toolchain ladder).** One client, every LSP language: a synchronous, pipelined `documentSymbol` session against a server the machine already has — clangd ships with Xcode CLT; gopls and rust-analyzer are used where installed; `exactness.lspServers` maps extensions to any other server command. Results are cached in `.context/lsp-cache.json` (content hash + server binary, so a file edit or a server upgrade invalidates) and warm regenerates spawn nothing. Because a server parsing a file standalone can be macro-blind, every LSP result passes a per-file quality guard: it is accepted only when it does not lose surface versus the regex tier, with ties going to LSP for its exact anchors. Failures of any kind — no server, crash, timeout, guard refusal — fall back to the regex tier silently and leave no toolchain label.
+
+```json
+{
+  "exactness": { "lsp": true, "lspServers": { ".zig": ["zls"] } }
 }
 ```
 

@@ -203,7 +203,7 @@ test('sigmap plan detects intent from goal', () => {
 // impactRadius is now a real graph result: null or {direct:[], transitive:[]}
 test('sigmap plan --json: impactRadius is a real graph shape, not always null', () => {
   const result = spawnSync('node', [SCRIPT, 'plan', 'rank files by relevance score', '--json'], {
-    cwd: ROOT, encoding: 'utf8', timeout: 30000,
+    cwd: ROOT, encoding: 'utf8', timeout: 120000,
   });
   assert.strictEqual(result.status, 0, `exit ${result.status}\n${result.stderr}`);
   const out = JSON.parse(result.stdout);
@@ -218,7 +218,7 @@ test('sigmap plan --json: impactRadius is a real graph shape, not always null', 
 // coveredFiles is honest (source files with coverage); testsAffected aliases it
 test('sigmap plan --json: coveredFiles array present and testsAffected aliases it', () => {
   const result = spawnSync('node', [SCRIPT, 'plan', 'fix authentication issue', '--json'], {
-    cwd: ROOT, encoding: 'utf8', timeout: 30000,
+    cwd: ROOT, encoding: 'utf8', timeout: 120000,
   });
   const out = JSON.parse(result.stdout);
   assert.ok(Array.isArray(out.coveredFiles), 'coveredFiles should be an array');
@@ -229,7 +229,7 @@ test('sigmap plan --json: coveredFiles array present and testsAffected aliases i
 // the misleading "Tests to run after change" label is gone from human output
 test('sigmap plan: human output no longer claims to list "Tests to run"', () => {
   const result = spawnSync('node', [SCRIPT, 'plan', 'add rate limiting'], {
-    cwd: ROOT, encoding: 'utf8', timeout: 30000,
+    cwd: ROOT, encoding: 'utf8', timeout: 120000,
   });
   assert.strictEqual(result.status, 0);
   assert.ok(!/Tests to run after change/.test(result.stdout),

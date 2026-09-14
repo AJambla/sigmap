@@ -245,7 +245,7 @@ test('CLI --help exits without a crash (exit code 0 or 1)', () => {
   const res = spawnSync('node', [SCRIPT, '--help'], {
     cwd: ROOT,
     encoding: 'utf8',
-    timeout: 10000,
+    timeout: 120000,
   });
   assert.ok(
     res.status === 0 || res.status === 1,

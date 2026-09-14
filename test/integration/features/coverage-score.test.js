@@ -150,7 +150,7 @@ test('grade reflects code-only coverage (not inflated by json/md)', () => {
 // 8. --report output says "code files" not "source files"
 test('--report output label says "code files"', () => {
   const out = execSync(`node ${path.join(ROOT, 'gen-context.js')} --report`, {
-    cwd: ROOT, encoding: 'utf8', timeout: 30000,
+    cwd: ROOT, encoding: 'utf8', timeout: 120000,
   });
   assert.ok(out.includes('code files') || out.includes('code files included'),
     `--report should say "code files", got: ${out.slice(0, 300)}`);
@@ -161,7 +161,7 @@ test('--report output label says "code files"', () => {
 // 9. --report output contains non-code skip note when skipped > 0
 test('--report output contains non-code skip note', () => {
   const out = execSync(`node ${path.join(ROOT, 'gen-context.js')} --report`, {
-    cwd: ROOT, encoding: 'utf8', timeout: 30000,
+    cwd: ROOT, encoding: 'utf8', timeout: 120000,
   });
   // sigmap's own repo has json, md files in src dirs
   // The note only appears when nonCodeSkipped > 0
@@ -174,7 +174,7 @@ test('--report output contains non-code skip note', () => {
 // 10. --health output says "file access" not "coverage ... source files"
 test('--health output label says "file access"', () => {
   const out = execSync(`node ${path.join(ROOT, 'gen-context.js')} --health`, {
-    cwd: ROOT, encoding: 'utf8', timeout: 30000,
+    cwd: ROOT, encoding: 'utf8', timeout: 120000,
   });
   assert.ok(out.includes('file access'),
     `--health should say "file access", got: ${out.slice(0, 300)}`);

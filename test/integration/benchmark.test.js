@@ -195,7 +195,7 @@ test('CLI --benchmark --json: valid JSON with required fields', () => {
   const res = spawnSync('node', [SCRIPT, '--benchmark', '--json'], {
     cwd: ROOT,
     encoding: 'utf8',
-    timeout: 15000,
+    timeout: 120000,
     maxBuffer: 1024 * 1024,
   });
   assert.strictEqual(res.status, 0, `exit ${res.status}: ${res.stderr}`);

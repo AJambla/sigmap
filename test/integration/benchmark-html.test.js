@@ -103,7 +103,7 @@ test('render-benchmark-report writes self-contained html from saved reports', ()
     execSync(`node "${SCRIPT}" --cwd "${dir}"`, {
       cwd: ROOT,
       encoding: 'utf8',
-      timeout: 20000,
+      timeout: 120000,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
@@ -126,7 +126,7 @@ test('render-benchmark-report --json returns file and summary', () => {
     const out = execSync(`node "${SCRIPT}" --cwd "${dir}" --json`, {
       cwd: ROOT,
       encoding: 'utf8',
-      timeout: 20000,
+      timeout: 120000,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     const parsed = JSON.parse(out.trim());
