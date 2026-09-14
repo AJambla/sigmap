@@ -10,6 +10,13 @@ Format: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [8.36.0] — 2026-09-14
+
+### Added
+- **T2 exactness: TypeScript via the target repo's own compiler** (#609, PR #610) — the first shipping increment of the #542 host-toolchain tier ladder. `exactness: { typescript: true }` parses `.ts` with the repo's own `node_modules/typescript` (the user's install, never bundled — the lib-index precedent), shipped dark behind the flag with a silent, byte-identical regex fallback for every failure shape: flag off, package absent, or package without the compiler API. That last shape is not hypothetical — **typescript@7**, the Go-native compiler and current npm latest, exposes only `version` through its CommonJS entry, so the resolver rejects it cleanly and 7.x repos stay on the regex floor until the LSP tier (#542 T3, which is what tsgo actually speaks); a hermetic test pins that exact package shape. Determinism honesty: when native extraction fires, the generated header's meta line carries `toolchain=typescript@<version>`, so byte-stability is stated per toolchain version (KNOWN_LIMITATIONS gains the opt-in AST tier row). Measured with typescript@5.9.3 on zod (286 files): 0 parse failures, 256/286 byte-identical, signatures 1,185 → 1,831 (+54%) — audited class by class: typed arrow consts whose annotations defeat the regex tier's `[^=]+` guard, exact end-line anchors across multiline declarations, and the removal of spurious "members" regex extracted from nested object-type literals. `.tsx` deferred: its extractor speaks a different output vocabulary and is its own increment
+
+---
+
 ## [8.35.0] — 2026-09-13
 
 ### Added

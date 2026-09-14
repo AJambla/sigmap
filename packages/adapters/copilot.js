@@ -45,6 +45,8 @@ function _confidenceMeta(opts) {
   if (opts.coverage != null) parts.push(`coverage=${opts.coverage}%`);
   if (opts.dropped  != null) parts.push(`dropped=${opts.dropped}`);
   if (opts.commit)        parts.push(`commit=${opts.commit}`);
+  // Host-toolchain label (#609): byte-stability holds per toolchain version.
+  if (opts.toolchain)     parts.push(`toolchain=${opts.toolchain}`);
   return `<!-- sigmap: ${parts.join(' ')} -->`;
 }
 

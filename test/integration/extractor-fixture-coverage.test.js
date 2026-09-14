@@ -33,7 +33,7 @@ function test(name, fn) {
 // source-meta is ESM; mirror its helper list rather than import it here, and
 // assert below that the two stay in step.
 const HELPERS = new Set([
-  'line-anchor', 'deps', 'coverage', 'patterns', 'python_ast', 'scan',
+  'line-anchor', 'deps', 'coverage', 'patterns', 'python_ast', 'scan', 'typescript_native',
   'python_dataclass', 'todos', 'prdiff', 'dispatch', 'generic',
 ]);
 

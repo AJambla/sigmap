@@ -35,6 +35,9 @@ To ensure proper attribution:
 
 We welcome contributions! See [Contributing](./docs/CONTRIBUTING.md) for guidelines.
 
+### Recent Contributors (v8.36.0)
+- **@manojmallick** — feat(extractors): T2 exactness — .ts parsed with the target repo's own typescript behind exactness.typescript, silent byte-identical regex fallback, toolchain-labeled header; +54% signatures on zod with zero parse failures, typescript@7's API-less shape rejected by design (#609, PR #610)
+
 ### Recent Contributors (v8.35.0)
 - **@manojmallick** — fix(retrieval): graph-boost seeds snapshotted so rank() no longer depends on index insertion order or git history depth; hard 72.2% → 75.6% as cascade noise stopped crediting near-hub files (#596, PR #604); fix(budget): the drop order now recognises JVM test conventions and protects entry points — spring-petclinic had kept all 17 test files while dropping the application entry point and every owner template (#592, PR #605); feat(extractors): member/per-file/body-scan ceilings raised to Java parity, un-hiding 43–71% of member surface on Swift/PHP/Kotlin/Scala/C# repos with hard bit-stable at 75.6% (#576, PR #606); fix(mcp): honest protocol-version negotiation plus session-less server/discover — both @hasmcp/mcp-spec-test verdicts now conformant on what could be checked (#544, #545, PR #607)
 

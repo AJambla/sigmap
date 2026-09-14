@@ -239,6 +239,7 @@ sigmap --analyze          # files scanned, signatures per file
 | `retrieval.callGraphBoost` | `boolean` | `false` | **v8.15.0, opt-in.** Boost files call-graph-connected to query matches in `ask`/`--query`/`query_context` — catches Go/Java same-package relations that have no import edge. Measured on the 90-task A/B: **+0 hit@5 delta**, so it stays off by default; enable it on call-topology-heavy repos and check the `callGraphBoost` signal in `--query --json`. Re-measure with `npm run benchmark:callgraph-boost`. |
 | `retrieval.surfaceEnrichment` | `boolean` | `false` | **v8.18.0, opt-in.** Append `route METHOD /path` pseudo-signatures to the rankable index so route-worded queries can match controllers whose signatures never mention the path (Express/Fastify/NestJS/Flask/FastAPI/Gin/Spring). Measured on the 90-task A/B: **+0 delta** (the corpus never asks route-worded questions), so it stays off by default; enable it on API-heavy repos. Re-measure with `npm run benchmark:surface-enrichment`. |
 | `retrieval.centralityBlend` | `boolean` | `false` | **v8.21.0, opt-in.** Blend import-graph centrality (zero-dep power iteration over the forward dependency graph) into `ask`/`--query`/`query_context` ranking as a small additive prior (`0.3 × centrality`) on positively-scored files only — heavily-referenced files break ties above one-off helpers, and non-matching files are never surfaced. Measured on the 90-task A/B: **+0 delta** (both arms 77.8% hit@5), so it stays off by default; enable it on hub-and-spoke architectures and check the `centrality` signal in `--query --json`. Re-measure with `npm run benchmark:centrality-blend`. |
+| `exactness.typescript` | `boolean` | `false` | **v8.36.0, opt-in.** Parse `.ts` with the **target repo's own** `node_modules/typescript` (the user's install — nothing is bundled) for true-AST signatures: exact anchors across multiline declarations, constrained generics, and the typed arrow consts regex cannot see. Silent, byte-identical regex fallback when the flag is off, no typescript resolves, or the resolved package has no compiler API (typescript@7's Go-native compiler is rejected by design — its path is the future LSP tier). When native extraction fires, the generated header carries `toolchain=typescript@<version>`, so byte-stability is stated per toolchain version. Measured +54% signatures on zod with typescript@5.9.3, 0 parse failures. See [exactness.typescript](#exactness-typescript). |
 
 ### sigCache
 
@@ -257,6 +258,16 @@ Enable incremental signature caching with mtime-based validation. When enabled, 
 ```json
 {
   "versionPins": true
+}
+```
+
+### exactness.typescript
+
+**v8.36.0+ (#609, tier T2 of the host-toolchain ladder).** Opt in to true-AST TypeScript extraction using the target repo's own `typescript` package — resolved from `node_modules` upward from each file, never bundled, never required to exist. Works with the classic compiler API (the `typescript@5.x` line and earlier); `typescript@7`'s Go-native compiler exposes no stable CommonJS API and falls back to the regex tier cleanly. Every failure shape — flag off, package absent, package unusable, parse error — produces output byte-identical to the flag being off. When native extraction fires, the generated header's meta line records `toolchain=typescript@<version>`: output is deterministic per toolchain version, and the label makes that boundary visible.
+
+```json
+{
+  "exactness": { "typescript": true }
 }
 ```
 
