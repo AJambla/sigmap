@@ -39,6 +39,7 @@ const LANG_EXT = {
   scala: 'scala',
   lua: 'lua',
   elixir: 'ex',
+  astro: 'astro',
   r: 'r',
   vue: 'vue',
   svelte: 'svelte',

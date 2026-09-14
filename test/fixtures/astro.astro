@@ -1,0 +1,32 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Card from '../components/Card.astro';
+import { getCollection } from 'astro:content';
+
+interface Props {
+  title: string;
+  description?: string;
+  tags: string[];
+}
+
+const { title, description = 'A post', tags } = Astro.props;
+
+const posts = await getCollection('blog');
+
+/** Formats a date for display. */
+export function formatDate(date: Date): string {
+  return date.toLocaleDateString('en-US');
+}
+
+function slugify(text: string): string {
+  return text.toLowerCase().replace(/\s+/g, '-');
+}
+---
+
+<Layout title={title}>
+  <h1>{title}</h1>
+  {posts.map((post) => (
+    <Card title={post.data.title} href={slugify(post.data.title)} />
+  ))}
+  <astro-heart count="0"></astro-heart>
+</Layout>
