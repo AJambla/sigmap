@@ -57,7 +57,8 @@
     "benchmark:honest": "node scripts/run-honest-benchmark.mjs --save",
     "benchmark:llm-ablation": "node scripts/run-llm-ablation.mjs",
     "benchmark:retrieval": "node scripts/run-retrieval-gate.mjs",
-    "validate:retrieval": "node scripts/check-corpus.mjs && node scripts/check-corpus.mjs benchmarks/tasks/retrieval-mined.jsonl && node scripts/run-retrieval-gate.mjs --gate --no-regress"
+    "validate:retrieval": "node scripts/check-corpus.mjs && node scripts/check-corpus.mjs benchmarks/tasks/retrieval-mined.jsonl && node scripts/run-retrieval-gate.mjs --gate --no-regress",
+    "benchmark:mined-expansions": "node scripts/run-mined-expansions-benchmark.mjs --save"
   },
   "files": [
     "gen-context.js",
@@ -120,6 +121,5 @@
   "license": "MIT",
   "engines": {
     "node": ">=18.0.0"
-  },
-  "devDependencies": {}
+  }
 }

@@ -1,0 +1,181 @@
+{
+  "benchmark": "mined-expansions-ab",
+  "arms": {
+    "A": "rank baseline",
+    "B": "rank + repo-mined query expansion"
+  },
+  "tasks": 105,
+  "hitAt5A": 89.5,
+  "hitAt5B": 90.5,
+  "mrrA": 0.715,
+  "mrrB": 0.72,
+  "deltaTasks": 1,
+  "perRepo": [
+    {
+      "repo": "abseil-cpp",
+      "tasks": 5,
+      "minedTokens": 1198,
+      "hitA": 5,
+      "hitB": 5,
+      "delta": 0
+    },
+    {
+      "repo": "akka",
+      "tasks": 5,
+      "minedTokens": 462,
+      "hitA": 5,
+      "hitB": 5,
+      "delta": 0
+    },
+    {
+      "repo": "axios",
+      "tasks": 8,
+      "minedTokens": 77,
+      "hitA": 4,
+      "hitB": 4,
+      "delta": 0
+    },
+    {
+      "repo": "express",
+      "tasks": 8,
+      "minedTokens": 21,
+      "hitA": 7,
+      "hitB": 7,
+      "delta": 0
+    },
+    {
+      "repo": "fastapi",
+      "tasks": 5,
+      "minedTokens": 463,
+      "hitA": 5,
+      "hitB": 5,
+      "delta": 0
+    },
+    {
+      "repo": "fastify",
+      "tasks": 8,
+      "minedTokens": 113,
+      "hitA": 6,
+      "hitB": 7,
+      "delta": 1
+    },
+    {
+      "repo": "flask",
+      "tasks": 8,
+      "minedTokens": 246,
+      "hitA": 7,
+      "hitB": 7,
+      "delta": 0
+    },
+    {
+      "repo": "gin",
+      "tasks": 8,
+      "minedTokens": 349,
+      "hitA": 8,
+      "hitB": 8,
+      "delta": 0
+    },
+    {
+      "repo": "laravel",
+      "tasks": 5,
+      "minedTokens": 1684,
+      "hitA": 5,
+      "hitB": 5,
+      "delta": 0
+    },
+    {
+      "repo": "okhttp",
+      "tasks": 5,
+      "minedTokens": 41,
+      "hitA": 5,
+      "hitB": 5,
+      "delta": 0
+    },
+    {
+      "repo": "rails",
+      "tasks": 5,
+      "minedTokens": 1184,
+      "hitA": 5,
+      "hitB": 5,
+      "delta": 0
+    },
+    {
+      "repo": "riverpod",
+      "tasks": 5,
+      "minedTokens": 511,
+      "hitA": 4,
+      "hitB": 4,
+      "delta": 0
+    },
+    {
+      "repo": "rust-analyzer",
+      "tasks": 5,
+      "minedTokens": 1347,
+      "hitA": 5,
+      "hitB": 5,
+      "delta": 0
+    },
+    {
+      "repo": "serilog",
+      "tasks": 5,
+      "minedTokens": 321,
+      "hitA": 5,
+      "hitB": 5,
+      "delta": 0
+    },
+    {
+      "repo": "spring-petclinic",
+      "tasks": 5,
+      "minedTokens": 113,
+      "hitA": 5,
+      "hitB": 5,
+      "delta": 0
+    },
+    {
+      "repo": "svelte",
+      "tasks": 5,
+      "minedTokens": 595,
+      "hitA": 4,
+      "hitB": 4,
+      "delta": 0
+    },
+    {
+      "repo": "vapor",
+      "tasks": 5,
+      "minedTokens": 431,
+      "hitA": 4,
+      "hitB": 4,
+      "delta": 0
+    },
+    {
+      "repo": "vue-core",
+      "tasks": 5,
+      "minedTokens": 419,
+      "hitA": 5,
+      "hitB": 5,
+      "delta": 0
+    }
+  ],
+  "skipped": [
+    {
+      "repo": "retrieval",
+      "reason": "repo not cloned"
+    },
+    {
+      "repo": "retrieval-hard",
+      "reason": "repo not cloned"
+    },
+    {
+      "repo": "retrieval-jvm-akka",
+      "reason": "repo not cloned"
+    },
+    {
+      "repo": "retrieval-jvm-spring-petclinic",
+      "reason": "repo not cloned"
+    },
+    {
+      "repo": "retrieval-mined",
+      "reason": "repo not cloned"
+    }
+  ]
+}
