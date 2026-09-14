@@ -10,6 +10,17 @@ Format: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [8.40.0] — 2026-09-14
+
+### Added
+- **Elixir extractor (Tier 3)** (#538, PR #623) — `.ex`/`.exs` in the Lua/Ruby family: `defmodule` blocks with `@moduledoc` hints; `def`/`defp`/`defmacro` with params (parens optional, `when` guards stripped, `%User{} = user` patterns reduced to binding names, `\\` defaults dropped); `@spec` as a `→ ret` hint and `@doc` first sentence as a doc hint on the next def; single-underscore names filtered, dunder macros kept. Deps genuinely resolve: `alias`/`import`/`use`/`require` module names become graph edges via the `lib/` snake_case convention with longest-suffix matching — external modules miss the file set, so no false edges
+- **Astro SFC extractor** (#539, PR #624) — `.astro` frontmatter between `---` fences is delegated to the real TypeScript extractor with anchors shifted to file coordinates (the non-exported `interface Props` convention handled by a same-line export prefix, so line numbers survive). Astro-specific passes add the `Astro.props` destructure, non-exported top-level functions, and awaited data-loading consts; capitalized template components land as a compact `uses A, B` hint. With #537's component surface (v8.39.0), every item in the #541 ranked build list has shipped
+
+### Fixed
+- **The CLI kept its own extension→extractor map, and it had drifted** (#538, PR #623) — a third resolution map, the exact class #591 eliminated, lacking `.lua` and `.gd`: **Lua and GDScript had been silently falling to the generic fallback in the generate pipeline** while their extractors passed every direct test. Deleted rather than patched — resolution now delegates to `dispatch.js` (verified a strict superset before deletion), and a regression test generates a repo with `.lua` + `.ex` files and asserts both reach their real extractors end-to-end
+
+---
+
 ## [8.39.0] — 2026-09-14
 
 ### Added

@@ -1,7 +1,7 @@
 ---
 layout: home
 title: SigMap — the deterministic, verifiable grounding layer for AI code work
-description: SigMap builds a deterministic, auditable signature-and-evidence map that AI agents, CI, and reviewers can trust and verify. Zero dependencies, no embeddings, fully offline. Proof — 78.6% hit@5, 43.4% fewer prompts, 96.6% average token reduction, 33 languages with R support.
+description: SigMap builds a deterministic, auditable signature-and-evidence map that AI agents, CI, and reviewers can trust and verify. Zero dependencies, no embeddings, fully offline. Proof — 78.6% hit@5, 43.4% fewer prompts, 96.6% average token reduction, 35 languages with R support.
 head:
   - - meta
     - property: og:title
@@ -60,7 +60,7 @@ features:
     link: /guide/judge
     linkText: Workflow docs →
   - icon: 🌐
-    title: 33 languages, zero native deps
+    title: 35 languages, zero native deps
     details: TypeScript, Python, Go, Rust, Java, Kotlin, Ruby, PHP, Swift, C#, C++, Dart, Scala, Vue, Svelte, GraphQL, SQL, Terraform, R, GDScript, and more.
     link: /guide/languages
     linkText: Language support →
@@ -78,12 +78,12 @@ features:
 
 <div style="max-width:840px;margin:0 auto;padding:18px 24px 0;text-align:center">
 <div style="display:inline-flex;flex-wrap:wrap;gap:.5rem;justify-content:center;background:var(--vp-c-brand-soft,#ede9fe);border:1px solid rgba(124,106,247,.25);border-radius:999px;padding:.55rem .9rem;font-size:.9rem;color:var(--vp-c-text-1)">
-  <span><strong>Release:</strong> v8.39.0</span>
+  <span><strong>Release:</strong> v8.40.0</span>
   <span>·</span>
-  <span><strong>New — the tag name is the API:</strong> Lit, Angular, and vanilla web components now extract their real public surface — <code>custom element &lt;user-card&gt;</code> tags, selectors, typed <code>@property</code>/<code>@Input</code> fields, and base classes — so an agent searching for a tag actually finds the component. Gated on detection: byte-identity for everything else verified across 1,291 real files. Zero dependencies, offline, deterministic.</span>
+  <span><strong>New — Elixir and Astro join, and a lying map dies:</strong> Elixir lands with @spec return hints and alias/import edges that genuinely resolve; Astro frontmatter runs through the real TypeScript extractor. And the CLI's drifted copy of the resolution map is deleted — Lua and GDScript had been silently falling to the generic fallback while their extractors passed every direct test. 35 languages, zero dependencies, offline, deterministic.</span>
 </div>
 <div style="margin-top:.4rem;display:inline-flex;flex-wrap:wrap;gap:.5rem;justify-content:center;background:var(--vp-c-default-soft,#f3f4f6);border:1px solid rgba(0,0,0,.08);border-radius:999px;padding:.55rem .9rem;font-size:.9rem;color:var(--vp-c-text-2)">
-  <span><strong>Benchmark:</strong> sigmap-v8.39-main</span>
+  <span><strong>Benchmark:</strong> sigmap-v8.40-main</span>
   <span>·</span>
   <span>78.6% hit@5 · 96.6% token reduction · 2026-09-13</span>
 </div>
@@ -176,7 +176,7 @@ See the full [end-to-end walkthrough](/guide/walkthrough) to watch this in actio
 | Overall token reduction | — | **96.6%** |
 | GPT-4o overflow repos | 16/21 | **0/21** |
 
-Latest saved benchmark run: **2026-09-13 (v8.39.0)**.
+Latest saved benchmark run: **2026-09-13 (v8.40.0)**.
 
 </div>
 

@@ -1,13 +1,13 @@
 ---
 title: Roadmap
-description: SigMap version history and roadmap. From v0.0 to v8.39.0, with recent releases completing the grounded-codegen plan — a realistic §9 ablation (real-symbol corpus, exact-signature grounding, --verbose), a Gemini (AI Studio) provider for the §9 ablation, the init Creation-workflow CLAUDE.md block, scaffold persistence, the LLM A/B hallucination ablation harness, the sigmap create orchestrator and its four guard stages (scaffold, verify-plan, verify-ai-output, review-pr), the conventions command with its full flag set (--conflicts, --inject, --report, --ci, --fix, --update), the grounding benchmark, read-time self-heal, live-index MCP write hooks, the get_callee_signatures MCP tool (exact callee signatures), realistic per-query savings, release-pipeline robustness (bundle integrity + version.json gates, standalone-bundle smoke test), the sigmap gain token-savings dashboard, supply-chain hardening (zero system-shell access), Squeeze input minimization with symbol enrichment, source-of-truth llms.txt, the verify-ai-output Hallucination Guard, and Memory tools (note, status, read_memory MCP tool).
+description: SigMap version history and roadmap. From v0.0 to v8.40.0, with recent releases completing the grounded-codegen plan — a realistic §9 ablation (real-symbol corpus, exact-signature grounding, --verbose), a Gemini (AI Studio) provider for the §9 ablation, the init Creation-workflow CLAUDE.md block, scaffold persistence, the LLM A/B hallucination ablation harness, the sigmap create orchestrator and its four guard stages (scaffold, verify-plan, verify-ai-output, review-pr), the conventions command with its full flag set (--conflicts, --inject, --report, --ci, --fix, --update), the grounding benchmark, read-time self-heal, live-index MCP write hooks, the get_callee_signatures MCP tool (exact callee signatures), realistic per-query savings, release-pipeline robustness (bundle integrity + version.json gates, standalone-bundle smoke test), the sigmap gain token-savings dashboard, supply-chain hardening (zero system-shell access), Squeeze input minimization with symbol enrichment, source-of-truth llms.txt, the verify-ai-output Hallucination Guard, and Memory tools (note, status, read_memory MCP tool).
 head:
   - - meta
     - property: og:title
       content: "SigMap Roadmap — version history and upcoming features"
   - - meta
     - property: og:description
-      content: "179 versions shipped. See what changed in each release and what is coming next."
+      content: "180 versions shipped. See what changed in each release and what is coming next."
   - - meta
     - property: og:url
       content: "https://sigmap.io/guide/roadmap"
@@ -20,9 +20,9 @@ head:
 ---
 # Roadmap
 
-One hundred seventy-nine versions shipped. MIT open source from day one.
+One hundred eighty versions shipped. MIT open source from day one.
 
-**Stats:** 96.6% overall token reduction · 78.6% retrieval hit@5 (1.73× measured lift vs single-shot grep) · 98.0% test-discovery F1 · installed-library grounding (JS/TS + Python) · method-level call-graph (JS/TS, Python, Java, Go, Rust, Kotlin, Scala) · 21 MCP tools · 33 languages · 17-language source resolver · 0 npm deps
+**Stats:** 96.6% overall token reduction · 78.6% retrieval hit@5 (1.73× measured lift vs single-shot grep) · 98.0% test-discovery F1 · installed-library grounding (JS/TS + Python) · method-level call-graph (JS/TS, Python, Java, Go, Rust, Kotlin, Scala) · 21 MCP tools · 35 languages · 17-language source resolver · 0 npm deps
 
 ## Token reduction by version
 
@@ -835,6 +835,18 @@ Two milestones in one release. **`verify-ai-output` Reliable MVP** (#232) grows 
 **Tags:** `KNOWN_LIMITATIONS.md` · `extraction honesty` · `tier label` · `drift guard` · `G1` · `#520` · `PR #521`
 
 **Impact:** the credibility gap a skeptical reviewer finds first is closed in writing; 6 new guard checks (133 files); zero runtime changes.
+
+---
+
+### v8.40.0 — two languages, and the map that lied ✓ (2026-09-14)
+
+**Minor release — the #541 ranked build list is complete.** **Elixir** (Tier 3, the Lua/Ruby family): `defmodule` blocks with `@moduledoc` hints, `def`/`defp`/`defmacro` with `when` guards stripped and pattern matches reduced to their binding names, `@spec` as return hints, `@doc` first sentences as doc hints — and deps that genuinely resolve, `alias`/`import`/`use` module names becoming graph edges via the `lib/` snake_case convention. **Astro**: frontmatter delegated to the real TypeScript extractor with line-preserving anchor shifts, plus the surface exported-only passes cannot see — the `Astro.props` destructure, file-local functions, awaited data-loading consts, and template component usages.
+
+Wiring Elixir exposed the release's real story: the CLI core kept **its own copy** of the extension→extractor map — a third resolution map, the drift class #591 eliminated — and the copy lacked `.lua` and `.gd`. **Lua and GDScript had been silently falling to the generic fallback in the generate pipeline** while their extractors passed every direct test. Deleted, not patched: resolution delegates to `dispatch.js` (verified a strict superset first), with an end-to-end regression test pinning that `.lua` and `.ex` reach their real extractors through the CLI.
+
+**Tags:** `elixir.js` · `astro.js` · `EXT_MAP drift` · `dispatch delegation` · `#538` · `#539` · `#541 complete` · `PR #623` · `PR #624`
+
+**Impact:** 35 languages / 49 extractor modules; Lua and GDScript restored in the generate pipeline; Elixir deps produce real graph edges. 25 fixture + 157 integration tests passing.
 
 ---
 

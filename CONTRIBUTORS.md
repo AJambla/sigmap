@@ -35,6 +35,9 @@ To ensure proper attribution:
 
 We welcome contributions! See [Contributing](./docs/CONTRIBUTING.md) for guidelines.
 
+### Recent Contributors (v8.40.0)
+- **@manojmallick** — feat(extractors): Elixir Tier 3 with resolving alias/import graph edges (#538, PR #623) and Astro SFC via TS-extractor delegation (#539, PR #624), completing the #541 ranked build list at 35 languages; fix: the drifted CLI resolution map deleted — Lua and GDScript had been silently falling to the generic fallback in the generate pipeline
+
 ### Recent Contributors (v8.39.0)
 - **@manojmallick** — feat(extractors): web-component surface — Lit tags + reactive fields, Angular selectors + inputs/outputs, vanilla customElements.define, with byte-identity for non-component code verified across 1,291 real files (#537, PR #621)
 
