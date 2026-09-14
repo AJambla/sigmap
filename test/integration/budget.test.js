@@ -10,7 +10,7 @@
  *  4.  budgetStatus computes remaining/pct with a budget; nulls without
  *  5.  budgetStatus reports context age and stale vs contextTtlDays
  *  6.  CLI `budget --json` returns valid JSON with expected keys
- *  7.  MCP get_budget handler returns the ledger text; TOOLS has 21 entries
+ *  7.  MCP get_budget handler returns the ledger text; TOOLS has 22 entries
  */
 
 const assert = require('assert');
@@ -133,9 +133,9 @@ test('CLI budget --json returns valid JSON with expected keys', () => {
   assert.strictEqual(j.budgetTokens, 5000);
 });
 
-test('MCP get_budget returns ledger text; TOOLS has 21 entries', () => {
-  assert.strictEqual(TOOLS.length, 21);
-  assert.strictEqual(TOOLS[TOOLS.length - 1].name, 'get_budget');
+test('MCP get_budget returns ledger text; TOOLS has 22 entries', () => {
+  assert.strictEqual(TOOLS.length, 22);
+  assert.strictEqual(TOOLS[TOOLS.length - 1].name, 'query_knowledge_map');
   const cwd = tmpCwd();
   const text = getBudget({ budgetTokens: 100 }, cwd);
   assert.ok(text.includes('SigMap session spend'), text.slice(0, 80));

@@ -222,7 +222,7 @@ Use SigMap with open-source tools and fully self-hosted setups:
 | **JetBrains** | [Marketplace](https://plugins.jetbrains.com/plugin/31109-sigmap--ai-context-engine/) | [github.com/manojmallick/sigmap-jetbrains](https://github.com/manojmallick/sigmap-jetbrains) | IntelliJ IDEA, WebStorm, PyCharm, GoLand — tool window + actions |
 | **Neovim** | lazy.nvim / packer / vim-plug | [github.com/manojmallick/sigmap.nvim](https://github.com/manojmallick/sigmap.nvim) | `:SigMap`, `:SigMapQuery` float window, statusline widget |
 
-**MCP server** — 21 on-demand tools for Claude Code and Cursor:
+**MCP server** — 22 on-demand tools for Claude Code and Cursor:
 
 ```bash
 sigmap --mcp

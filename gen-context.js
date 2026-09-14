@@ -15725,6 +15725,265 @@ __factories["./src/map/import-graph"] = function(module, exports) {
   
 };
 
+// ── ./src/map/knowledge-map ──
+__factories["./src/map/knowledge-map"] = function(module, exports) {
+  
+  const fs = require('fs');
+  const path = require('path');
+  const { buildFromCwd } = __require('./src/graph/builder');
+  const { buildCallFileGraph } = __require('./src/graph/call-graph');
+  const { buildSigIndex } = __require('./src/retrieval/ranker');
+  const { parseAnchor, findRelatedTests } = __require('./src/evidence/pack');
+  const { directDeps, collectVersionPins } = __require('./src/verify/lib-index');
+  const { collectRoutes } = __require('./src/map/route-table');
+
+  // Unified knowledge map (#626, increment 1 of #543). SigMap already computes
+  // the pieces — import graph, call-file graph, signature index, installed
+  // library pins, route table, impl↔test discovery — but they live behind
+  // separate tools. This assembles them into ONE typed, deterministic store.
+  //
+  // ── Schema draft (v1) ──────────────────────────────────────────────────────
+  // Node ids (also the sort key):
+  //   file:<rel-path>          symbol:<rel-path>#<name> (anchor start-end kept)
+  //   lib:<name>@<version>     route:<METHOD> <path>
+  // Edge kinds, serialized as { from, kind, to }:
+  //   imports        file → file          (import graph)
+  //   calls          file → file          (call-file graph)
+  //   defines        file → symbol       (signature index, with anchors)
+  //   tests          test-file → file    (impl↔test discovery)
+  //   uses-lib       file → lib          (bare imports matching declared deps)
+  //   exposes-route  file → route        (route table)
+  // Serialization: nodes sorted by id, edges by (from, kind, to), keys sorted
+  // recursively — two builds of the same tree are byte-identical. Symbol nodes
+  // are capped per file and the cap is disclosed in `truncated`.
+
+  const SCHEMA_VERSION = 1;
+  const MAX_SYMBOLS_PER_FILE = 50;
+  const CACHE_FILE = 'knowledge-map.json';
+
+  const _rel = (cwd, f) => path.relative(cwd, f).replace(/\\/g, '/');
+
+  /** Stable stringify: object keys sorted recursively (evidence-pack pattern). */
+  function _sortKeys(value) {
+    if (Array.isArray(value)) return value.map(_sortKeys);
+    if (value && typeof value === 'object') {
+      const out = {};
+      for (const k of Object.keys(value).sort()) out[k] = _sortKeys(value[k]);
+      return out;
+    }
+    return value;
+  }
+  function canonicalJson(value) {
+    return JSON.stringify(_sortKeys(value), null, 1);
+  }
+
+  /** Bare (non-relative) import specifiers in a JS/TS source, root package only. */
+  function _bareImports(src) {
+    const out = new Set();
+    const stripped = String(src).replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
+    for (const m of stripped.matchAll(/(?:from\s+|require\s*\(\s*|import\s*\(\s*)['"]([^'".][^'"]*)['"]/g)) {
+      const spec = m[1];
+      const root = spec.startsWith('@') ? spec.split('/').slice(0, 2).join('/') : spec.split('/')[0];
+      out.add(root);
+    }
+    return out;
+  }
+
+  /**
+   * Build the unified knowledge map for a repo from existing producers.
+   * Deterministic: same tree in, byte-identical store out.
+   * @param {string} cwd
+   * @returns {{ schema: number, nodes: object[], edges: object[], truncated: string[] }}
+   */
+  function buildKnowledgeMap(cwd) {
+    // The graph builder lowercases absolute node keys, and macOS tmpdirs are
+    // symlinks — resolve the root and match graph nodes via a lowercased
+    // abs→rel lookup or every membership check silently misses.
+    try { cwd = fs.realpathSync(cwd); } catch (_) {}
+    const nodes = new Map(); // id → node
+    const edges = new Set(); // canonical "from kind to"
+    const truncated = [];
+    const addNode = (node) => { if (!nodes.has(node.id)) nodes.set(node.id, node); };
+    const addEdge = (from, kind, to) => { edges.add(`${from} ${kind} ${to}`); };
+
+    // Files + symbols + defines — from the signature index (anchors included).
+    const sigIndex = buildSigIndex(cwd);
+    const relFiles = [...sigIndex.keys()].map((f) => f.replace(/\\/g, '/')).sort();
+    for (const rel of relFiles) {
+      addNode({ id: `file:${rel}`, kind: 'file' });
+      const sigs = sigIndex.get(rel) || sigIndex.get(rel.replace(/\//g, path.sep)) || [];
+      let emitted = 0;
+      for (const sig of sigs) {
+        const { symbol, start, end } = parseAnchor(sig);
+        const nameMatch = /([A-Za-z_$][\w$]*)\s*(?:\(|=|:|$)/.exec(symbol.replace(/^[\s#]*(?:export\s+|async\s+|function\s+|class\s+|def\s+|defp\s+|fn\s+|pub\s+fn\s+|module\.exports\s*=?\s*)?/, ''));
+        if (!nameMatch) continue;
+        if (emitted >= MAX_SYMBOLS_PER_FILE) { truncated.push(`file:${rel}`); break; }
+        emitted++;
+        const id = `symbol:${rel}#${nameMatch[1]}`;
+        addNode(start ? { id, kind: 'symbol', anchor: `${start}-${end}` } : { id, kind: 'symbol' });
+        addEdge(`file:${rel}`, 'defines', id);
+      }
+    }
+
+    // Imports — the file dependency graph.
+    const absToRel = new Map(relFiles.map((r) => [path.join(cwd, r).toLowerCase(), r]));
+    const relOf = (abs) => absToRel.get(String(abs).toLowerCase());
+    const importGraph = buildFromCwd(cwd);
+    for (const [from, tos] of importGraph.forward) {
+      const fromRel = relOf(from);
+      if (!fromRel) continue;
+      for (const to of tos || []) {
+        const toRel = relOf(to);
+        if (toRel) addEdge(`file:${fromRel}`, 'imports', `file:${toRel}`);
+      }
+    }
+
+    // Calls — file-level call-graph edges (may be empty for uncovered languages).
+    try {
+      const callGraph = buildCallFileGraph(cwd);
+      for (const [from, tos] of callGraph.forward || []) {
+        const fromRel = relOf(from);
+        if (!fromRel) continue;
+        for (const to of tos || []) {
+          const toRel = relOf(to);
+          if (toRel) addEdge(`file:${fromRel}`, 'calls', `file:${toRel}`);
+        }
+      }
+    } catch (_) {}
+
+    // Libraries + uses-lib — declared deps with installed versions, bound to
+    // the files whose bare imports name them.
+    const deps = new Set(directDeps(cwd));
+    const pins = collectVersionPins(cwd).pins; // "name@version"
+    const versionOf = new Map(pins.map((p) => {
+      const at = p.lastIndexOf('@');
+      return [p.slice(0, at), p.slice(at + 1)];
+    }));
+    const libId = (name) => `lib:${name}@${versionOf.get(name) || 'unknown'}`;
+    if (deps.size > 0) {
+      for (const rel of relFiles) {
+        if (!/\.(ts|tsx|js|jsx|mjs|cjs)$/.test(rel)) continue;
+        let src;
+        try { src = fs.readFileSync(path.join(cwd, rel), 'utf8'); } catch (_) { continue; }
+        for (const spec of _bareImports(src)) {
+          if (!deps.has(spec)) continue;
+          addNode({ id: libId(spec), kind: 'library', name: spec, version: versionOf.get(spec) || null });
+          addEdge(`file:${rel}`, 'uses-lib', libId(spec));
+        }
+      }
+    }
+
+    // Tests — impl↔test discovery from the evidence pack.
+    for (const rel of relFiles) {
+      for (const t of findRelatedTests(rel, relFiles)) {
+        addEdge(`file:${t}`, 'tests', `file:${rel}`);
+      }
+    }
+
+    // Routes.
+    try {
+      const absFiles = relFiles.map((r) => path.join(cwd, r));
+      for (const r of collectRoutes(absFiles, cwd) || []) {
+        if (!r.method || !r.path) continue;
+        const id = `route:${r.method} ${r.path}`;
+        addNode({ id, kind: 'route', method: r.method, path: r.path });
+        // collectRoutes already returns repo-relative paths.
+        const routeRel = r.file && (relOf(r.file) || (nodes.has(`file:${r.file}`) ? r.file : null));
+        if (routeRel) addEdge(`file:${routeRel}`, 'exposes-route', id);
+      }
+    } catch (_) {}
+
+    return {
+      schema: SCHEMA_VERSION,
+      nodes: [...nodes.values()].sort((a, b) => a.id.localeCompare(b.id)),
+      edges: [...edges].sort().map((e) => {
+        const [from, kind, to] = e.split(' ');
+        return { from, kind, to };
+      }),
+      truncated: [...new Set(truncated)].sort(),
+    };
+  }
+
+  /** Load from .context cache (keyed by newest context mtime) or build fresh. */
+  function loadOrBuild(cwd) {
+    try { cwd = fs.realpathSync(cwd); } catch (_) {}
+    const cachePath = path.join(cwd, '.context', CACHE_FILE);
+    let ctxMtime = 0;
+    try {
+      for (const f of fs.readdirSync(path.join(cwd, '.context'))) {
+        if (f === CACHE_FILE) continue;
+        const st = fs.statSync(path.join(cwd, '.context', f));
+        if (st.mtimeMs > ctxMtime) ctxMtime = st.mtimeMs;
+      }
+    } catch (_) {}
+    try {
+      const cached = JSON.parse(fs.readFileSync(cachePath, 'utf8'));
+      if (cached.schema === SCHEMA_VERSION && cached.builtFor === ctxMtime) return cached;
+    } catch (_) {}
+    const map = buildKnowledgeMap(cwd);
+    map.builtFor = ctxMtime;
+    try {
+      fs.mkdirSync(path.dirname(cachePath), { recursive: true });
+      fs.writeFileSync(cachePath, canonicalJson(map));
+    } catch (_) {}
+    return map;
+  }
+
+  /**
+   * Upgrade-impact walk: lib → importing files → their callers/importers →
+   * the tests covering any file in the blast set.
+   */
+  function upgradeImpact(map, libraryName) {
+    const lib = map.nodes.find((n) => n.kind === 'library' && n.name === libraryName);
+    if (!lib) return null;
+    const importers = map.edges.filter((e) => e.kind === 'uses-lib' && e.to === lib.id).map((e) => e.from);
+    const importerSet = new Set(importers);
+    const callers = new Set();
+    for (const e of map.edges) {
+      if ((e.kind === 'calls' || e.kind === 'imports') && importerSet.has(e.to) && !importerSet.has(e.from)) {
+        callers.add(e.from);
+      }
+    }
+    const blast = new Set([...importers, ...callers]);
+    const tests = new Set();
+    for (const e of map.edges) {
+      if (e.kind === 'tests' && blast.has(e.to)) tests.add(e.from);
+    }
+    return {
+      library: lib.id,
+      importers: importers.sort(),
+      callers: [...callers].sort(),
+      tests: [...tests].sort(),
+    };
+  }
+
+  /** Typed neighbors of one file node. */
+  function fileNeighbors(map, rel) {
+    const id = `file:${rel.replace(/\\/g, '/')}`;
+    if (!map.nodes.some((n) => n.id === id)) return null;
+    const out = { imports: [], importedBy: [], calls: [], calledBy: [], tests: [], testedBy: [], usesLibs: [], defines: [], routes: [] };
+    for (const e of map.edges) {
+      if (e.from === id) {
+        if (e.kind === 'imports') out.imports.push(e.to);
+        else if (e.kind === 'calls') out.calls.push(e.to);
+        else if (e.kind === 'tests') out.tests.push(e.to);
+        else if (e.kind === 'uses-lib') out.usesLibs.push(e.to);
+        else if (e.kind === 'defines') out.defines.push(e.to);
+        else if (e.kind === 'exposes-route') out.routes.push(e.to);
+      } else if (e.to === id) {
+        if (e.kind === 'imports') out.importedBy.push(e.from);
+        else if (e.kind === 'calls') out.calledBy.push(e.from);
+        else if (e.kind === 'tests') out.testedBy.push(e.from);
+      }
+    }
+    for (const k of Object.keys(out)) out[k].sort();
+    return out;
+  }
+
+  module.exports = { buildKnowledgeMap, loadOrBuild, upgradeImpact, fileNeighbors, canonicalJson, SCHEMA_VERSION };
+  
+};
+
 // ── ./src/map/migrations ──
 __factories["./src/map/migrations"] = function(module, exports) {
   
@@ -17010,7 +17269,37 @@ __factories["./src/mcp/handlers"] = function(module, exports) {
     return header + sq.squeezed;
   }
 
-  module.exports = { readContext, searchSignatures, getMap, createCheckpoint, getRouting, explainFile, listModules, queryContext, getMethodImpact, getImpact, getLines, readMemory, getCalleeSignatures, notifyFileCreated, notifySymbolAdded, notifyFileDeleted, getDiffContext, getArchitectureOverview, verifySuggestion, squeezeOutput, getBudget };
+  // query_knowledge_map({ library | file }) → string (#626, increment 1 of #543)
+  function queryKnowledgeMap(args, cwd) {
+    const km = __require('./src/map/knowledge-map');
+    const map = km.loadOrBuild(cwd);
+    if (args && args.library) {
+      const impact = km.upgradeImpact(map, String(args.library));
+      if (!impact) return `No library node for "${args.library}" — not a declared dependency, or no file imports it.`;
+      const lines = [`Upgrade impact for ${impact.library}:`];
+      lines.push(`  importing files (${impact.importers.length}):`);
+      for (const f of impact.importers) lines.push(`    ${f.replace(/^file:/, '')}`);
+      lines.push(`  callers/importers of those (${impact.callers.length}):`);
+      for (const f of impact.callers) lines.push(`    ${f.replace(/^file:/, '')}`);
+      lines.push(`  covering tests (${impact.tests.length}):`);
+      for (const f of impact.tests) lines.push(`    ${f.replace(/^file:/, '')}`);
+      return lines.join('\n');
+    }
+    if (args && args.file) {
+      const n = km.fileNeighbors(map, String(args.file));
+      if (!n) return `No file node for "${args.file}" in the knowledge map.`;
+      const lines = [`Knowledge-map neighbors of ${args.file}:`];
+      for (const [k, v] of Object.entries(n)) {
+        if (v.length === 0) continue;
+        lines.push(`  ${k} (${v.length}): ${v.map((x) => x.replace(/^(file|symbol|lib|route):/, '')).slice(0, 20).join(', ')}${v.length > 20 ? ` … +${v.length - 20} more` : ''}`);
+      }
+      if (lines.length === 1) lines.push('  (no edges)');
+      return lines.join('\n');
+    }
+    return `Knowledge map: schema v${map.schema} · ${map.nodes.length} nodes · ${map.edges.length} edges. Pass { library } for upgrade impact or { file } for neighbors.`;
+  }
+
+  module.exports = { readContext, searchSignatures, getMap, createCheckpoint, getRouting, explainFile, listModules, queryContext, getMethodImpact, getImpact, getLines, readMemory, getCalleeSignatures, notifyFileCreated, notifySymbolAdded, notifyFileDeleted, getDiffContext, getArchitectureOverview, verifySuggestion, squeezeOutput, getBudget, queryKnowledgeMap };
   
 };
 
@@ -17204,7 +17493,7 @@ __factories["./src/mcp/server"] = function(module, exports) {
 
   const readline = require('readline');
   const { TOOLS } = __require('./src/mcp/tools');
-  const { readContext, searchSignatures, getMap, createCheckpoint, getRouting, explainFile, listModules, queryContext, getMethodImpact, getImpact, getLines, readMemory, getCalleeSignatures, notifyFileCreated, notifySymbolAdded, notifyFileDeleted, getDiffContext, getArchitectureOverview, verifySuggestion, squeezeOutput, getBudget } = __require('./src/mcp/handlers');
+  const { readContext, searchSignatures, getMap, createCheckpoint, getRouting, explainFile, listModules, queryContext, getMethodImpact, getImpact, getLines, readMemory, getCalleeSignatures, notifyFileCreated, notifySymbolAdded, notifyFileDeleted, getDiffContext, getArchitectureOverview, verifySuggestion, squeezeOutput, getBudget, queryKnowledgeMap } = __require('./src/mcp/handlers');
 
   const SERVER_INFO = {
     name: 'sigmap',
@@ -17319,6 +17608,7 @@ __factories["./src/mcp/server"] = function(module, exports) {
         else if (name === 'verify_suggestion') text = verifySuggestion(args, cwd);
         else if (name === 'squeeze_output') text = squeezeOutput(args, cwd);
         else if (name === 'get_budget') text = getBudget(args, cwd);
+        else if (name === 'query_knowledge_map') text = queryKnowledgeMap(args, cwd);
         else {
           respondError(id, -32601, `Unknown tool: ${name}`);
           return;
@@ -17789,6 +18079,23 @@ __factories["./src/mcp/tools"] = function(module, exports) {
           },
         },
         required: [],
+      },
+    },
+    {
+      name: 'query_knowledge_map',
+      description:
+        'Query the unified knowledge map — typed nodes (file, symbol, library@version, route) ' +
+        'and edges (imports, calls, defines, tests, uses-lib, exposes-route) assembled from ' +
+        "SigMap's existing graphs. Pass { library: \"express\" } for upgrade impact: the " +
+        'lib → importing files → their callers → covering tests chain. Pass { file: ' +
+        '\"src/x.js\" } for a file\'s typed neighbors. Deterministic, cached in .context, ' +
+        'local-only; no LLM, no network.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          library: { type: 'string', description: 'Declared dependency name for the upgrade-impact walk' },
+          file: { type: 'string', description: 'Repo-relative file path for a typed-neighbors view' },
+        },
       },
     },
   ];

@@ -26,7 +26,7 @@ Cursor, GitHub Copilot, Aider, Windsurf, local LLMs, and MCP.
 | Task-success proxy (modeled) | — | 61.0% |
 | Prompts per task | 2.84 | 1.61 (43.4% fewer) |
 | Supported languages | — | 35 |
-| MCP tools | — | 21 |
+| MCP tools | — | 22 |
 | npm runtime dependencies | — | 0 |
 
 ---
@@ -147,7 +147,7 @@ sigmap --version                         Show version
 
 ---
 
-## MCP server — 21 tools
+## MCP server — 22 tools
 
 Start with `sigmap --mcp` (stdio JSON-RPC). Configure once:
 
@@ -321,6 +321,14 @@ Session spend ledger — estimated tokens SigMap has emitted this session (chars
 
 ```
 Input:  { session?: string, budgetTokens?: number }
+```
+
+### query_knowledge_map
+
+Query the unified knowledge map — typed nodes (file, symbol, library@version, route) and edges (imports, calls, defines, tests, uses-lib, exposes-route) assembled from SigMap's existing graphs. Pass { library: "express" } for upgrade impact: the lib → importing files → their callers → covering tests chain. Pass { file: "src/x.js" } for a file's typed neighbors. Deterministic, cached in .context, local-only; no LLM, no network.
+
+```
+Input:  { library?: string, file?: string }
 ```
 
 ---
