@@ -35,6 +35,9 @@ To ensure proper attribution:
 
 We welcome contributions! See [Contributing](./docs/CONTRIBUTING.md) for guidelines.
 
+### Recent Contributors (v8.47.0)
+- **@manojmallick** — feat(java): G4 increment 3 — Java extractor migrated to the balanced-scanner core (string-safe comments, masked brace counting, annotation-arg params, nested generic bounds) with the modern-Java surface: generic type names, records, sealed types, implicit-public interface methods; fixture parity byte-exact, retrieval gate PASS (#646, PR #647)
+
 ### Recent Contributors (v8.46.0)
 - **@manojmallick** — feat(go): G4 increment 2 — Go extractor migrated to the balanced-scanner core (nested func params, generics, generic receivers, string-safe comments; fixture parity byte-exact) and Go joins arity-checked verification (`.go` in EXACT_PARAM_EXTS, type-variadic parsing, go blocks in the guard filter); retrieval gate PASS (#643, PR #644)
 
