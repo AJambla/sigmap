@@ -10,6 +10,13 @@ Format: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [8.39.0] — 2026-09-14
+
+### Added
+- **Web-component surface: Lit, Angular, and vanilla custom elements** (#537, PR #621) — first item in the #541 ranked build list. The TS/JS extractors saw a component's class and methods but lost everything that makes it a component: the `@customElement` tag name, `@property`/`@state` reactive fields, Angular's `@Component` selector and `@Input`/`@Output` pairs, and the base class — for an agent those ARE the public API, and a query for `user-card` could never find `UserCard`. Decorator-aware enrichment in the hooks/Zustand idiom family (a shared `component-surface` helper used by both extractors, not a new extractor): component classes now print their `extends` base, a `custom element <tag>` or `selector 'app-x'` member, and typed reactive/input/output fields with decorator-line anchors; `customElements.define('x-y', Cls)` attaches the tag in both TS and JS. Every addition is gated on detecting a marker, and a marker separated from its class by real code does not attach (decorators-only gap, pinned by test). Byte-identity for non-component code verified two ways: the fixture suite unchanged, and an old-vs-new sweep across 1,291 real files (sigmap + zod + express + vue-core + svelte) with zero divergence
+
+---
+
 ## [8.38.0] — 2026-09-14
 
 ### Added

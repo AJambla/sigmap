@@ -1,13 +1,13 @@
 ---
 title: Roadmap
-description: SigMap version history and roadmap. From v0.0 to v8.38.0, with recent releases completing the grounded-codegen plan — a realistic §9 ablation (real-symbol corpus, exact-signature grounding, --verbose), a Gemini (AI Studio) provider for the §9 ablation, the init Creation-workflow CLAUDE.md block, scaffold persistence, the LLM A/B hallucination ablation harness, the sigmap create orchestrator and its four guard stages (scaffold, verify-plan, verify-ai-output, review-pr), the conventions command with its full flag set (--conflicts, --inject, --report, --ci, --fix, --update), the grounding benchmark, read-time self-heal, live-index MCP write hooks, the get_callee_signatures MCP tool (exact callee signatures), realistic per-query savings, release-pipeline robustness (bundle integrity + version.json gates, standalone-bundle smoke test), the sigmap gain token-savings dashboard, supply-chain hardening (zero system-shell access), Squeeze input minimization with symbol enrichment, source-of-truth llms.txt, the verify-ai-output Hallucination Guard, and Memory tools (note, status, read_memory MCP tool).
+description: SigMap version history and roadmap. From v0.0 to v8.39.0, with recent releases completing the grounded-codegen plan — a realistic §9 ablation (real-symbol corpus, exact-signature grounding, --verbose), a Gemini (AI Studio) provider for the §9 ablation, the init Creation-workflow CLAUDE.md block, scaffold persistence, the LLM A/B hallucination ablation harness, the sigmap create orchestrator and its four guard stages (scaffold, verify-plan, verify-ai-output, review-pr), the conventions command with its full flag set (--conflicts, --inject, --report, --ci, --fix, --update), the grounding benchmark, read-time self-heal, live-index MCP write hooks, the get_callee_signatures MCP tool (exact callee signatures), realistic per-query savings, release-pipeline robustness (bundle integrity + version.json gates, standalone-bundle smoke test), the sigmap gain token-savings dashboard, supply-chain hardening (zero system-shell access), Squeeze input minimization with symbol enrichment, source-of-truth llms.txt, the verify-ai-output Hallucination Guard, and Memory tools (note, status, read_memory MCP tool).
 head:
   - - meta
     - property: og:title
       content: "SigMap Roadmap — version history and upcoming features"
   - - meta
     - property: og:description
-      content: "178 versions shipped. See what changed in each release and what is coming next."
+      content: "179 versions shipped. See what changed in each release and what is coming next."
   - - meta
     - property: og:url
       content: "https://sigmap.io/guide/roadmap"
@@ -20,7 +20,7 @@ head:
 ---
 # Roadmap
 
-One hundred seventy-eight versions shipped. MIT open source from day one.
+One hundred seventy-nine versions shipped. MIT open source from day one.
 
 **Stats:** 96.6% overall token reduction · 78.6% retrieval hit@5 (1.73× measured lift vs single-shot grep) · 98.0% test-discovery F1 · installed-library grounding (JS/TS + Python) · method-level call-graph (JS/TS, Python, Java, Go, Rust, Kotlin, Scala) · 21 MCP tools · 33 languages · 17-language source resolver · 0 npm deps
 
@@ -835,6 +835,18 @@ Two milestones in one release. **`verify-ai-output` Reliable MVP** (#232) grows 
 **Tags:** `KNOWN_LIMITATIONS.md` · `extraction honesty` · `tier label` · `drift guard` · `G1` · `#520` · `PR #521`
 
 **Impact:** the credibility gap a skeptical reviewer finds first is closed in writing; 6 new guard checks (133 files); zero runtime changes.
+
+---
+
+### v8.39.0 — the tag name is the API ✓ (2026-09-14)
+
+**Minor release — web components stop being invisible.** The TS/JS extractors saw a Lit or Angular component's class and methods but lost what makes it a component: the `@customElement` tag, `@property`/`@state` reactive fields, Angular's selector and `@Input`/`@Output` pairs, and the base class. For an agent those ARE the public surface — a query for `user-card` could never find `UserCard`. Component classes now print their base, their tag or selector, and their typed reactive fields, in both TypeScript and JavaScript, including the vanilla `customElements.define` path.
+
+The mechanism is deliberately not a new extractor: it is decorator-aware enrichment in the hooks/Zustand idiom family, gated on detecting a component marker — and a marker separated from its class by real code refuses to attach (decorators-only gap, pinned by test). Byte-identity for everything else was verified the project's way: not asserted, but swept — 1,291 real files across five codebases, zero divergence.
+
+**Tags:** `component-surface.js` · `@customElement` · `@Component` · `customElements.define` · `#537` · `#541 rank 1` · `PR #621`
+
+**Impact:** Lit/Angular/vanilla component API surface (tags, selectors, reactive fields, bases) now extracted; non-component output byte-identical across 1,291 swept files. 23 extractor + 156 integration tests passing.
 
 ---
 
