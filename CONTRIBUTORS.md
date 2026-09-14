@@ -35,6 +35,9 @@ To ensure proper attribution:
 
 We welcome contributions! See [Contributing](./docs/CONTRIBUTING.md) for guidelines.
 
+### Recent Contributors (v8.44.0)
+- **@manojmallick** — feat(evidence): knowledge map increment 4 — evidence packs re-based as views over the store: `relatedTestsView` over tests edges, byte-identical `buildEvidencePack` (contextHash parity pinned), `buildPrEvidence` blast + related tests from the cached store without per-call index/graph rebuilds; plus the case-sensitive-fs fix keeping graph-only file nodes in context-less stores (#635, PR #636)
+
 ### Recent Contributors (v8.43.0)
 - **@manojmallick** — feat(map): knowledge map increment 3 — get_impact and get_architecture_overview re-based as views over the cached store with BFS parity pinned, tests/routes enriched from typed edges, honest route counts, tokens on file nodes, SCHEMA_VERSION 3 (#632, PR #633)
 

@@ -10,6 +10,16 @@ Format: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [8.44.0] — 2026-09-14
+
+### Added
+- **Knowledge map increment 4: evidence packs become views over the store** (#635, PR #636) — the #543 epic's last re-basing item, deferred in #632. A new `relatedTestsView(map, rels)` reads related tests for a whole file list from the store's `tests` edges in one pass (keys are the caller's original path strings; store-absent files are omitted so callers can fall back). `buildEvidencePack` sources `relatedTests` from the view with **byte-identical output** — `grounding.contextHash` parity with the legacy per-file discovery is pinned by test, and callers injecting `opts.sigIndex` keep the legacy path entirely, so fake-cwd unit builds create no `.context` cache. `buildPrEvidence` derives blast radius (`impactView`) and related tests from the cached store instead of rebuilding the signature index **and** import graph on every call, with the legacy rebuild retained as fallback; blast counts match the graph path, tests/routes are store-enriched supersets, and the report stays byte-stable given a fixed tree
+
+### Fixed
+- **Context-less stores dropped every graph edge on case-sensitive filesystems** (PR #636) — graph keys are lowercased, so `relOfGraphKey`'s realpath probe failed on Linux whenever the true path contained uppercase and the file was missing from the signature index, silently discarding all `imports` edges (surfaced as flaky CI where the mkdtemp suffix case decided the outcome). The probe now falls back to prefix-matching the lowercased cwd; a regression test pins an uppercase tmp dir without a gen-context run
+
+---
+
 ## [8.43.0] — 2026-09-14
 
 ### Added

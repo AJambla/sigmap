@@ -268,7 +268,7 @@ sigmap ask "what did I touch" --since HEAD~3 --mode index
 
 ## evidence
 
-Build an **Evidence Pack** — a deterministic, machine-consumable signature-and-evidence map for a query. Where [`ask`](#ask) is tuned for a human reading a terminal, `evidence` emits a byte-stable JSON artifact (**schema v2**, v8.16.0) that an agent or CI can ingest directly: every file entry is anchored to real symbols and line ranges, carries a relevance reason and confidence, **multi-factor risk labels** (`riskFactors`, with `riskLabel` as the dominant factor for v1 consumers), and the pack is signed with a sha256 `contextHash`. Schema v2 also publishes a validatable **JSON Schema** at [sigmap.io/schemas/evidence-pack-2.json](https://sigmap.io/schemas/evidence-pack-2.json) (`schemaUrl` in the pack), a **`testDiscovery` provenance block** stating the measured accuracy of the related-tests method (F1 0.98 on 3,701 pairs / 28 repos — guard-tested against the committed benchmark report), and a `generator` identity. It always writes the artifact to `.context/evidence-pack.json`; stdout carries the requested mode (JSON by default, or Markdown with `--markdown`).
+Build an **Evidence Pack** — a deterministic, machine-consumable signature-and-evidence map for a query. Where [`ask`](#ask) is tuned for a human reading a terminal, `evidence` emits a byte-stable JSON artifact (**schema v2**, v8.16.0) that an agent or CI can ingest directly: every file entry is anchored to real symbols and line ranges, carries a relevance reason and confidence, **multi-factor risk labels** (`riskFactors`, with `riskLabel` as the dominant factor for v1 consumers), and the pack is signed with a sha256 `contextHash`. Schema v2 also publishes a validatable **JSON Schema** at [sigmap.io/schemas/evidence-pack-2.json](https://sigmap.io/schemas/evidence-pack-2.json) (`schemaUrl` in the pack), a **`testDiscovery` provenance block** stating the measured accuracy of the related-tests method (F1 0.98 on 3,701 pairs / 28 repos — guard-tested against the committed benchmark report), and a `generator` identity. It always writes the artifact to `.context/evidence-pack.json`; stdout carries the requested mode (JSON by default, or Markdown with `--markdown`). Since v8.44 the pack's `relatedTests` are served from the cached [knowledge map](/guide/mcp#query-knowledge-map)'s `tests` edges instead of a per-file rescan — the output is byte-identical (same `contextHash`), just cheaper to produce.
 
 The pack carries **no wall-clock timestamp** — running it twice on an unchanged repository produces byte-identical output and an identical `contextHash`. That is the point: the artifact is auditable, exactly what an agentic grep loop cannot produce.
 
@@ -549,7 +549,7 @@ Deletions are excluded from the source/security checks. Any finding exits non-ze
 sigmap review-pr --markdown --base main > pr-evidence.md   # post this as a PR comment
 ```
 
-The report carries **no wall-clock timestamp**, so it is byte-stable given a fixed tree (a re-run produces an identical comment). The exit code still reflects the review (0 = clean, 1 = findings), so the same command can both **post** the comment and **gate** the PR in CI.
+The report carries **no wall-clock timestamp**, so it is byte-stable given a fixed tree (a re-run produces an identical comment). The exit code still reflects the review (0 = clean, 1 = findings), so the same command can both **post** the comment and **gate** the PR in CI. Since v8.44 the blast radius and related tests are views over the cached knowledge map — no per-call signature-index or import-graph rebuild — with affected tests enriched by the store's discovered test↔impl edges.
 
 ---
 
@@ -1423,8 +1423,8 @@ sigmap bench --submit --json
 ────────────────────────────────────────────────────────
  SigMap Community Benchmark Submission
 ────────────────────────────────────────────────────────
- SigMap version : 8.43.0
- Benchmark ID   : sigmap-v8.43-main
+ SigMap version : 8.44.0
+ Benchmark ID   : sigmap-v8.44-main
  Submitted      : 2026-09-13
 ────────────────────────────────────────────────────────
  Canonical metrics (official release):
