@@ -6871,16 +6871,30 @@ __factories["./src/extractors/javascript"] = function(module, exports) {
     return capMembersWithNotice(members, 120, 'methods');
   }
 
+  // One linear pass over well-formed docblocks. The previous three matchAll
+  // passes used `\/\*\*[\s\S]*?@returns?...[\s\S]*?\*\/` — lazy gaps free to
+  // scan ACROSS comment boundaries, so every docblock without a matching
+  // declaration tail walked toward end-of-file: O(n²) on docblock-dense files,
+  // measured at 93.6% of a full 15s self-generate (#615). The docblock-bounded
+  // shape below is the one buildDocHints already uses, which profiles at ~0%.
+  const RETURN_TAG = /@returns?\s+\{([^}]+)\}/;
+  const RETURN_DECLS = [
+    /\s*(?:export\s+)?(?:async\s+)?function\s+(\w+)\s*\(/y,
+    /\s*export\s+const\s+(\w+)\s*=\s*(?:async\s+)?\(/y,
+    /\s*(?:static\s+|async\s+|get\s+|set\s+)*(\w+)\s*\(/y,
+  ];
+
   function buildReturnHints(src) {
     const hints = new Map();
-    for (const m of src.matchAll(/\/\*\*[\s\S]*?@returns?\s+\{([^}]+)\}[\s\S]*?\*\/\s*(?:export\s+)?(?:async\s+)?function\s+(\w+)\s*\(/g)) {
-      hints.set(m[2], normalizeType(m[1]));
-    }
-    for (const m of src.matchAll(/\/\*\*[\s\S]*?@returns?\s+\{([^}]+)\}[\s\S]*?\*\/\s*export\s+const\s+(\w+)\s*=\s*(?:async\s+)?\(/g)) {
-      hints.set(m[2], normalizeType(m[1]));
-    }
-    for (const m of src.matchAll(/\/\*\*[\s\S]*?@returns?\s+\{([^}]+)\}[\s\S]*?\*\/\s*(?:static\s+|async\s+|get\s+|set\s+)*(\w+)\s*\(/g)) {
-      hints.set(m[2], normalizeType(m[1]));
+    for (const block of src.matchAll(/\/\*\*(?:[^*]|\*(?!\/))*\*\//g)) {
+      const tag = RETURN_TAG.exec(block[0]);
+      if (!tag) continue;
+      const end = block.index + block[0].length;
+      for (const decl of RETURN_DECLS) {
+        decl.lastIndex = end;
+        const m = decl.exec(src);
+        if (m) hints.set(m[1], normalizeType(tag[1]));
+      }
     }
     return hints;
   }
