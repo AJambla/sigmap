@@ -153,16 +153,35 @@ const EXPANSIONS = (() => {
  * token → weight (1 for the original query tokens, EXPANSION_WEIGHT for
  * synonyms). Original tokens always keep full weight even if also a synonym.
  *
+ * With a repo-mined map (B2, #649 — `{ token: [[neighbor, w], …] }` from
+ * mined-expansions.js), mined neighbors join at EXPANSION_WEIGHT × w. The
+ * ordering invariant: original (1) > static (EXPANSION_WEIGHT) ≥ mined
+ * (EXPANSION_WEIGHT × w, w ≤ 1), and an existing entry is never overridden.
+ * Without the second argument, behavior is byte-identical to before.
+ *
  * @param {string[]} qToks  stemmed, de-duplicated query tokens
+ * @param {object} [mined]  mined expansions: token → [[neighbor, weight], …]
  * @returns {Map<string, number>}
  */
-function expandQuery(qToks) {
+function expandQuery(qToks, mined) {
   const weights = new Map();
   for (const t of qToks) weights.set(t, 1);
   for (const t of qToks) {
     const syns = EXPANSIONS.get(t);
     if (!syns) continue;
     for (const s of syns) if (!weights.has(s)) weights.set(s, EXPANSION_WEIGHT);
+  }
+  if (mined && typeof mined === 'object') {
+    for (const t of qToks) {
+      const neighbors = mined[t];
+      if (!Array.isArray(neighbors)) continue;
+      for (const pair of neighbors) {
+        const s = pair && pair[0];
+        const w = pair && pair[1];
+        if (typeof s !== 'string' || typeof w !== 'number') continue;
+        if (!weights.has(s)) weights.set(s, Math.min(EXPANSION_WEIGHT, EXPANSION_WEIGHT * w));
+      }
+    }
   }
   return weights;
 }
@@ -228,7 +247,9 @@ function bm25rank(query, candidates, opts) {
   }
 
   const qToks = [...new Set(tokenize(query))];
-  const qWeights = expandQuery(qToks); // token → weight (1 exact, <1 synonym)
+  // token → weight (1 exact, <1 synonym); opts.expansions carries the opt-in
+  // repo-mined map (B2) from callers that enabled retrieval.minedExpansions.
+  const qWeights = expandQuery(qToks, opts && opts.expansions);
 
   return docs
     .map((d) => {
