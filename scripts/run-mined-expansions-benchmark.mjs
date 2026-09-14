@@ -62,13 +62,25 @@ function reciprocalRank(ranked, expected) {
   return 0;
 }
 
+// Corpus → directory mapping (mirrors the retrieval gate): the self-repo
+// corpora — `retrieval` (easy), `retrieval-hard` (the leak-free split, B2's
+// actual target), `retrieval-mined` — score against THIS repo's own context
+// and drift with development by design; `retrieval-jvm-<name>` maps to the
+// cached repo `<name>`; everything else maps 1:1.
+function repoDirFor(corpus) {
+  if (corpus === 'retrieval' || corpus === 'retrieval-hard' || corpus === 'retrieval-mined') return ROOT;
+  const jvm = /^retrieval-jvm-(.+)$/.exec(corpus);
+  if (jvm) return path.join(REPOS_DIR, jvm[1]);
+  return path.join(REPOS_DIR, corpus);
+}
+
 const repos = fs.readdirSync(TASKS_DIR).filter((f) => f.endsWith('.jsonl')).map((f) => f.replace(/\.jsonl$/, '')).sort();
 const perRepo = [];
 const skipped = [];
 let tasksA = 0, hitsA = 0, hitsB = 0, mrrA = 0, mrrB = 0;
 
 for (const repo of repos) {
-  const dir = path.join(REPOS_DIR, repo);
+  const dir = repoDirFor(repo);
   if (!fs.existsSync(dir)) { skipped.push({ repo, reason: 'repo not cloned' }); continue; }
   const tasks = loadTasks(repo);
   if (!tasks.length) { skipped.push({ repo, reason: 'no tasks' }); continue; }
