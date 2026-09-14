@@ -223,6 +223,63 @@ test('knowledge-map.js source is NUL-free so git diffs it as text', () => {
   assert.ok(!src.includes(0), 'raw NUL bytes make git treat the file as binary');
 });
 
+test('relatedTestsView returns sorted tests and omits store-absent files (#635)', () => {
+  const view = km.relatedTestsView(map, ['src/banner.js', 'src/pad.js', 'not/there.js']);
+  assert.deepStrictEqual(view.get('src/banner.js'), ['test/banner.test.js']);
+  assert.deepStrictEqual(view.get('src/pad.js'), []);
+  assert.ok(!view.has('not/there.js'), 'store-absent file must be omitted, not empty');
+});
+
+test('evidence pack over the store is byte-identical to the legacy path (#635)', () => {
+  const { buildEvidencePack } = require(path.join(ROOT, 'src/evidence/pack'));
+  const { buildSigIndex } = require(path.join(ROOT, 'src/retrieval/ranker'));
+  const store = buildEvidencePack('banner text padding', dir);
+  const legacy = buildEvidencePack('banner text padding', dir, { sigIndex: buildSigIndex(dir) });
+  assert.strictEqual(store.grounding.contextHash, legacy.grounding.contextHash,
+    'store-backed pack must hash identically to per-file discovery');
+  const banner = store.files.find((f) => f.path === 'src/banner.js');
+  assert.ok(banner, `banner.js not ranked: ${store.files.map((f) => f.path)}`);
+  assert.deepStrictEqual(banner.relatedTests, ['test/banner.test.js']);
+});
+
+test('injected-index pack build writes nothing for a fake cwd (#635)', () => {
+  const fake = path.join(os.tmpdir(), `sigmap-km-nowrite-${process.pid}`);
+  const { buildEvidencePack } = require(path.join(ROOT, 'src/evidence/pack'));
+  const idx = new Map([['src/x.js', ['function x()  :1-2']]]);
+  buildEvidencePack('x', fake, { sigIndex: idx });
+  assert.ok(!fs.existsSync(fake), 'injected-index build must not create the cwd or a .context cache');
+});
+
+test('PR evidence derives blast + related tests from the store (#635)', () => {
+  const { buildPrEvidence } = require(path.join(ROOT, 'src/review/pr-evidence'));
+  const { analyzeImpact } = require(path.join(ROOT, 'src/graph/impact'));
+  const ev = buildPrEvidence([{ path: 'src/banner.js', status: 'M' }], dir, { scope: 'vs main' });
+  const rep = ev.files[0];
+  assert.deepStrictEqual(rep.relatedTests, ['test/banner.test.js']);
+  assert.ok(rep.blast, 'blast radius missing');
+  const old = analyzeImpact('src/banner.js', dir, { depth: 2 })[0].impact;
+  assert.strictEqual(rep.blast.total, old.totalImpact, 'store blast count must match the graph path');
+  assert.strictEqual(rep.blast.direct.length, old.direct.length);
+  assert.ok(rep.blast.tests.includes('test/banner.test.js'), JSON.stringify(rep.blast));
+});
+
+test('context-less store keeps graph edges when the tmp path has uppercase (#636)', () => {
+  // No gen-context run: every graph endpoint resolves via relOfGraphKey. The
+  // uppercase dir name forces the case-sensitive-fs fallback on Linux.
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'sigmap-km-CASE-'));
+  try {
+    fs.mkdirSync(path.join(base, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(base, 'gen-context.config.json'), JSON.stringify({ srcDirs: ['src'] }));
+    fs.writeFileSync(path.join(base, 'src', 'auth.js'), 'function login() { return true; }\nmodule.exports = { login };\n');
+    fs.writeFileSync(path.join(base, 'src', 'consumer.js'), "const { login } = require('./auth');\nmodule.exports = () => login();\n");
+    const m = km.buildKnowledgeMap(base);
+    assert.ok(m.edges.some((e) => e.kind === 'imports' && e.from === 'file:src/consumer.js' && e.to === 'file:src/auth.js'),
+      `imports edge missing from context-less store: ${JSON.stringify(m.edges.filter((e) => e.kind === 'imports'))}`);
+    const view = km.impactView(m, 'src/auth.js', 2);
+    assert.strictEqual(view.totalImpact, 1, JSON.stringify(view));
+  } finally { fs.rmSync(base, { recursive: true, force: true }); }
+});
+
 test('the store persists to .context and cache-hits on unchanged context', () => {
   const first = km.loadOrBuild(dir);
   const cachePath = path.join(dir, '.context', 'knowledge-map.json');

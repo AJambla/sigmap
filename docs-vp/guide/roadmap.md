@@ -1,13 +1,13 @@
 ---
 title: Roadmap
-description: SigMap version history and roadmap. From v0.0 to v8.43.0, with recent releases completing the grounded-codegen plan — a realistic §9 ablation (real-symbol corpus, exact-signature grounding, --verbose), a Gemini (AI Studio) provider for the §9 ablation, the init Creation-workflow CLAUDE.md block, scaffold persistence, the LLM A/B hallucination ablation harness, the sigmap create orchestrator and its four guard stages (scaffold, verify-plan, verify-ai-output, review-pr), the conventions command with its full flag set (--conflicts, --inject, --report, --ci, --fix, --update), the grounding benchmark, read-time self-heal, live-index MCP write hooks, the get_callee_signatures MCP tool (exact callee signatures), realistic per-query savings, release-pipeline robustness (bundle integrity + version.json gates, standalone-bundle smoke test), the sigmap gain token-savings dashboard, supply-chain hardening (zero system-shell access), Squeeze input minimization with symbol enrichment, source-of-truth llms.txt, the verify-ai-output Hallucination Guard, and Memory tools (note, status, read_memory MCP tool).
+description: SigMap version history and roadmap. From v0.0 to v8.44.0, with recent releases completing the grounded-codegen plan — a realistic §9 ablation (real-symbol corpus, exact-signature grounding, --verbose), a Gemini (AI Studio) provider for the §9 ablation, the init Creation-workflow CLAUDE.md block, scaffold persistence, the LLM A/B hallucination ablation harness, the sigmap create orchestrator and its four guard stages (scaffold, verify-plan, verify-ai-output, review-pr), the conventions command with its full flag set (--conflicts, --inject, --report, --ci, --fix, --update), the grounding benchmark, read-time self-heal, live-index MCP write hooks, the get_callee_signatures MCP tool (exact callee signatures), realistic per-query savings, release-pipeline robustness (bundle integrity + version.json gates, standalone-bundle smoke test), the sigmap gain token-savings dashboard, supply-chain hardening (zero system-shell access), Squeeze input minimization with symbol enrichment, source-of-truth llms.txt, the verify-ai-output Hallucination Guard, and Memory tools (note, status, read_memory MCP tool).
 head:
   - - meta
     - property: og:title
       content: "SigMap Roadmap — version history and upcoming features"
   - - meta
     - property: og:description
-      content: "183 versions shipped. See what changed in each release and what is coming next."
+      content: "184 versions shipped. See what changed in each release and what is coming next."
   - - meta
     - property: og:url
       content: "https://sigmap.io/guide/roadmap"
@@ -835,6 +835,18 @@ Two milestones in one release. **`verify-ai-output` Reliable MVP** (#232) grows 
 **Tags:** `KNOWN_LIMITATIONS.md` · `extraction honesty` · `tier label` · `drift guard` · `G1` · `#520` · `PR #521`
 
 **Impact:** the credibility gap a skeptical reviewer finds first is closed in writing; 6 new guard checks (133 files); zero runtime changes.
+
+---
+
+### v8.44.0 — the evidence rests on the store ✓ (2026-09-14)
+
+**Minor release — knowledge map increment 4, and the #543 epic's last re-basing item lands.** Evidence packs were the derived view #632 deliberately deferred — a schema-stable, hash-anchored artifact re-bases only when the bytes can be proven identical. They now are: `buildEvidencePack` reads `relatedTests` from the store's discovered `tests` edges via the new `relatedTestsView` (one edge pass for the whole ranked set), and the `grounding.contextHash` parity with the legacy per-file rescan is pinned by test. Callers injecting a pre-built `sigIndex` keep the legacy path untouched, so unit builds against a fake cwd write no `.context` cache. `buildPrEvidence` goes further: blast radius (`impactView`) and related tests both come from the mtime-cached store — the per-call signature-index **and** import-graph rebuilds are gone, with the legacy rebuild retained as a fallback and affected tests enriched by the store's test↔impl edges.
+
+The increment also caught a real bug: graph keys are lowercased, so on a case-sensitive filesystem the store's realpath probe failed whenever the true path contained uppercase and the file was missing from the signature index — every `imports` edge of a context-less store silently vanished, surfacing as flaky CI where the mkdtemp suffix case decided the outcome. The probe now falls back to prefix-matching the lowercased cwd, and a regression test pins an uppercase tmp dir without a gen-context run.
+
+**Tags:** `relatedTestsView` · `contextHash parity` · `buildPrEvidence` · `impactView` · `case-sensitive fs` · `#543 increment 4` · `#635` · `PR #636`
+
+**Impact:** zero per-call index/graph rebuilds in PR evidence; byte-identical evidence packs, cheaper to produce; the #543 re-basing plan is complete (SCIP export stays on-demand). 158 integration files passing (knowledge-map suite 19 → 24).
 
 ---
 

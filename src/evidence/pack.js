@@ -15,6 +15,7 @@
  *   - retrieval/ranker        → ranked files, scores, signals
  *   - extractors/line-anchor  → `:start-end` suffix parsing (sourceLines)
  *   - security/scanner        → secret redaction of symbols
+ *   - map/knowledge-map       → relatedTests view over the store's tests edges
  *   - crypto (node builtin)    → sha256 grounding hash
  *
  * Determinism: the pack carries NO wall-clock timestamp. Given an unchanged
@@ -200,6 +201,7 @@ function sortKeys(value) {
  * @param {number} [opts.budget=6000]      - token budget for included files
  * @param {number} [opts.top=12]           - max ranked files to consider
  * @param {Map<string,string[]>} [opts.sigIndex] - pre-built index (else built from cwd)
+ * @param {object} [opts.map]             - pre-loaded knowledge map (else loaded from cwd)
  * @returns {object} Evidence Pack v1
  */
 function buildEvidencePack(query, cwd, opts = {}) {
@@ -213,6 +215,19 @@ function buildEvidencePack(query, cwd, opts = {}) {
   const ranked = rank(query, sigIndex, { topK: top, cwd })
     .filter((r) => r.score > 0 || ranked0Empty(query));
   const maxScore = ranked.reduce((m, r) => Math.max(m, r.score), 0);
+
+  // Related tests are a view over the knowledge-map store (#635) — same bytes
+  // as per-file discovery (the store's tests edges come from findRelatedTests
+  // over the same index). Injected-index callers keep the legacy path: loading
+  // the store would build and cache under an arbitrary cwd.
+  let kmap = opts.map || null;
+  if (!kmap && !(opts.sigIndex instanceof Map)) {
+    try { kmap = require('../map/knowledge-map').loadOrBuild(cwd); } catch (_) { kmap = null; }
+  }
+  let storeTests = null;
+  if (kmap) {
+    try { storeTests = require('../map/knowledge-map').relatedTestsView(kmap, ranked.map((r) => r.file)); } catch (_) { storeTests = null; }
+  }
 
   // Greedy budget fill in rank order; the remainder is reported as dropped.
   const files = [];
@@ -243,7 +258,7 @@ function buildEvidencePack(query, cwd, opts = {}) {
       reason: reasonFor(r.signals),
       confidence: maxScore > 0 ? Math.round((r.score / maxScore) * 100) / 100 : 0,
       sourceLines,
-      relatedTests: findRelatedTests(r.file, allFiles),
+      relatedTests: storeTests && storeTests.has(r.file) ? storeTests.get(r.file) : findRelatedTests(r.file, allFiles),
       riskLabel: riskFactors[0],
       riskFactors,
     });
