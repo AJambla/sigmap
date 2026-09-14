@@ -14327,7 +14327,7 @@ __factories["./src/graph/impact"] = function(module, exports) {
     };
   }
 
-  module.exports = { getImpact, analyzeImpact, formatImpact, formatImpactJSON };
+  module.exports = { getImpact, analyzeImpact, formatImpact, formatImpactJSON, isTestFile, isRouteFile };
   
 };
 
@@ -15775,7 +15775,7 @@ __factories["./src/map/knowledge-map"] = function(module, exports) {
   // library pins, route table, impl↔test discovery — but they live behind
   // separate tools. This assembles them into ONE typed, deterministic store.
   //
-  // ── Schema draft (v2) ──────────────────────────────────────────────────────
+  // ── Schema draft (v3) ──────────────────────────────────────────────────────
   // Node ids (also the sort key):
   //   file:<rel-path>          symbol:<rel-path>#<name> (anchor start-end kept)
   //   lib:<name>@<version>     route:<METHOD> <path>
@@ -15788,11 +15788,13 @@ __factories["./src/map/knowledge-map"] = function(module, exports) {
   //   uses-lib       file → lib          (bare imports matching declared deps)
   //   exposes-route  file → route        (route table)
   //   reads-env      file → env          (per-file env reads, #629)
+  // v3 (#632): file nodes carry a `tokens` estimate (chars/4 over signatures);
+  // graph endpoints missing from the signature index still get file nodes.
   // Serialization: nodes sorted by id, edges by (from, kind, to), keys sorted
   // recursively — two builds of the same tree are byte-identical. Symbol nodes
   // are capped per file and the cap is disclosed in `truncated`.
 
-  const SCHEMA_VERSION = 2;
+  const SCHEMA_VERSION = 3;
   const MAX_SYMBOLS_PER_FILE = 50;
   const CACHE_FILE = 'knowledge-map.json';
 
@@ -15845,8 +15847,8 @@ __factories["./src/map/knowledge-map"] = function(module, exports) {
     const sigIndex = buildSigIndex(cwd);
     const relFiles = [...sigIndex.keys()].map((f) => f.replace(/\\/g, '/')).sort();
     for (const rel of relFiles) {
-      addNode({ id: `file:${rel}`, kind: 'file' });
       const sigs = sigIndex.get(rel) || sigIndex.get(rel.replace(/\//g, path.sep)) || [];
+      addNode({ id: `file:${rel}`, kind: 'file', tokens: Math.ceil(sigs.join('\n').length / 4) });
       let emitted = 0;
       for (const sig of sigs) {
         const { symbol, start, end } = parseAnchor(sig);
@@ -15863,13 +15865,27 @@ __factories["./src/map/knowledge-map"] = function(module, exports) {
     // Imports — the file dependency graph.
     const absToRel = new Map(relFiles.map((r) => [path.join(cwd, r).toLowerCase(), r]));
     const relOf = (abs) => absToRel.get(String(abs).toLowerCase());
+    const relOfGraphKey = (abs) => {
+      const hit = relOf(abs);
+      if (hit) return hit;
+      try {
+        const real = fs.realpathSync(String(abs));
+        if (real.toLowerCase().startsWith(cwd.toLowerCase() + path.sep)) {
+          return real.slice(cwd.length + 1).replace(/\\/g, '/');
+        }
+      } catch (_) {}
+      return null;
+    };
     const importGraph = buildFromCwd(cwd);
     for (const [from, tos] of importGraph.forward) {
-      const fromRel = relOf(from);
+      const fromRel = relOfGraphKey(from);
       if (!fromRel) continue;
       for (const to of tos || []) {
-        const toRel = relOf(to);
-        if (toRel) addEdge(`file:${fromRel}`, 'imports', `file:${toRel}`);
+        const toRel = relOfGraphKey(to);
+        if (!toRel) continue;
+        addNode({ id: `file:${fromRel}`, kind: 'file', tokens: 0 });
+        addNode({ id: `file:${toRel}`, kind: 'file', tokens: 0 });
+        addEdge(`file:${fromRel}`, 'imports', `file:${toRel}`);
       }
     }
 
@@ -16017,6 +16033,109 @@ __factories["./src/map/knowledge-map"] = function(module, exports) {
     };
   }
 
+  /**
+   * Impact of changing one file, computed from the store's `imports` edges with
+   * the same BFS semantics as src/graph/impact (direct = level 1, transitive =
+   * deeper, depth 0 = unlimited). Tests/routes are the pattern-classified sets
+   * the old path produced, enriched with the store's discovered `tests` and
+   * `exposes-route` edges (supersets, never smaller). Result shape matches
+   * getImpact() so formatImpact renders it unchanged.
+   */
+  function impactView(map, relFile, depth) {
+    const { isTestFile, isRouteFile } = __require('./src/graph/impact');
+    const rel = String(relFile).replace(/\\/g, '/');
+    const id = `file:${rel}`;
+    const reverse = new Map();
+    for (const e of map.edges) {
+      if (e.kind !== 'imports') continue;
+      if (!reverse.has(e.to)) reverse.set(e.to, []);
+      reverse.get(e.to).push(e.from);
+    }
+    const direct = new Set();
+    const transitive = new Set();
+    const visited = new Set([id]);
+    for (const f of reverse.get(id) || []) {
+      if (!visited.has(f)) { direct.add(f); visited.add(f); }
+    }
+    if (depth !== 1) {
+      let frontier = [...direct];
+      let d = 1;
+      while (frontier.length > 0 && (depth === 0 || d < depth)) {
+        const next = [];
+        for (const node of frontier) {
+          for (const imp of reverse.get(node) || []) {
+            if (!visited.has(imp)) { transitive.add(imp); visited.add(imp); next.push(imp); }
+          }
+        }
+        frontier = next;
+        d++;
+      }
+    }
+    const strip = (x) => x.replace(/^file:/, '');
+    const impacted = [...direct, ...transitive].map(strip);
+    const tests = impacted.filter(isTestFile);
+    const testSet = new Set(tests);
+    const coverTargets = new Set([id, ...impacted.map((r) => `file:${r}`)]);
+    const extraTests = [];
+    for (const e of map.edges) {
+      if (e.kind === 'tests' && coverTargets.has(e.to) && !testSet.has(strip(e.from))) {
+        testSet.add(strip(e.from));
+        extraTests.push(strip(e.from));
+      }
+    }
+    const routeFiles = new Set(map.edges.filter((e) => e.kind === 'exposes-route').map((e) => strip(e.from)));
+    const routes = impacted.filter((f) => isRouteFile(f) || routeFiles.has(f));
+    return {
+      changed: rel,
+      direct: [...direct].map(strip),
+      transitive: [...transitive].map(strip),
+      tests: tests.concat(extraTests.sort()),
+      routes,
+      totalImpact: direct.size + transitive.size,
+    };
+  }
+
+  /**
+   * Architecture rollup from the store: module token table, hub files by
+   * reverse-import degree, dependency-cycle count, and the route total.
+   */
+  function architectureView(map) {
+    const files = map.nodes.filter((n) => n.kind === 'file');
+    const groups = {};
+    let totalTokens = 0;
+    for (const n of files) {
+      const rel = n.id.slice(5);
+      const parts = rel.split('/');
+      const mod = parts.length > 1 ? parts[0] : '.';
+      const tok = n.tokens || 0;
+      if (!groups[mod]) groups[mod] = { files: 0, tokens: 0 };
+      groups[mod].files++;
+      groups[mod].tokens += tok;
+      totalTokens += tok;
+    }
+    const modules = Object.entries(groups)
+      .map(([mod, d]) => ({ mod, files: d.files, tokens: d.tokens }))
+      .sort((a, b) => b.tokens - a.tokens);
+    const inDeg = new Map();
+    const forward = new Map();
+    for (const e of map.edges) {
+      if (e.kind !== 'imports') continue;
+      const from = e.from.slice(5);
+      const to = e.to.slice(5);
+      inDeg.set(to, (inDeg.get(to) || 0) + 1);
+      if (!forward.has(from)) forward.set(from, []);
+      forward.get(from).push(to);
+    }
+    const hubs = [...inDeg.entries()]
+      .map(([file, count]) => ({ file, in: count }))
+      .sort((a, b) => b.in - a.in || (a.file < b.file ? -1 : 1))
+      .slice(0, 10);
+    let cycles = 0;
+    try { cycles = __require('./src/map/import-graph').detectCycles(forward).length; } catch (_) {}
+    const routes = map.nodes.filter((n) => n.kind === 'route').length;
+    return { totalFiles: files.length, totalTokens, modules, hubs, cycles, routes };
+  }
+
   /** Readers of one env var: the files that read it, and the committed-example flag. */
   function envReaders(map, name) {
     const id = `env:${name}`;
@@ -16050,7 +16169,7 @@ __factories["./src/map/knowledge-map"] = function(module, exports) {
     return out;
   }
 
-  module.exports = { buildKnowledgeMap, loadOrBuild, upgradeImpact, fileNeighbors, envReaders, canonicalJson, SCHEMA_VERSION };
+  module.exports = { buildKnowledgeMap, loadOrBuild, upgradeImpact, fileNeighbors, envReaders, impactView, architectureView, canonicalJson, SCHEMA_VERSION };
   
 };
 
@@ -16809,11 +16928,14 @@ __factories["./src/mcp/handlers"] = function(module, exports) {
     if (!args || !args.file) return 'Missing required argument: file';
 
     try {
-      const { analyzeImpact, formatImpact } = __require('./src/graph/impact');
+      // View over the knowledge map (#632): cached store instead of a per-call
+      // graph rebuild; same BFS semantics and rendering as the old path.
+      const km = __require('./src/map/knowledge-map');
+      const { formatImpact } = __require('./src/graph/impact');
       const depth = Math.max(0, parseInt(args.depth, 10) || 3);
-      const results = analyzeImpact(args.file, cwd, { depth });
-      if (results.length === 0) return `No impact data for: ${args.file}`;
-      return results.map((r) => formatImpact(r.impact)).join('\n\n---\n\n');
+      const rel = path.isAbsolute(args.file) ? path.relative(cwd, args.file) : String(args.file);
+      const map = km.loadOrBuild(cwd);
+      return formatImpact(km.impactView(map, rel, depth));
     } catch (err) {
       return `_get_impact failed: ${err.message}_`;
     }
@@ -17191,64 +17313,32 @@ __factories["./src/mcp/handlers"] = function(module, exports) {
    */
   function getArchitectureOverview(args, cwd) {
     try {
-      const { buildSigIndex } = __require('./src/retrieval/ranker');
-      const index = buildSigIndex(cwd);
+      // View over the knowledge map (#632): every section — modules, hubs,
+      // cycles, routes — derives from the cached store; route totals count real
+      // route nodes instead of PROJECT_MAP.md table lines.
+      const km = __require('./src/map/knowledge-map');
+      const map = km.loadOrBuild(cwd);
+      const view = km.architectureView(map);
       const out = ['# Architecture overview', ''];
 
-      if (index.size === 0) {
+      if (view.totalFiles === 0) {
         out.push('_No context file found. Run: node gen-context.js_', '');
       } else {
-        const groups = {};
-        let totalTokens = 0;
-        let totalFiles = 0;
-        for (const [rel, sigs] of index.entries()) {
-          const parts = rel.replace(/\\/g, '/').split('/');
-          const mod = parts.length > 1 ? parts[0] : '.';
-          const tok = Math.ceil(sigs.join('\n').length / 4);
-          if (!groups[mod]) groups[mod] = { files: 0, tokens: 0 };
-          groups[mod].files++;
-          groups[mod].tokens += tok;
-          totalTokens += tok;
-          totalFiles++;
-        }
-        const sorted = Object.entries(groups)
-          .map(([mod, d]) => ({ mod, files: d.files, tokens: d.tokens }))
-          .sort((a, b) => b.tokens - a.tokens);
-
-        out.push(`**${totalFiles} indexed files · ${sorted.length} modules · ~${totalTokens} tokens**`, '');
+        out.push(`**${view.totalFiles} indexed files · ${view.modules.length} modules · ~${view.totalTokens} tokens**`, '');
         out.push('## Modules', '| Module | Files | Tokens |', '|--------|-------|--------|');
-        for (const m of sorted.slice(0, 20)) out.push(`| ${m.mod} | ${m.files} | ~${m.tokens} |`);
+        for (const m of view.modules.slice(0, 20)) out.push(`| ${m.mod} | ${m.files} | ~${m.tokens} |`);
         out.push('');
       }
 
-      // Hub files + cycle count from the dependency graph (optional).
-      try {
-        const { buildFromCwd } = __require('./src/graph/builder');
-        const { detectCycles } = __require('./src/map/import-graph');
-        const graph = buildFromCwd(cwd);
-        if (graph && graph.reverse && graph.reverse.size) {
-          const hubs = [...graph.reverse.entries()]
-            .map(([f, importers]) => ({ file: path.relative(cwd, f).replace(/\\/g, '/'), in: importers.length }))
-            .filter((h) => h.in > 0)
-            .sort((a, b) => b.in - a.in)
-            .slice(0, 10);
-          if (hubs.length) {
-            out.push('## Hub files (most depended-on)', '| File | Importers |', '|------|-----------|');
-            for (const h of hubs) out.push(`| \`${h.file}\` | ${h.in} |`);
-            out.push('');
-          }
-          let cycleCount = 0;
-          try { cycleCount = detectCycles(graph.forward).length; } catch (_) {}
-          out.push(`**Dependency cycles:** ${cycleCount}` + (cycleCount ? ' _(see import graph)_' : ' — none detected'), '');
-        }
-      } catch (_) { /* graph optional */ }
+      if (view.hubs.length) {
+        out.push('## Hub files (most depended-on)', '| File | Importers |', '|------|-----------|');
+        for (const h of view.hubs) out.push(`| \`${h.file}\` | ${h.in} |`);
+        out.push('');
+        out.push(`**Dependency cycles:** ${view.cycles}` + (view.cycles ? ' _(see import graph)_' : ' — none detected'), '');
+      }
 
-      // Routes from PROJECT_MAP.md if present.
-      const mapPath = path.join(cwd, 'PROJECT_MAP.md');
-      if (fs.existsSync(mapPath)) {
-        const mc = fs.readFileSync(mapPath, 'utf8');
-        const routeCount = mc.split('\n').filter((l) => l.startsWith('| ') && !l.startsWith('| Method') && !l.startsWith('|---')).length;
-        out.push('## Project map', `Routes detected: ${routeCount} _(use get_map for imports/classes/routes detail)_`, '');
+      if (view.routes > 0) {
+        out.push('## Project map', `Routes detected: ${view.routes} _(use get_map for imports/classes/routes detail)_`, '');
       } else {
         out.push('_Run `node gen-project-map.js` for routes / class-hierarchy detail (get_map)._');
       }
