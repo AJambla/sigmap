@@ -263,6 +263,23 @@ test('PR evidence derives blast + related tests from the store (#635)', () => {
   assert.ok(rep.blast.tests.includes('test/banner.test.js'), JSON.stringify(rep.blast));
 });
 
+test('context-less store keeps graph edges when the tmp path has uppercase (#636)', () => {
+  // No gen-context run: every graph endpoint resolves via relOfGraphKey. The
+  // uppercase dir name forces the case-sensitive-fs fallback on Linux.
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'sigmap-km-CASE-'));
+  try {
+    fs.mkdirSync(path.join(base, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(base, 'gen-context.config.json'), JSON.stringify({ srcDirs: ['src'] }));
+    fs.writeFileSync(path.join(base, 'src', 'auth.js'), 'function login() { return true; }\nmodule.exports = { login };\n');
+    fs.writeFileSync(path.join(base, 'src', 'consumer.js'), "const { login } = require('./auth');\nmodule.exports = () => login();\n");
+    const m = km.buildKnowledgeMap(base);
+    assert.ok(m.edges.some((e) => e.kind === 'imports' && e.from === 'file:src/consumer.js' && e.to === 'file:src/auth.js'),
+      `imports edge missing from context-less store: ${JSON.stringify(m.edges.filter((e) => e.kind === 'imports'))}`);
+    const view = km.impactView(m, 'src/auth.js', 2);
+    assert.strictEqual(view.totalImpact, 1, JSON.stringify(view));
+  } finally { fs.rmSync(base, { recursive: true, force: true }); }
+});
+
 test('the store persists to .context and cache-hits on unchanged context', () => {
   const first = km.loadOrBuild(dir);
   const cachePath = path.join(dir, '.context', 'knowledge-map.json');

@@ -110,12 +110,20 @@ function buildKnowledgeMap(cwd) {
   const relOfGraphKey = (abs) => {
     const hit = relOf(abs);
     if (hit) return hit;
+    const key = String(abs);
     try {
-      const real = fs.realpathSync(String(abs));
+      const real = fs.realpathSync(key);
       if (real.toLowerCase().startsWith(cwd.toLowerCase() + path.sep)) {
         return real.slice(cwd.length + 1).replace(/\\/g, '/');
       }
-    } catch (_) {}
+    } catch (_) {
+      // Graph keys are lowercased (graphKey), so on a case-sensitive fs the
+      // realpath probe fails whenever the true path has uppercase — prefix-
+      // match the lowercased cwd instead of dropping the file (#635/#636 CI).
+      if (key.toLowerCase().startsWith(cwd.toLowerCase() + path.sep)) {
+        return key.slice(cwd.length + 1).replace(/\\/g, '/');
+      }
+    }
     return null;
   };
   const importGraph = buildFromCwd(cwd);
