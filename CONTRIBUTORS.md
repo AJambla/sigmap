@@ -35,6 +35,9 @@ To ensure proper attribution:
 
 We welcome contributions! See [Contributing](./docs/CONTRIBUTING.md) for guidelines.
 
+### Recent Contributors (v8.37.1)
+- **@manojmallick** — perf(extractors): linear buildReturnHints — full generate 15s → 0.97s, CI suite wall-time halved, and 13 silently mis-bound @returns hints corrected along the way (#615, PR #616)
+
 ### Recent Contributors (v8.37.0)
 - **@manojmallick** — feat(lsp): zero-dep synchronous LSP client — documentSymbol via clangd/gopls/rust-analyzer behind exactness.lsp, per-file quality guard so the tier never loses surface to regex, content+binary-keyed cache, acceptance-gated toolchain labels; libuv +37% / spdlog +15% effective signatures with clangd (#612, PR #613)
 

@@ -10,6 +10,13 @@ Format: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [8.37.1] — 2026-09-14
+
+### Fixed
+- **Full generate 15s → 0.97s: the return-hint regexes were quadratic** (#615, PR #616). A CPU profile put 93.6% of a full self-generate on the two JSDoc `@returns` patterns in `buildReturnHints` — their lazy `[\s\S]*?` gaps were free to scan across comment boundaries, so every docblock without a matching declaration tail walked toward end-of-file: O(n²) on docblock-dense files. This was the real cause of the CI timeout flakes that v8.37.0 recalibrated around; the timeouts treated the symptom, this removes the cause (CI test jobs dropped from ~3m30s to ~1m40s). Rewritten as one linear pass over well-formed docblocks with sticky declaration matches. Verified against the old implementation on 947 real files: 934 byte-identical, and every one of the 13 divergences is the old pattern's bug being fixed — the unbounded gap could bind a hint across an intervening comment to a later declaration (`composeHealth` carried a distant `object` tag instead of its own docblock's type; express's `stringify()` was labeled `ServerResponse` instead of `string`). Retrieval gate: hit@5 identical on all four corpora, hard MRR −0.001 from the corrected tokens, baseline re-recorded. A new guard test pins the correct binding semantics and a linear-time bound on a 3,000-docblock file
+
+---
+
 ## [8.37.0] — 2026-09-14
 
 ### Added

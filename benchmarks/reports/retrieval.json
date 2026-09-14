@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-14T09:29:02.726Z",
+  "generated": "2026-09-14T10:52:55.346Z",
   "repos": [
     {
       "repo": "express",
@@ -1269,7 +1269,7 @@
       "sigCount": 29,
       "tasks": 8,
       "hitAt5": 0.625,
-      "mrr": 0.664,
+      "mrr": 0.667,
       "randomBaseline": 0.161,
       "improvement": 3.9,
       "tiers": {
@@ -1295,7 +1295,7 @@
             "lib/request.js"
           ],
           "top1": "lib/content-type-parser.js",
-          "firstHitRank": 7,
+          "firstHitRank": 6,
           "tier": "wrong"
         },
         {

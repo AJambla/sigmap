@@ -1,7 +1,7 @@
 {
   "hard": {
     "hitAt5": 0.756,
-    "mrr": 0.639,
+    "mrr": 0.638,
     "precisionAt5": 0.151,
     "tasks": 90
   },
@@ -13,7 +13,7 @@
   },
   "easy": {
     "hitAt5": 0.9,
-    "mrr": 0.817,
+    "mrr": 0.813,
     "precisionAt5": 0.22,
     "tasks": 20
   },

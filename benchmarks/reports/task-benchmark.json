@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-14T09:29:12.516Z",
+  "generated": "2026-09-14T10:53:04.667Z",
   "methodology": {
     "promptWeights": {
       "correct": 1,
@@ -26,8 +26,8 @@
     "hitAt5Without": 13.6,
     "hitAt5With": 78.6,
     "avgImprovement": 59.3,
-    "totalGroundedSymbols": 9476,
-    "totalDarkSymbols": 58078,
+    "totalGroundedSymbols": 9460,
+    "totalDarkSymbols": 58094,
     "hallucinationRiskPct": 86
   },
   "repos": [
@@ -111,9 +111,9 @@
       "promptsWith": 2.38,
       "promptsWithout": 2.76,
       "reductionPct": 13.9,
-      "groundedSymbols": 59,
-      "darkSymbols": 303,
-      "hallucinationRiskPct": 83.7
+      "groundedSymbols": 58,
+      "darkSymbols": 304,
+      "hallucinationRiskPct": 84
     },
     {
       "repo": "rust-analyzer",
@@ -251,9 +251,9 @@
       "promptsWith": 1.8,
       "promptsWithout": 2.98,
       "reductionPct": 39.7,
-      "groundedSymbols": 392,
-      "darkSymbols": 1799,
-      "hallucinationRiskPct": 82.1
+      "groundedSymbols": 378,
+      "darkSymbols": 1813,
+      "hallucinationRiskPct": 82.7
     },
     {
       "repo": "fastify",
@@ -265,9 +265,9 @@
       "promptsWith": 1.75,
       "promptsWithout": 2.81,
       "reductionPct": 37.7,
-      "groundedSymbols": 164,
-      "darkSymbols": 150,
-      "hallucinationRiskPct": 47.8
+      "groundedSymbols": 163,
+      "darkSymbols": 151,
+      "hallucinationRiskPct": 48.1
     },
     {
       "repo": "fastapi",
