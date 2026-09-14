@@ -1,8 +1,17 @@
 type UserService struct  :4-6
+type Stack struct  :40-42
 type Repository interface  :8-11
   FindById(id string) → (*User, error)  :9-9
   Save(user *User) → error  :10-10
+type Runner interface  :64-66
+  Run(handler func(ctx string) error) → (int, error)  :65-65
 func NewUserService(repo Repository) → *UserService  :13-15
 func (s) GetUser(id string) → (*User, error)  :17-19
 func (s) CreateUser(data CreateUserDto) → (*User, error)  :21-24
 func HashPassword(password string) → (string, error)  :26-28
+func Apply(f func(int) error, n int) → error  :31-33  # Apply maps f over n
+func Map(s []T, f func(T) U) → []U  :35-38
+func (s) Push(v T)  :44-46
+func Fetch(url string) → string  :48-51
+func Join(parts []string, sep string) → string  :53-58
+func Sum(nums ...int) → int  :60-62
