@@ -357,6 +357,7 @@ strategy = full
 hotCommits = 10
 watchDebounce = 300
 routing = false
+judge = {"threshold":0.25,"learnBoostAbove":0.75,"learnPenalizeBelow":0.4}
 format = default
 tracking = false
 sessionBudgetTokens = null

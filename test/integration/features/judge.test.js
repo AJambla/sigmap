@@ -218,6 +218,94 @@ test('sigmap history → exits 0', () => {
   assert.strictEqual(r.status, 0, `exit ${r.status}\n${r.stderr}`);
 });
 
+// ── J2: configurable learning thresholds (#638) ──────────────────────────────
+
+const { DEFAULTS } = require('../../../src/config/defaults');
+
+/** Temp cwd with one real source file and a context that names it in a heading. */
+function learnFixture() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sigmap-judge-band-'));
+  fs.mkdirSync(path.join(dir, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'src', 'a.js'), 'module.exports = 1;\n');
+  return dir;
+}
+
+// 13. loader merges a partial judge section over defaults
+test('config: partial judge section merges over defaults', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sigmap-judge-cfg-'));
+  fs.writeFileSync(path.join(dir, 'gen-context.config.json'),
+    JSON.stringify({ judge: { learnBoostAbove: 0.9 } }));
+  const cfg = loadConfig(dir);
+  assert.strictEqual(cfg.judge.learnBoostAbove, 0.9, 'user override lost');
+  assert.strictEqual(cfg.judge.learnPenalizeBelow, DEFAULTS.judge.learnPenalizeBelow, 'sibling default lost');
+  assert.strictEqual(cfg.judge.threshold, DEFAULTS.judge.threshold, 'threshold default lost');
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+// 14. engine respects a configured band: the same score flips boost → no-op
+test('judge --learn: configured band flips boost to no-op at the same score', () => {
+  const dir = learnFixture();
+  const context = '## src/a.js\nfunction rank sorts results relevance score tokens';
+  const response = 'rank sorts results relevance score tokens'; // fully grounded → score 1.0
+  const def = judge(response, context, { learn: true, cwd: dir });
+  assert.strictEqual(def.learning.action, 'boost', `default band should boost: ${JSON.stringify(def.learning)}`);
+  const moved = judge(response, context, { learn: true, cwd: dir, learnBoostAbove: 1.0 });
+  assert.strictEqual(moved.learning.action, 'none', `band 1.0 must not boost a 1.0 score: ${JSON.stringify(moved.learning)}`);
+  assert.ok(moved.learning.reason.includes('(0.4-1)'), `no-op reason must report the active band: ${moved.learning.reason}`);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+// 15. engine respects penalizeBelow: zero score stops penalizing when the band is 0
+test('judge --learn: penalizeBelow 0 turns a penalize into a no-op', () => {
+  const dir = learnFixture();
+  const context = '## src/a.js\nfunction rank sorts results relevance score tokens';
+  const response = 'weather paris sunny warm holiday'; // score 0
+  const def = judge(response, context, { learn: true, cwd: dir });
+  assert.strictEqual(def.learning.action, 'penalize', `default band should penalize: ${JSON.stringify(def.learning)}`);
+  const moved = judge(response, context, { learn: true, cwd: dir, learnPenalizeBelow: 0 });
+  assert.strictEqual(moved.learning.action, 'none', `band 0 must not penalize a 0 score: ${JSON.stringify(moved.learning)}`);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+// 16. CLI: judge.threshold from config flips the verdict; --threshold still wins
+test('sigmap judge: config threshold applies, --threshold flag overrides it', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sigmap-judge-cli-'));
+  fs.writeFileSync(path.join(dir, 'gen-context.config.json'),
+    JSON.stringify({ judge: { threshold: 0.99 } }));
+  const strict = spawnSync(process.execPath, [SCRIPT, 'judge', '--response', respFile, '--context', ctxFile, '--json'], {
+    encoding: 'utf8', cwd: dir, timeout: 120000,
+  });
+  assert.strictEqual(strict.status, 1, `config threshold 0.99 should fail a grounded answer, got exit ${strict.status}: ${strict.stdout}`);
+  const flagged = spawnSync(process.execPath, [SCRIPT, 'judge', '--response', respFile, '--context', ctxFile, '--threshold', '0.25', '--json'], {
+    encoding: 'utf8', cwd: dir, timeout: 120000,
+  });
+  assert.strictEqual(flagged.status, 0, `--threshold 0.25 must override config 0.99, got exit ${flagged.status}: ${flagged.stdout}`);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+// 17. Derivation guard (#638): the shipped band separates measured mixtures.
+//     Answers built from the repo's own vocabulary at 80% grounded tokens must
+//     land in the boost band; at 30% grounded they must land in the penalize
+//     band. Pins band ordering so a config edit can't silently invert it.
+test('judge band: derived defaults separate 80%/30% grounded mixtures', () => {
+  const src = fs.readFileSync(path.join(ROOT, 'src/judge/judge-engine.js'), 'utf8');
+  // ≥7-char tokens only: the engine's STOP words are all ≤6 chars, so none of
+  // the mixture is stop-filtered and the constructed ratios stay exact.
+  const vocab = [...new Set((src.toLowerCase().match(/\b[a-z][a-z0-9_]{6,}\b/g) || []))].slice(0, 40);
+  assert.ok(vocab.length === 40, `expected 40 vocab tokens, got ${vocab.length}`);
+  const context = vocab.join(' ');
+  const novel = Array.from({ length: 14 }, (_, i) => `zzqxword${i}`);
+  const boostMix = vocab.slice(0, 16).concat(novel.slice(0, 4)).join(' ');    // 16/20 = 0.8
+  const penalizeMix = vocab.slice(0, 6).concat(novel).join(' ');              // 6/20 = 0.3
+  const hi = groundedness(boostMix, context);
+  const lo = groundedness(penalizeMix, context);
+  const { learnBoostAbove, learnPenalizeBelow } = DEFAULTS.judge;
+  assert.ok(hi > learnBoostAbove, `80% mixture (${hi}) must exceed learnBoostAbove (${learnBoostAbove})`);
+  assert.ok(lo < learnPenalizeBelow, `30% mixture (${lo}) must sit below learnPenalizeBelow (${learnPenalizeBelow})`);
+  assert.ok(learnPenalizeBelow > 0 && learnPenalizeBelow < learnBoostAbove && learnBoostAbove < 1,
+    `band ordering violated: 0 < ${learnPenalizeBelow} < ${learnBoostAbove} < 1`);
+});
+
 // Cleanup
 try {
   fs.rmSync(tmpDir, { recursive: true });
