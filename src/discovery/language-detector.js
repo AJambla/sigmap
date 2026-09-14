@@ -20,6 +20,7 @@ const EXT_TO_LANG = {
   '.c': 'cpp', '.h': 'cpp', '.hpp': 'cpp', '.swift': 'swift',
   '.dart': 'dart', '.scala': 'scala', '.php': 'php',
   '.lua': 'lua',
+  '.ex': 'elixir', '.exs': 'elixir',
   '.gd': 'gdscript',
   '.r': 'r', '.R': 'r',
 };
