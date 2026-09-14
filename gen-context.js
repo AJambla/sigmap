@@ -1563,6 +1563,10 @@ __factories["./src/config/defaults"] = function(module, exports) {
       // over the built-in registry — commands are spawned directly, never a shell.
       lsp: false,
       lspServers: {},
+      // T4 spike (#618): read a CI-produced index.scip at the repo root as a
+      // signature source (import only) — compiler-typed signatures, same
+      // per-file never-lose-vs-regex guard as the LSP tier.
+      scip: false,
     },
 
     // Impact layer settings (v2.5)
@@ -8990,6 +8994,124 @@ __factories["./src/extractors/scan"] = function(module, exports) {
   }
 
   module.exports = { stripComments, maskCode, readBalanced };
+  
+};
+
+// ── ./src/extractors/scip_symbols ──
+__factories["./src/extractors/scip_symbols"] = function(module, exports) {
+  
+  const fs = require('fs');
+  const path = require('path');
+  const { parseIndex } = __require('./src/scip/reader');
+  const { anchor } = __require('./src/extractors/line-anchor');
+  const { capWithNotice } = __require('./src/util/truncate');
+
+  // SCIP index → signature lines (#618, tier T4 of #542, import only). When a
+  // repo's CI already produced `index.scip` at the root, its documents carry
+  // compiler-typed signatures inside `documentation[0]` code fences — richer
+  // than the regex tier and free at extraction time. This renders them into the
+  // signature vocabulary with anchors from definition occurrences. As with the
+  // LSP tier, the wiring applies a per-file quality guard, so a sparse or stale
+  // index entry never loses surface vs the regex floor, and the toolchain label
+  // (`scip:<tool>@<version>` from Metadata) is registered only on acceptance.
+
+  const PER_FILE_LIMIT = 200;
+  const SIG_TEXT_CHARS = 110;
+  const HINT_CHARS = 60;
+
+  // SCIP symbol grammar suffixes to SKIP — not API surface:
+  //   `(name)`  parameter · `[T]` type parameter · `local N` locals ·
+  //   trailing `/` package/file symbols · `typeLiteral` synthesized members
+  const SKIP_SYMBOL = /\((?:[^()]*)\)$|\[[^\]]*\]$|(^|\s)local\s+\d|\/$|typeLiteral/;
+
+  let _cache = null; // { cwd, mtimeMs, size, index } — reloaded when the file changes
+
+  function _loadIndex(cwd) {
+    const p = path.join(cwd, 'index.scip');
+    let st;
+    try { st = fs.statSync(p); } catch (_) { return null; }
+    if (_cache && _cache.cwd === cwd && _cache.mtimeMs === st.mtimeMs && _cache.size === st.size) {
+      return _cache.index;
+    }
+    try {
+      const index = parseIndex(fs.readFileSync(p));
+      _cache = { cwd, mtimeMs: st.mtimeMs, size: st.size, index };
+      return index;
+    } catch (_) {
+      _cache = { cwd, mtimeMs: st.mtimeMs, size: st.size, index: null };
+      return null;
+    }
+  }
+
+  /** Fence interior of a SCIP documentation string, compacted to one line. */
+  function _sigText(doc) {
+    const m = /^```[\w-]*\n([\s\S]*?)\n?```/.exec(doc || '');
+    const inner = m ? m[1] : '';
+    return inner.replace(/\s+/g, ' ').trim().slice(0, SIG_TEXT_CHARS);
+  }
+
+  function _hint(doc) {
+    return String(doc || '').replace(/\s+/g, ' ').trim().split(/[.!?]/)[0].trim().slice(0, HINT_CHARS);
+  }
+
+  /** Member-of relation from SCIP symbol structure: `...X#member().` ⊂ `...X#`. */
+  function _isMemberSymbol(symbol) {
+    const hash = symbol.lastIndexOf('#');
+    return hash !== -1 && hash < symbol.length - 1;
+  }
+
+  /**
+   * Extract signatures for one file from the repo's SCIP index.
+   * Returns null (caller falls back) when there is no usable entry.
+   * @param {string} filePath - absolute path
+   * @param {string} cwd - repo root (where index.scip lives)
+   * @returns {{ sigs: string[], label: string }|null}
+   */
+  function extractViaScip(filePath, cwd) {
+    if (!cwd) return null;
+    const index = _loadIndex(cwd);
+    if (!index) return null;
+    const rel = path.relative(cwd, path.resolve(filePath)).replace(/\\/g, '/');
+    const doc = index.documents.get(rel);
+    if (!doc || doc.defs.length === 0) return null;
+
+    const rows = [];
+    for (const def of doc.defs) {
+      if (SKIP_SYMBOL.test(def.symbol)) continue;
+      const docs = doc.symbols.get(def.symbol) || [];
+      const text = _sigText(docs[0]);
+      if (!text) continue;
+      const startLn = (def.range[0] || 0) + 1;
+      // Occurrence ranges cover the identifier; enclosing_range (when the
+      // indexer emits it) covers the whole declaration and gives a real end.
+      const endLn = def.enclosing && def.enclosing.length >= 3
+        ? def.enclosing[def.enclosing.length === 3 ? 0 : 2] + 1
+        : startLn;
+      const hint = _hint(docs[1]);
+      rows.push({
+        text: `${_isMemberSymbol(def.symbol) ? '  ' : ''}${text}${anchor(startLn, Math.max(endLn, startLn))}${hint ? `  # ${hint}` : ''}`,
+        start: startLn,
+      });
+    }
+    if (rows.length === 0) return null;
+    rows.sort((a, b) => a.start - b.start);
+    const sigs = capWithNotice(rows.map((r) => r.text), PER_FILE_LIMIT, 'signatures');
+    return { sigs, label: `scip:${index.tool || 'unknown'}` };
+  }
+
+  const _labels = new Set();
+
+  /** Register a label once the wiring has ACCEPTED the SCIP result. */
+  function acceptLabel(label) {
+    if (label) _labels.add(label);
+  }
+
+  /** Toolchain labels for indexes whose entries were actually used this run. */
+  function toolchainLabels() {
+    return [..._labels].sort();
+  }
+
+  module.exports = { extractViaScip, acceptLabel, toolchainLabels };
   
 };
 
@@ -16670,7 +16792,7 @@ __factories["./src/mcp/server"] = function(module, exports) {
 
   const SERVER_INFO = {
     name: 'sigmap',
-    version: '8.37.1',
+    version: '8.38.0',
     description: 'SigMap MCP server — code signatures on demand',
   };
 
@@ -19651,6 +19773,116 @@ __factories["./src/scaffold/propose"] = function(module, exports) {
   }
 
   module.exports = { proposeScaffold, DEFAULT_THRESHOLD, HARD_FLOOR };
+  
+};
+
+// ── ./src/scip/reader ──
+__factories["./src/scip/reader"] = function(module, exports) {
+  
+  // Zero-dep SCIP index reader (#618, tier T4 of #542). SCIP is Sourcegraph's
+  // protobuf index format; indexers exist for TS/Java/Python/Rust/C++/Ruby and
+  // more, and a repo whose CI already produces `index.scip` has compiler-grade
+  // signatures sitting on disk. This reads them — import only, nothing emitted.
+  //
+  // The wire subset needed is tiny: varints and length-delimited fields. Field
+  // numbers are grounded from the scip bindings vendored by scip-typescript
+  // (src/scip.ts getter → field-number pairs), and the reader is validated
+  // against a real index produced by that tool:
+  //   Index            metadata=1 · documents=2
+  //   Metadata         tool_info=2 (ToolInfo: name=1 version=2)
+  //   Document         relative_path=1 · occurrences=2 · symbols=3
+  //   SymbolInformation symbol=1 · documentation=3
+  //   Occurrence       range=1 (packed) · symbol=2 · symbol_roles=3 · enclosing_range=7
+  // Anything unrecognized is skipped by wire type, so newer fields are inert.
+
+  function readVarint(buf, pos) {
+    let v = 0n, shift = 0n, p = pos;
+    for (;;) {
+      const b = buf[p++];
+      v |= BigInt(b & 0x7f) << shift;
+      if (!(b & 0x80)) break;
+      shift += 7n;
+    }
+    return [Number(v), p];
+  }
+
+  /** Iterate [fieldNumber, value] pairs of one protobuf message. */
+  function* fields(buf) {
+    let p = 0;
+    while (p < buf.length) {
+      let key;
+      [key, p] = readVarint(buf, p);
+      const field = key >>> 3, wire = key & 7;
+      if (wire === 0) { let v; [v, p] = readVarint(buf, p); yield [field, v]; }
+      else if (wire === 2) { let len; [len, p] = readVarint(buf, p); yield [field, buf.slice(p, p + len)]; p += len; }
+      else if (wire === 5) { p += 4; }
+      else if (wire === 1) { p += 8; }
+      else throw new Error(`scip: unknown wire type ${wire}`);
+    }
+  }
+
+  function packedVarints(buf) {
+    const out = [];
+    let p = 0;
+    while (p < buf.length) { let v; [v, p] = readVarint(buf, p); out.push(v); }
+    return out;
+  }
+
+  const DEFINITION_ROLE = 0x1;
+
+  /**
+   * Parse a SCIP index buffer into a compact per-document structure.
+   * Throws on malformed input — callers treat any throw as "no index".
+   * @param {Buffer} buf
+   * @returns {{ tool: string, documents: Map<string, { symbols: Map<string, string[]>, defs: Array<{symbol: string, range: number[]}> }> }}
+   */
+  function parseIndex(buf) {
+    let tool = '';
+    const documents = new Map();
+    for (const [f, v] of fields(buf)) {
+      if (f === 1) {
+        for (const [mf, mv] of fields(v)) {
+          if (mf === 2) {
+            let name = '', version = '';
+            for (const [tf, tv] of fields(mv)) {
+              if (tf === 1) name = tv.toString('utf8');
+              if (tf === 2) version = tv.toString('utf8');
+            }
+            tool = version ? `${name}@${version}` : name;
+          }
+        }
+      } else if (f === 2) {
+        let relPath = '';
+        const symbols = new Map();
+        const defs = [];
+        for (const [df, dv] of fields(v)) {
+          if (df === 1) relPath = dv.toString('utf8');
+          else if (df === 3) {
+            let symbol = '';
+            const docs = [];
+            for (const [sf, sv] of fields(dv)) {
+              if (sf === 1) symbol = sv.toString('utf8');
+              if (sf === 3) docs.push(sv.toString('utf8'));
+            }
+            if (symbol) symbols.set(symbol, docs);
+          } else if (df === 2) {
+            let range = null, symbol = '', roles = 0, enclosing = null;
+            for (const [of, ov] of fields(dv)) {
+              if (of === 1) range = Buffer.isBuffer(ov) ? packedVarints(ov) : [ov];
+              if (of === 2) symbol = ov.toString('utf8');
+              if (of === 3) roles = ov;
+              if (of === 7) enclosing = Buffer.isBuffer(ov) ? packedVarints(ov) : [ov];
+            }
+            if ((roles & DEFINITION_ROLE) && symbol && range) defs.push({ symbol, range, enclosing });
+          }
+        }
+        if (relPath) documents.set(relPath.replace(/\\/g, '/'), { symbols, defs });
+      }
+    }
+    return { tool, documents };
+  }
+
+  module.exports = { parseIndex, fields, readVarint, packedVarints, DEFINITION_ROLE };
   
 };
 
@@ -23015,7 +23247,7 @@ function __tryGit(args, opts = {}) {
   catch (_) { return ''; }
 }
 
-const VERSION = '8.37.1';
+const VERSION = '8.38.0';
 const MARKER = '\n\n## Auto-generated signatures\n<!-- Updated by gen-context.js -->\n';
 
 function requireSourceOrBundled(key) {
@@ -23247,6 +23479,10 @@ function _toolchainLabel() {
     const lspx = requireSourceOrBundled('./src/extractors/lsp_symbols');
     parts.push(...lspx.toolchainLabels());
   } catch (_) {}
+  try {
+    const scipx = requireSourceOrBundled('./src/extractors/scip_symbols');
+    parts.push(...scipx.toolchainLabels());
+  } catch (_) {}
   return parts.length ? parts.join(', ') : undefined;
 }
 
@@ -23271,6 +23507,24 @@ function detectAndExtract(filePath, content, maxSigsPerFile, exactness, cwd) {
         if (Array.isArray(sigs) && sigs.length > 0) {
           _nativeTsVersion = resolved.version;
           return sigs.slice(0, maxSigsPerFile);
+        }
+      }
+    } catch (_) {}
+  }
+
+  // T4 spike (#618, opt-in): a CI-produced SCIP index at the repo root is
+  // compiler-grade signatures already on disk — free at extraction time.
+  // Same per-file quality guard as the LSP tier: never lose surface vs regex.
+  if (exactness && exactness.scip) {
+    try {
+      const scipx = requireSourceOrBundled('./src/extractors/scip_symbols');
+      const out = scipx.extractViaScip(filePath, cwd);
+      if (out && Array.isArray(out.sigs) && out.sigs.length > 0) {
+        const extractor = getExtractor(extractorName);
+        const regexSigs = extractor ? (extractor.extract(content) || []) : [];
+        if (out.sigs.length >= regexSigs.length) {
+          scipx.acceptLabel(out.label);
+          return out.sigs.slice(0, maxSigsPerFile);
         }
       }
     } catch (_) {}

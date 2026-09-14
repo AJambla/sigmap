@@ -175,6 +175,10 @@ const DEFAULTS = {
     // over the built-in registry — commands are spawned directly, never a shell.
     lsp: false,
     lspServers: {},
+    // T4 spike (#618): read a CI-produced index.scip at the repo root as a
+    // signature source (import only) — compiler-typed signatures, same
+    // per-file never-lose-vs-regex guard as the LSP tier.
+    scip: false,
   },
 
   // Impact layer settings (v2.5)

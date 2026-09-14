@@ -241,6 +241,7 @@ sigmap --analyze          # files scanned, signatures per file
 | `retrieval.centralityBlend` | `boolean` | `false` | **v8.21.0, opt-in.** Blend import-graph centrality (zero-dep power iteration over the forward dependency graph) into `ask`/`--query`/`query_context` ranking as a small additive prior (`0.3 × centrality`) on positively-scored files only — heavily-referenced files break ties above one-off helpers, and non-matching files are never surfaced. Measured on the 90-task A/B: **+0 delta** (both arms 77.8% hit@5), so it stays off by default; enable it on hub-and-spoke architectures and check the `centrality` signal in `--query --json`. Re-measure with `npm run benchmark:centrality-blend`. |
 | `exactness.typescript` | `boolean` | `false` | **v8.36.0, opt-in.** Parse `.ts` with the **target repo's own** `node_modules/typescript` (the user's install — nothing is bundled) for true-AST signatures: exact anchors across multiline declarations, constrained generics, and the typed arrow consts regex cannot see. Silent, byte-identical regex fallback when the flag is off, no typescript resolves, or the resolved package has no compiler API (typescript@7's Go-native compiler is rejected by design — its path is the future LSP tier). When native extraction fires, the generated header carries `toolchain=typescript@<version>`, so byte-stability is stated per toolchain version. Measured +54% signatures on zod with typescript@5.9.3, 0 parse failures. See [exactness.typescript](#exactness-typescript). |
 | `exactness.lsp` | `boolean` | `false` | **v8.37.0, opt-in.** Ask a language server already on the machine (clangd/gopls/rust-analyzer) for `documentSymbol` per file — server-typed details and exact multiline ranges, cached across runs by content hash + server binary. A per-file quality guard accepts the LSP result only when it does not lose surface vs the regex tier (a server parsing standalone can be macro-blind), so the tier is strictly non-losing. Header labels `toolchain=<server>@<version>` when used. Measured with clangd: libuv +37%, spdlog +15% effective signatures. See [exactness.lsp](#exactness-lsp). |
+| `exactness.scip` | `boolean` | `false` | **v8.38.0, opt-in.** Read a CI-produced `index.scip` at the repo root as a signature source (import only): compiler-typed signatures with definition-occurrence anchors, parsed by a zero-dep protobuf reader. Same per-file never-lose-vs-regex guard as the LSP tier; header labels `toolchain=scip:<tool>@<version>` on acceptance. Measured on zod: +590% effective signatures. See [exactness.scip](#exactness-scip). |
 | `exactness.lspServers` | `object` | `{}` | Extension → command-array overrides laid over the built-in server registry, e.g. `{ ".rs": ["rust-analyzer"] }`. Commands are spawned directly with an argument array — never a shell. |
 
 ### sigCache
@@ -280,6 +281,16 @@ Enable incremental signature caching with mtime-based validation. When enabled, 
 ```json
 {
   "exactness": { "lsp": true, "lspServers": { ".zig": ["zls"] } }
+}
+```
+
+### exactness.scip
+
+**v8.38.0+ (#618, tier T4 of the host-toolchain ladder — the ladder's final rung).** If your CI already runs a SCIP indexer (scip-typescript, scip-java, scip-python, ...), the resulting `index.scip` holds compiler-grade signatures for every indexed file. With the flag on, SigMap parses it once per run with a zero-dependency protobuf wire reader and serves those signatures — typed by the compiler, anchored by definition occurrences — wherever they do not lose surface versus the regex tier (the same per-file guard the LSP tier uses). No index, a corrupt index, or an uncovered file falls back silently. Index freshness is your pipeline's concern: regenerate `index.scip` alongside your builds.
+
+```json
+{
+  "exactness": { "scip": true }
 }
 ```
 

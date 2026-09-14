@@ -78,12 +78,12 @@ features:
 
 <div style="max-width:840px;margin:0 auto;padding:18px 24px 0;text-align:center">
 <div style="display:inline-flex;flex-wrap:wrap;gap:.5rem;justify-content:center;background:var(--vp-c-brand-soft,#ede9fe);border:1px solid rgba(124,106,247,.25);border-radius:999px;padding:.55rem .9rem;font-size:.9rem;color:var(--vp-c-text-1)">
-  <span><strong>Release:</strong> v8.37.1</span>
+  <span><strong>Release:</strong> v8.38.0</span>
   <span>·</span>
-  <span><strong>New — fifteen times faster:</strong> a CPU profile put 93.6% of a full generate on two backtracking regexes; one linear rewrite later, a full index of this repo takes 0.97s instead of 15s — and fixing the performance fixed the data, correcting 13 silently mis-bound return-type hints across real corpora. Zero dependencies, offline, deterministic.</span>
+  <span><strong>New — the exactness ladder is complete:</strong> opt-in <code>exactness.scip</code> reads your CI's <code>index.scip</code> as a signature source — compiler-typed signatures via a zero-dependency protobuf reader, +590% effective signatures measured on zod, with the same per-file guard that keeps every tier (repo-local typescript, LSP servers, SCIP) from ever losing surface to the regex floor. Zero dependencies, offline, deterministic.</span>
 </div>
 <div style="margin-top:.4rem;display:inline-flex;flex-wrap:wrap;gap:.5rem;justify-content:center;background:var(--vp-c-default-soft,#f3f4f6);border:1px solid rgba(0,0,0,.08);border-radius:999px;padding:.55rem .9rem;font-size:.9rem;color:var(--vp-c-text-2)">
-  <span><strong>Benchmark:</strong> sigmap-v8.37-main</span>
+  <span><strong>Benchmark:</strong> sigmap-v8.38-main</span>
   <span>·</span>
   <span>78.6% hit@5 · 96.6% token reduction · 2026-09-13</span>
 </div>
@@ -176,7 +176,7 @@ See the full [end-to-end walkthrough](/guide/walkthrough) to watch this in actio
 | Overall token reduction | — | **96.6%** |
 | GPT-4o overflow repos | 16/21 | **0/21** |
 
-Latest saved benchmark run: **2026-09-13 (v8.37.1)**.
+Latest saved benchmark run: **2026-09-13 (v8.38.0)**.
 
 </div>
 
