@@ -161,16 +161,18 @@ function judge(response, context, opts = {}) {
       return result;
     }
 
-    if (score > 0.75) {
+    const boostAbove = typeof opts.learnBoostAbove === 'number' ? opts.learnBoostAbove : 0.75;
+    const penalizeBelow = typeof opts.learnPenalizeBelow === 'number' ? opts.learnPenalizeBelow : 0.40;
+    if (score > boostAbove) {
       boostFiles(opts.cwd, contextFiles, 0.05);
       learning.applied = true;
       learning.action = 'boost';
-    } else if (score < 0.40) {
+    } else if (score < penalizeBelow) {
       penalizeFiles(opts.cwd, contextFiles, 0.03);
       learning.applied = true;
       learning.action = 'penalize';
     } else {
-      learning.reason = 'groundedness in no-op band (0.40-0.75)';
+      learning.reason = `groundedness in no-op band (${penalizeBelow}-${boostAbove})`;
     }
 
     result.learning = learning;

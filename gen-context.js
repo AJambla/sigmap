@@ -1488,6 +1488,18 @@ __factories["./src/config/defaults"] = function(module, exports) {
     // Routes files to fast/balanced/powerful model tiers based on complexity
     routing: false,
 
+    // sigmap judge — verdict threshold and the --learn boost/penalize band (J2).
+    // The band is measured, not hand-picked: answers built from ≥ ~80% context-
+    // grounded vocabulary score above learnBoostAbove, answers under ~30%
+    // grounded score below learnPenalizeBelow (guard-tested on a mixture corpus
+    // drawn from the repo's own signatures — see judge.test.js). CLI flags
+    // override; scores between the two bounds neither boost nor penalize.
+    judge: {
+      threshold: 0.25,          // verdict pass/fail floor (--threshold overrides)
+      learnBoostAbove: 0.75,    // --learn boosts context files above this score
+      learnPenalizeBelow: 0.40, // --learn penalizes context files below this score
+    },
+
     // Output format: 'default' (markdown only) | 'cache' (also write Anthropic prompt-cache JSON)
     format: 'default',
 
@@ -14834,16 +14846,18 @@ __factories["./src/judge/judge-engine"] = function(module, exports) {
         return result;
       }
 
-      if (score > 0.75) {
+      const boostAbove = typeof opts.learnBoostAbove === 'number' ? opts.learnBoostAbove : 0.75;
+      const penalizeBelow = typeof opts.learnPenalizeBelow === 'number' ? opts.learnPenalizeBelow : 0.40;
+      if (score > boostAbove) {
         boostFiles(opts.cwd, contextFiles, 0.05);
         learning.applied = true;
         learning.action = 'boost';
-      } else if (score < 0.40) {
+      } else if (score < penalizeBelow) {
         penalizeFiles(opts.cwd, contextFiles, 0.03);
         learning.applied = true;
         learning.action = 'penalize';
       } else {
-        learning.reason = 'groundedness in no-op band (0.40-0.75)';
+        learning.reason = `groundedness in no-op band (${penalizeBelow}-${boostAbove})`;
       }
 
       result.learning = learning;
@@ -27568,8 +27582,15 @@ function main() {
     try { contextText = fs.readFileSync(path.resolve(cwd, ctxFile), 'utf8'); }
     catch (e) { console.error(`[sigmap] cannot read --context file: ${e.message}`); process.exit(1); }
 
+    // Config-driven defaults (J2): judge.threshold / learnBoostAbove /
+    // learnPenalizeBelow from gen-context.config.json; --threshold overrides.
+    const judgeCfg = (loadConfig(cwd) || {}).judge || {};
+    const judgeOpts = {};
+    if (typeof judgeCfg.threshold === 'number') judgeOpts.threshold = judgeCfg.threshold;
+    if (typeof judgeCfg.learnBoostAbove === 'number') judgeOpts.learnBoostAbove = judgeCfg.learnBoostAbove;
+    if (typeof judgeCfg.learnPenalizeBelow === 'number') judgeOpts.learnPenalizeBelow = judgeCfg.learnPenalizeBelow;
     const thrIdx = args.indexOf('--threshold');
-    const judgeOpts = thrIdx >= 0 ? { threshold: parseFloat(args[thrIdx + 1]) || 0.25 } : {};
+    if (thrIdx >= 0) judgeOpts.threshold = parseFloat(args[thrIdx + 1]) || 0.25;
     if (args.includes('--learn')) {
       judgeOpts.learn = true;
       judgeOpts.cwd = cwd;
