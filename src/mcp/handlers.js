@@ -1036,12 +1036,21 @@ function queryKnowledgeMap(args, cwd) {
     const lines = [`Knowledge-map neighbors of ${args.file}:`];
     for (const [k, v] of Object.entries(n)) {
       if (v.length === 0) continue;
-      lines.push(`  ${k} (${v.length}): ${v.map((x) => x.replace(/^(file|symbol|lib|route):/, '')).slice(0, 20).join(', ')}${v.length > 20 ? ` … +${v.length - 20} more` : ''}`);
+      lines.push(`  ${k} (${v.length}): ${v.map((x) => x.replace(/^(file|symbol|lib|route|env):/, '')).slice(0, 20).join(', ')}${v.length > 20 ? ` … +${v.length - 20} more` : ''}`);
     }
     if (lines.length === 1) lines.push('  (no edges)');
     return lines.join('\n');
   }
-  return `Knowledge map: schema v${map.schema} · ${map.nodes.length} nodes · ${map.edges.length} edges. Pass { library } for upgrade impact or { file } for neighbors.`;
+  if (args && args.env) {
+    const r = km.envReaders(map, String(args.env));
+    if (!r) return `No env-var node for "${args.env}" — nothing reads it and no committed .env example declares it.`;
+    const lines = [`Env var ${r.env}:`];
+    lines.push(`  declared in a committed .env example: ${r.inExample ? 'yes' : 'no'}`);
+    lines.push(`  reader files (${r.readers.length}):`);
+    for (const f of r.readers) lines.push(`    ${f.replace(/^file:/, '')}`);
+    return lines.join('\n');
+  }
+  return `Knowledge map: schema v${map.schema} · ${map.nodes.length} nodes · ${map.edges.length} edges. Pass { library } for upgrade impact, { file } for neighbors, or { env } for readers of an environment variable.`;
 }
 
 module.exports = { readContext, searchSignatures, getMap, createCheckpoint, getRouting, explainFile, listModules, queryContext, getMethodImpact, getImpact, getLines, readMemory, getCalleeSignatures, notifyFileCreated, notifySymbolAdded, notifyFileDeleted, getDiffContext, getArchitectureOverview, verifySuggestion, squeezeOutput, getBudget, queryKnowledgeMap };

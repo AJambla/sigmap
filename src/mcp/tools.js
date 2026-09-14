@@ -416,17 +416,19 @@ const TOOLS = [
   {
     name: 'query_knowledge_map',
     description:
-      'Query the unified knowledge map — typed nodes (file, symbol, library@version, route) ' +
-      'and edges (imports, calls, defines, tests, uses-lib, exposes-route) assembled from ' +
-      "SigMap's existing graphs. Pass { library: \"express\" } for upgrade impact: the " +
-      'lib → importing files → their callers → covering tests chain. Pass { file: ' +
-      '\"src/x.js\" } for a file\'s typed neighbors. Deterministic, cached in .context, ' +
-      'local-only; no LLM, no network.',
+      'Query the unified knowledge map — typed nodes (file, symbol, library@version, route, ' +
+      'env-var, migration, script) and edges (imports, calls, defines, tests, uses-lib, ' +
+      "exposes-route, reads-env) assembled from SigMap's existing graphs. Pass { library: " +
+      '\"express\" } for upgrade impact: the lib → importing files → their callers → covering ' +
+      'tests chain. Pass { file: \"src/x.js\" } for a file\'s typed neighbors. Pass { env: ' +
+      '\"DATABASE_URL\" } for the files reading an environment variable. Deterministic, ' +
+      'cached in .context, local-only; no LLM, no network.',
     inputSchema: {
       type: 'object',
       properties: {
         library: { type: 'string', description: 'Declared dependency name for the upgrade-impact walk' },
         file: { type: 'string', description: 'Repo-relative file path for a typed-neighbors view' },
+        env: { type: 'string', description: 'Environment variable name — which files read it, and whether a committed .env example declares it' },
       },
     },
   },

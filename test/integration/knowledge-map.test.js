@@ -36,13 +36,17 @@ function repo() {
   fs.mkdirSync(path.join(dir, 'node_modules', 'leftpad'), { recursive: true });
   fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({
     name: 'km-fixture', version: '1.0.0', dependencies: { leftpad: '^9.1.0' },
+    scripts: { lint: 'true' },
   }));
+  fs.writeFileSync(path.join(dir, '.env.example'), 'PAD_WIDTH=8\nUNUSED_FLAG=0\n');
+  fs.mkdirSync(path.join(dir, 'migrations'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'migrations', '20240101120000_create_pads.sql'), 'CREATE TABLE pads (id int);\n');
   fs.writeFileSync(path.join(dir, 'node_modules', 'leftpad', 'package.json'), JSON.stringify({
     name: 'leftpad', version: '9.1.4', main: 'index.js',
   }));
   fs.writeFileSync(path.join(dir, 'node_modules', 'leftpad', 'index.js'), 'module.exports = (s) => s;\n');
   fs.writeFileSync(path.join(dir, 'src', 'pad.js'),
-    "const leftpad = require('leftpad');\nfunction padded(s) {\n  return leftpad(s);\n}\nmodule.exports = { padded };\n");
+    "const leftpad = require('leftpad');\nconst WIDTH = process.env.PAD_WIDTH;\nfunction padded(s) {\n  return leftpad(s, WIDTH);\n}\nmodule.exports = { padded };\n");
   fs.writeFileSync(path.join(dir, 'src', 'banner.js'),
     "const { padded } = require('./pad');\nfunction banner(text) {\n  return padded(text);\n}\nmodule.exports = { banner };\n");
   fs.writeFileSync(path.join(dir, 'test', 'banner.test.js'),
@@ -106,7 +110,66 @@ test('MCP handler renders the chain and the neighbors view', () => {
   const neighbors = queryKnowledgeMap({ file: 'src/pad.js' }, dir);
   assert.ok(neighbors.includes('importedBy') && neighbors.includes('usesLibs'), neighbors.slice(0, 160));
   const summary = queryKnowledgeMap({}, dir);
-  assert.ok(/schema v1 · \d+ nodes · \d+ edges/.test(summary), summary);
+  assert.ok(/schema v2 · \d+ nodes · \d+ edges/.test(summary), summary);
+});
+
+test('env-var nodes carry the example flag and per-file reads-env edges', () => {
+  const envNode = map.nodes.find((n) => n.id === 'env:PAD_WIDTH');
+  assert.ok(envNode && envNode.kind === 'env-var' && envNode.inExample === true,
+    `PAD_WIDTH node wrong: ${JSON.stringify(envNode)}`);
+  assert.ok(map.edges.some((e) => e.from === 'file:src/pad.js' && e.kind === 'reads-env' && e.to === 'env:PAD_WIDTH'),
+    'reads-env edge missing for src/pad.js → PAD_WIDTH');
+  const unused = map.nodes.find((n) => n.id === 'env:UNUSED_FLAG');
+  assert.ok(unused && unused.inExample === true, 'example-only var must still get a node');
+  assert.ok(!map.edges.some((e) => e.kind === 'reads-env' && e.to === 'env:UNUSED_FLAG'),
+    'example-only var must have no reader edges');
+});
+
+test('migration and script nodes from the structured collectors', () => {
+  const mig = map.nodes.find((n) => n.kind === 'migration');
+  assert.ok(mig && mig.id === 'migration:migrations/20240101120000_create_pads.sql'
+    && mig.version === '20240101120000', `migration node wrong: ${JSON.stringify(mig)}`);
+  const script = map.nodes.find((n) => n.id === 'script:script:lint');
+  assert.ok(script && script.runner === 'script' && script.detail === 'npm run lint',
+    `script node wrong: ${JSON.stringify(script)}`);
+});
+
+test('MCP env query renders readers and the example-declaration status', () => {
+  const out = queryKnowledgeMap({ env: 'PAD_WIDTH' }, dir);
+  assert.ok(out.includes('env:PAD_WIDTH') && out.includes('declared in a committed .env example: yes')
+    && out.includes('src/pad.js'), out);
+  const miss = queryKnowledgeMap({ env: 'NOPE_VAR' }, dir);
+  assert.ok(miss.startsWith('No env-var node'), miss);
+});
+
+test('fileNeighbors exposes readsEnv', () => {
+  const n = km.fileNeighbors(map, 'src/pad.js');
+  assert.deepStrictEqual(n.readsEnv, ['env:PAD_WIDTH']);
+});
+
+test('schema bump invalidates a v1 cache', () => {
+  const cachePath = path.join(dir, '.context', 'knowledge-map.json');
+  km.loadOrBuild(dir); // populate, then poison with a v1 shell keyed to the same mtime
+  const cached = JSON.parse(fs.readFileSync(cachePath, 'utf8'));
+  fs.writeFileSync(cachePath, JSON.stringify({ schema: 1, nodes: [], edges: [], truncated: [], builtFor: cached.builtFor }));
+  const rebuilt = km.loadOrBuild(dir);
+  assert.strictEqual(rebuilt.schema, 2);
+  assert.ok(rebuilt.nodes.length > 0, 'stale v1 cache must be rebuilt, not served');
+});
+
+test('producer analyze output derives from the collectors (env table rows)', () => {
+  const envSchema = require(path.join(ROOT, 'src/map/env-schema'));
+  const absFiles = ['src/pad.js', 'src/banner.js', 'src/app.js', 'test/banner.test.js'].map((r) => path.join(dir, r));
+  const table = envSchema.analyze(absFiles, dir);
+  assert.ok(table.includes('| PAD_WIDTH | code, .env.example |'), table);
+  assert.ok(table.includes('| UNUSED_FLAG | .env.example |'), table);
+  const rows = envSchema.collectEnvReads(absFiles, dir);
+  assert.deepStrictEqual(rows.find((r) => r.name === 'PAD_WIDTH').files, ['src/pad.js']);
+});
+
+test('knowledge-map.js source is NUL-free so git diffs it as text', () => {
+  const src = fs.readFileSync(path.join(ROOT, 'src/map/knowledge-map.js'));
+  assert.ok(!src.includes(0), 'raw NUL bytes make git treat the file as binary');
 });
 
 test('the store persists to .context and cache-hits on unchanged context', () => {
