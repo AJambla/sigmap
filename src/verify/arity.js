@@ -15,7 +15,10 @@ const path = require('path');
 const { maskCode, readBalanced } = require('../extractors/scan');
 
 // Files whose signature params are exact (JS/TS via scan.js, Python via AST,
-// Go via the balanced scanner — G4 #643).
+// Go via the balanced scanner — G4 #643). Java params are exact too (#646)
+// but `.java` is deliberately absent: Java has no top-level callables —
+// every method is an indented member and answer calls are dotted, both
+// excluded by design — so nothing from a .java file could ever be indexed.
 const EXACT_PARAM_EXTS = new Set(['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.py', '.go']);
 
 const CTRL_KEYWORDS = new Set([
