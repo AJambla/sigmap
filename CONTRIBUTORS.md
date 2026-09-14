@@ -35,6 +35,9 @@ To ensure proper attribution:
 
 We welcome contributions! See [Contributing](./docs/CONTRIBUTING.md) for guidelines.
 
+### Recent Contributors (v8.43.0)
+- **@manojmallick** — feat(map): knowledge map increment 3 — get_impact and get_architecture_overview re-based as views over the cached store with BFS parity pinned, tests/routes enriched from typed edges, honest route counts, tokens on file nodes, SCHEMA_VERSION 3 (#632, PR #633)
+
 ### Recent Contributors (v8.42.0)
 - **@manojmallick** — feat(map): knowledge map increment 2 — env-var/migration/script nodes with per-file reads-env edges from structured producer collectors, the `{ env }` query on query_knowledge_map, SCHEMA_VERSION 2, and the NUL-delimiter escape fix that makes the store source git-diffable text (#629, PR #630)
 

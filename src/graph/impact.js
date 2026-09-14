@@ -237,4 +237,4 @@ function formatImpactJSON(result) {
   };
 }
 
-module.exports = { getImpact, analyzeImpact, formatImpact, formatImpactJSON };
+module.exports = { getImpact, analyzeImpact, formatImpact, formatImpactJSON, isTestFile, isRouteFile };

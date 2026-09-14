@@ -476,11 +476,14 @@ function getImpact(args, cwd) {
   if (!args || !args.file) return 'Missing required argument: file';
 
   try {
-    const { analyzeImpact, formatImpact } = require('../graph/impact');
+    // View over the knowledge map (#632): cached store instead of a per-call
+    // graph rebuild; same BFS semantics and rendering as the old path.
+    const km = require('../map/knowledge-map');
+    const { formatImpact } = require('../graph/impact');
     const depth = Math.max(0, parseInt(args.depth, 10) || 3);
-    const results = analyzeImpact(args.file, cwd, { depth });
-    if (results.length === 0) return `No impact data for: ${args.file}`;
-    return results.map((r) => formatImpact(r.impact)).join('\n\n---\n\n');
+    const rel = path.isAbsolute(args.file) ? path.relative(cwd, args.file) : String(args.file);
+    const map = km.loadOrBuild(cwd);
+    return formatImpact(km.impactView(map, rel, depth));
   } catch (err) {
     return `_get_impact failed: ${err.message}_`;
   }
@@ -858,64 +861,32 @@ function getDiffContext(args, cwd) {
  */
 function getArchitectureOverview(args, cwd) {
   try {
-    const { buildSigIndex } = require('../retrieval/ranker');
-    const index = buildSigIndex(cwd);
+    // View over the knowledge map (#632): every section — modules, hubs,
+    // cycles, routes — derives from the cached store; route totals count real
+    // route nodes instead of PROJECT_MAP.md table lines.
+    const km = require('../map/knowledge-map');
+    const map = km.loadOrBuild(cwd);
+    const view = km.architectureView(map);
     const out = ['# Architecture overview', ''];
 
-    if (index.size === 0) {
+    if (view.totalFiles === 0) {
       out.push('_No context file found. Run: node gen-context.js_', '');
     } else {
-      const groups = {};
-      let totalTokens = 0;
-      let totalFiles = 0;
-      for (const [rel, sigs] of index.entries()) {
-        const parts = rel.replace(/\\/g, '/').split('/');
-        const mod = parts.length > 1 ? parts[0] : '.';
-        const tok = Math.ceil(sigs.join('\n').length / 4);
-        if (!groups[mod]) groups[mod] = { files: 0, tokens: 0 };
-        groups[mod].files++;
-        groups[mod].tokens += tok;
-        totalTokens += tok;
-        totalFiles++;
-      }
-      const sorted = Object.entries(groups)
-        .map(([mod, d]) => ({ mod, files: d.files, tokens: d.tokens }))
-        .sort((a, b) => b.tokens - a.tokens);
-
-      out.push(`**${totalFiles} indexed files · ${sorted.length} modules · ~${totalTokens} tokens**`, '');
+      out.push(`**${view.totalFiles} indexed files · ${view.modules.length} modules · ~${view.totalTokens} tokens**`, '');
       out.push('## Modules', '| Module | Files | Tokens |', '|--------|-------|--------|');
-      for (const m of sorted.slice(0, 20)) out.push(`| ${m.mod} | ${m.files} | ~${m.tokens} |`);
+      for (const m of view.modules.slice(0, 20)) out.push(`| ${m.mod} | ${m.files} | ~${m.tokens} |`);
       out.push('');
     }
 
-    // Hub files + cycle count from the dependency graph (optional).
-    try {
-      const { buildFromCwd } = require('../graph/builder');
-      const { detectCycles } = require('../map/import-graph');
-      const graph = buildFromCwd(cwd);
-      if (graph && graph.reverse && graph.reverse.size) {
-        const hubs = [...graph.reverse.entries()]
-          .map(([f, importers]) => ({ file: path.relative(cwd, f).replace(/\\/g, '/'), in: importers.length }))
-          .filter((h) => h.in > 0)
-          .sort((a, b) => b.in - a.in)
-          .slice(0, 10);
-        if (hubs.length) {
-          out.push('## Hub files (most depended-on)', '| File | Importers |', '|------|-----------|');
-          for (const h of hubs) out.push(`| \`${h.file}\` | ${h.in} |`);
-          out.push('');
-        }
-        let cycleCount = 0;
-        try { cycleCount = detectCycles(graph.forward).length; } catch (_) {}
-        out.push(`**Dependency cycles:** ${cycleCount}` + (cycleCount ? ' _(see import graph)_' : ' — none detected'), '');
-      }
-    } catch (_) { /* graph optional */ }
+    if (view.hubs.length) {
+      out.push('## Hub files (most depended-on)', '| File | Importers |', '|------|-----------|');
+      for (const h of view.hubs) out.push(`| \`${h.file}\` | ${h.in} |`);
+      out.push('');
+      out.push(`**Dependency cycles:** ${view.cycles}` + (view.cycles ? ' _(see import graph)_' : ' — none detected'), '');
+    }
 
-    // Routes from PROJECT_MAP.md if present.
-    const mapPath = path.join(cwd, 'PROJECT_MAP.md');
-    if (fs.existsSync(mapPath)) {
-      const mc = fs.readFileSync(mapPath, 'utf8');
-      const routeCount = mc.split('\n').filter((l) => l.startsWith('| ') && !l.startsWith('| Method') && !l.startsWith('|---')).length;
-      out.push('## Project map', `Routes detected: ${routeCount} _(use get_map for imports/classes/routes detail)_`, '');
+    if (view.routes > 0) {
+      out.push('## Project map', `Routes detected: ${view.routes} _(use get_map for imports/classes/routes detail)_`, '');
     } else {
       out.push('_Run `node gen-project-map.js` for routes / class-hierarchy detail (get_map)._');
     }

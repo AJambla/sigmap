@@ -10,6 +10,13 @@ Format: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [8.43.0] — 2026-09-14
+
+### Added
+- **Knowledge map increment 3: `get_impact` and `get_architecture_overview` become views over the store** (#632, PR #633) — the #543 epic's derived-views plan lands. Both MCP handlers now read the mtime-cached store via `loadOrBuild` instead of rebuilding the import graph and signature index on **every call**. `impactView` keeps the graph path's exact BFS semantics (direct = level 1, transitive deeper, depth 0 = unlimited; parity pinned by a realpath-normalized set-equality test) and answers get richer from typed data: affected tests now include the store's discovered `tests` edges — a test covering an impacted file counts even when it doesn't import it — and route totals count real `route` nodes instead of PROJECT_MAP.md table lines (the old heuristic counted every table row in the file). File nodes carry a `tokens` estimate, graph-only endpoints get nodes via realpath recovery, and `SCHEMA_VERSION` bumps to 3. Evidence packs deliberately stay on their own path (schema-stable, hash-anchored artifact — deferred on the epic). Along the way the parity test exposed that the old path mangles displayed paths when the cwd contains capital letters (`../../t/…` artifacts on macOS tmpdirs) — the store's realpath handling is the correct one
+
+---
+
 ## [8.42.0] — 2026-09-14
 
 ### Added

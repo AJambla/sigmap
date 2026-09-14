@@ -16,7 +16,7 @@ const { execFileSync } = require('child_process');
 const ROOT = path.join(__dirname, '..', '..');
 const CLI = path.join(ROOT, 'gen-context.js');
 const km = require(path.join(ROOT, 'src/map/knowledge-map'));
-const { queryKnowledgeMap } = require(path.join(ROOT, 'src/mcp/handlers'));
+const { queryKnowledgeMap, getImpact, getArchitectureOverview } = require(path.join(ROOT, 'src/mcp/handlers'));
 
 let passed = 0;
 let failed = 0;
@@ -110,7 +110,7 @@ test('MCP handler renders the chain and the neighbors view', () => {
   const neighbors = queryKnowledgeMap({ file: 'src/pad.js' }, dir);
   assert.ok(neighbors.includes('importedBy') && neighbors.includes('usesLibs'), neighbors.slice(0, 160));
   const summary = queryKnowledgeMap({}, dir);
-  assert.ok(/schema v2 · \d+ nodes · \d+ edges/.test(summary), summary);
+  assert.ok(/schema v3 · \d+ nodes · \d+ edges/.test(summary), summary);
 });
 
 test('env-var nodes carry the example flag and per-file reads-env edges', () => {
@@ -153,7 +153,7 @@ test('schema bump invalidates a v1 cache', () => {
   const cached = JSON.parse(fs.readFileSync(cachePath, 'utf8'));
   fs.writeFileSync(cachePath, JSON.stringify({ schema: 1, nodes: [], edges: [], truncated: [], builtFor: cached.builtFor }));
   const rebuilt = km.loadOrBuild(dir);
-  assert.strictEqual(rebuilt.schema, 2);
+  assert.strictEqual(rebuilt.schema, 3);
   assert.ok(rebuilt.nodes.length > 0, 'stale v1 cache must be rebuilt, not served');
 });
 
@@ -165,6 +165,57 @@ test('producer analyze output derives from the collectors (env table rows)', () 
   assert.ok(table.includes('| UNUSED_FLAG | .env.example |'), table);
   const rows = envSchema.collectEnvReads(absFiles, dir);
   assert.deepStrictEqual(rows.find((r) => r.name === 'PAD_WIDTH').files, ['src/pad.js']);
+});
+
+test('file nodes carry a token estimate (v3)', () => {
+  const f = map.nodes.find((n) => n.id === 'file:src/pad.js');
+  assert.ok(f && typeof f.tokens === 'number' && f.tokens > 0, JSON.stringify(f));
+});
+
+test('impactView parity with the graph path (direct/transitive equal, tests/routes supersets)', () => {
+  const { analyzeImpact } = require(path.join(ROOT, 'src/graph/impact'));
+  // The old path mangles rel display paths when the cwd contains capital
+  // letters (builder lowercases keys); compare realpath-normalized abs sets.
+  const realDir = fs.realpathSync(dir);
+  const norm = (r, base) => {
+    try { return fs.realpathSync(path.resolve(base, r)).toLowerCase(); }
+    catch (_) { return path.resolve(base, r).toLowerCase(); }
+  };
+  const old = analyzeImpact('src/pad.js', dir, { depth: 3 })[0].impact;
+  const view = km.impactView(map, 'src/pad.js', 3);
+  assert.deepStrictEqual(new Set(view.direct.map((r) => norm(r, realDir))), new Set(old.direct.map((r) => norm(r, dir))));
+  assert.deepStrictEqual(new Set(view.transitive.map((r) => norm(r, realDir))), new Set(old.transitive.map((r) => norm(r, dir))));
+  assert.strictEqual(view.totalImpact, old.totalImpact);
+  const viewTests = new Set(view.tests.map((r) => norm(r, realDir)));
+  for (const t of old.tests) assert.ok(viewTests.has(norm(t, dir)), `old test ${t} missing from view`);
+  const viewRoutes = new Set(view.routes.map((r) => norm(r, realDir)));
+  for (const r of old.routes) assert.ok(viewRoutes.has(norm(r, dir)), `old route ${r} missing from view`);
+});
+
+test('MCP get_impact renders from the store with tests-edge enrichment', () => {
+  const out = getImpact({ file: 'src/pad.js' }, dir);
+  assert.ok(out.includes('## Impact: `src/pad.js`'), out.slice(0, 120));
+  assert.ok(out.includes('### Direct importers') && out.includes('src/banner.js'), out);
+  assert.ok(out.includes('### Affected tests') && out.includes('test/banner.test.js'), out);
+});
+
+test('MCP get_architecture_overview derives every section from the store', () => {
+  const out = getArchitectureOverview({}, dir);
+  assert.ok(out.includes('# Architecture overview'), out.slice(0, 80));
+  assert.ok(/\*\*\d+ indexed files · \d+ modules · ~\d+ tokens\*\*/.test(out), out);
+  assert.ok(out.includes('| src |'), 'module table row missing');
+  assert.ok(out.includes('## Hub files (most depended-on)') && out.includes('src/pad.js'), out);
+  assert.ok(out.includes('**Dependency cycles:** 0 — none detected'), out);
+  assert.ok(out.includes('Routes detected: 1'), out);
+});
+
+test('view handlers reuse the cached store across calls', () => {
+  const first = getArchitectureOverview({}, dir);
+  const cachePath = path.join(dir, '.context', 'knowledge-map.json');
+  const bytesBefore = fs.readFileSync(cachePath, 'utf8');
+  const second = getArchitectureOverview({}, dir);
+  assert.strictEqual(first, second);
+  assert.strictEqual(fs.readFileSync(cachePath, 'utf8'), bytesBefore, 'cache must not be rewritten on a hit');
 });
 
 test('knowledge-map.js source is NUL-free so git diffs it as text', () => {
