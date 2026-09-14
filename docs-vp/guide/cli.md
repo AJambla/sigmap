@@ -1403,7 +1403,7 @@ sigmap share
 
 ```
 Generated with SigMap — the deterministic, verifiable grounding layer for AI code work
-96.6% fewer tokens · 78.6% retrieval hit@5 · 43.4% fewer prompts
+96.6% fewer tokens · 78.6% retrieval hit@5 · 43.7% fewer prompts
 https://sigmap.io
 [sigmap] Copied to clipboard.
 ```
@@ -1423,8 +1423,8 @@ sigmap bench --submit --json
 ────────────────────────────────────────────────────────
  SigMap Community Benchmark Submission
 ────────────────────────────────────────────────────────
- SigMap version : 8.45.0
- Benchmark ID   : sigmap-v8.45-main
+ SigMap version : 8.46.0
+ Benchmark ID   : sigmap-v8.46-main
  Submitted      : 2026-09-13
 ────────────────────────────────────────────────────────
  Canonical metrics (official release):

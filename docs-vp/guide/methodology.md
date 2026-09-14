@@ -78,7 +78,7 @@ Example tasks:
 - **Wrong** (not in top 5) — likely multiple retries
 
 **SigMap breakdown:**
-- Correct: 61.0% of tasks
+- Correct: 61.9% of tasks
 - Partial: 26.7% of tasks
 - Wrong: 21.1% of tasks
 

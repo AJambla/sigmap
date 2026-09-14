@@ -35,6 +35,9 @@ To ensure proper attribution:
 
 We welcome contributions! See [Contributing](./docs/CONTRIBUTING.md) for guidelines.
 
+### Recent Contributors (v8.46.0)
+- **@manojmallick** — feat(go): G4 increment 2 — Go extractor migrated to the balanced-scanner core (nested func params, generics, generic receivers, string-safe comments; fixture parity byte-exact) and Go joins arity-checked verification (`.go` in EXACT_PARAM_EXTS, type-variadic parsing, go blocks in the guard filter); retrieval gate PASS (#643, PR #644)
+
 ### Recent Contributors (v8.45.0)
 - **@manojmallick** — feat(judge): the judge-convergence tranche — J1 structural claim grounding via the verify engine (`checks` summary field, repo + installed-lib symbols ground at the judge surface, cwd-less behavior byte-identical) and J2 configurable learning thresholds with mixture-corpus-derived, drift-guarded defaults (#638, PR #639; #640, PR #641)
 

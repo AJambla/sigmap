@@ -30,14 +30,15 @@ keep precision high. Python bare imports are intentionally **not** flagged
 
 ### Arity checks (v8.28.0)
 
-Because the balanced scanner (v8.27) made JS/TS parameter lists exact — and
-Python's come from the AST — the guard can compare a call's argument count
-against the repo signature's arity range (`=` defaults and `?`-optionals lower
-the minimum; `...rest`/`*args` make it variadic). Conservative by
-construction: only uniquely-resolved **top-level** functions from JS/TS/Python
-are checked; variadic signatures flag only too-few; dotted method calls,
-ambiguous names, and every other language are skipped. The suggestion on each
-flag is the actual repo signature and its file.
+Because the balanced scanner made JS/TS (v8.27) and Go (v8.46) parameter
+lists exact — and Python's come from the AST — the guard can compare a call's
+argument count against the repo signature's arity range (`=` defaults and
+`?`-optionals lower the minimum; `...rest`/`*args`/Go's `nums ...int` make it
+variadic). Conservative by construction: only uniquely-resolved **top-level**
+functions from JS/TS/Python/Go are checked (Go receiver methods are excluded
+— dotted calls are never flagged); variadic signatures flag only too-few;
+dotted method calls, ambiguous names, and every other language are skipped.
+The suggestion on each flag is the actual repo signature and its file.
 
 ### Installed-library grounding (v8.1.0, v9.0 G5/D5 — the moat)
 
