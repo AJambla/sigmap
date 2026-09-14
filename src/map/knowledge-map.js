@@ -387,6 +387,34 @@ function envReaders(map, name) {
   return { env: id, inExample: !!node.inExample, readers };
 }
 
+/**
+ * Related tests per file, from the store's `tests` edges (test → impl) — the
+ * evidence view (#635). One edge pass for a whole file list; keys are the
+ * caller's original path strings, and files absent from the store are omitted
+ * so callers can fall back to per-file discovery.
+ * @param {object} map
+ * @param {string[]} rels
+ * @returns {Map<string, string[]>} input path → sorted test rel paths
+ */
+function relatedTestsView(map, rels) {
+  const want = new Map(); // "file:<rel>" → original input string
+  for (const r of rels || []) {
+    const orig = String(r);
+    want.set(`file:${orig.replace(/\\/g, '/')}`, orig);
+  }
+  const out = new Map();
+  for (const n of map.nodes) {
+    if (want.has(n.id)) out.set(want.get(n.id), []);
+  }
+  for (const e of map.edges) {
+    if (e.kind !== 'tests') continue;
+    const orig = want.get(e.to);
+    if (orig !== undefined && out.has(orig)) out.get(orig).push(e.from.slice(5));
+  }
+  for (const list of out.values()) list.sort();
+  return out;
+}
+
 /** Typed neighbors of one file node. */
 function fileNeighbors(map, rel) {
   const id = `file:${rel.replace(/\\/g, '/')}`;
@@ -411,4 +439,4 @@ function fileNeighbors(map, rel) {
   return out;
 }
 
-module.exports = { buildKnowledgeMap, loadOrBuild, upgradeImpact, fileNeighbors, envReaders, impactView, architectureView, canonicalJson, SCHEMA_VERSION };
+module.exports = { buildKnowledgeMap, loadOrBuild, upgradeImpact, fileNeighbors, envReaders, impactView, architectureView, relatedTestsView, canonicalJson, SCHEMA_VERSION };
