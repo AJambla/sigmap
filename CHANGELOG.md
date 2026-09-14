@@ -10,6 +10,13 @@ Format: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [8.47.0] — 2026-09-15
+
+### Added
+- **Java extractor on the balanced scanner + modern-Java surface (G4 increment 3)** (#646, PR #647) — the Java extractor still parsed with a naive comment strip and `[^)]*`/`<[^>]+>` captures: a `//` or `/*` inside a string corrupted the rest of the line, braces inside strings derailed the class-body depth count, an annotation with arguments on a parameter (`@Size(max = 10) String name`) truncated the param list, and a generic method with nested bounds was missed. It now runs on the shared `scan.js` core: string-aware comment stripping, masked brace counting, and balanced reads for member params, generic bounds, and type headers. The regexes also learn modern Java — **generic type names** (`interface Repository<T, ID>` was silently missing, as the old pinned fixture output itself proved), **records** with header components, **sealed/non-sealed** types, **implicit-public interface methods** (safe: interface bodies hold no statements), and annotation-argument params. Existing fixture output stays byte-identical with 11 new pinned lines. `.java` deliberately stays out of `EXACT_PARAM_EXTS` — Java has no top-level callables and dotted calls are never flagged, so nothing from a `.java` file could ever enter the arity index; the reasoning is recorded at the constant. Retrieval gate PASS
+
+---
+
 ## [8.46.0] — 2026-09-14
 
 ### Added

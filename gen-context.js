@@ -7019,6 +7019,7 @@ __factories["./src/extractors/html"] = function(module, exports) {
 __factories["./src/extractors/java"] = function(module, exports) {
   
   const { lineAt, withAnchor } = __require('./src/extractors/line-anchor');
+  const { stripComments, maskCode, readBalanced } = __require('./src/extractors/scan');
   const { capWithNotice, capMembersWithNotice } = __require('./src/util/truncate');
 
   // Class bodies are scanned to this many characters. Generated JVM sources
@@ -7033,10 +7034,18 @@ __factories["./src/extractors/java"] = function(module, exports) {
   // Per-file signature ceiling, likewise above the configured default.
   const MAX_SIGS_PER_FILE = 200;
 
+  // Chars scanned past a type's name/header for the body `{` (extends /
+  // implements / permits clauses) before giving up.
+  const HEAD_SCAN_CHARS = 500;
+
   /**
    * Extract signatures from Java source code.
-   * Signatures carry `:start-end` line anchors (Surgical Context); the comment
-   * strip below is newline-preserving so anchor lines match the original file.
+   * Signatures carry `:start-end` line anchors (Surgical Context); comment
+   * stripping is the shared string-aware scanner (G4, #646), so `//` or `/*`
+   * inside a string literal survives, and brace depth is counted on masked
+   * text. Balanced reads capture annotation-argument params, nested generic
+   * bounds, generic type names, records, sealed types, and implicit-public
+   * interface methods.
    * @param {string} src - Raw file content
    * @returns {string[]} Array of signature strings
    */
@@ -7048,17 +7057,50 @@ __factories["./src/extractors/java"] = function(module, exports) {
     // as the Python/JS extractors' doc hints.
     const hinted = (sig, name) => (docHints.has(name) ? `${sig}  # ${docHints.get(name)}` : sig);
 
-    const stripped = src
-      .replace(/\/\/.*$/gm, '')
-      .replace(/\/\*[\s\S]*?\*\//g, (s) => s.replace(/[^\n]/g, ' '));
+    const stripped = stripComments(src);
+    const masked = maskCode(src);
+    const ws = (i) => { while (stripped[i] === ' ' || stripped[i] === '\t' || stripped[i] === '\n') i++; return i; };
 
-    // Classes and interfaces
-    const typeRegex = /^(?:public\s+|protected\s+)?(?:abstract\s+|final\s+)?(class|interface|enum)\s+(\w+)(?:\s+extends\s+[\w<>, .]+)?(?:\s+implements\s+[\w<>, .]+)?\s*\{/gm;
+    // Type declarations: classes, interfaces, enums, records — modifiers in any
+    // order, sealed/non-sealed included, generic names allowed.
+    const typeRegex = /^(?:(?:public|protected|abstract|final|sealed|non-sealed|static|strictfp)\s+)*(class|interface|enum|record)\s+(\w+)/gm;
     for (const m of stripped.matchAll(typeRegex)) {
-      const bodyStart = m.index + m[0].length;
-      const block = extractBlock(stripped, bodyStart);
-      sigs.push(hinted(withAnchor(`${m[1]} ${m[2]}`, lineAt(stripped, m.index), lineAt(stripped, bodyStart + block.length)), m[2]));
-      for (const meth of extractMembers(block)) {
+      const kw = m[1];
+      const name = m[2];
+      let i = m.index + m[0].length;
+      // Optional type parameters on the name: `<T, ID>`, `<T extends Comparable<T>>`.
+      i = ws(i);
+      if (stripped[i] === '<') {
+        const c = readBalanced(masked, i, '<', '>');
+        if (c < 0) continue;
+        i = ws(c + 1);
+      }
+      // Record header components: `record Point(int x, int y)`.
+      let header = '';
+      if (kw === 'record') {
+        if (stripped[i] !== '(') continue;
+        const c = readBalanced(masked, i);
+        if (c < 0) continue;
+        header = `(${normalizeParams(stripped.slice(i + 1, c))})`;
+        i = ws(c + 1);
+      }
+      // Walk extends/implements/permits to the body brace, jumping generics.
+      let bodyOpen = -1;
+      const scanEnd = Math.min(masked.length, i + HEAD_SCAN_CHARS);
+      let j = i;
+      while (j < scanEnd) {
+        const ch = masked[j];
+        if (ch === '<') { const c = readBalanced(masked, j, '<', '>'); if (c < 0) break; j = c + 1; continue; }
+        if (ch === '{') { bodyOpen = j; break; }
+        if (ch === ';') break; // degenerate body-less declaration
+        j++;
+      }
+      if (bodyOpen < 0) continue;
+      const bodyStart = bodyOpen + 1;
+      const block = extractBlock(stripped, masked, bodyStart);
+      sigs.push(hinted(withAnchor(`${kw} ${name}${header}`, lineAt(stripped, m.index), lineAt(stripped, bodyStart + block.length)), name));
+      const maskedBlock = masked.slice(bodyStart, bodyStart + block.length);
+      for (const meth of extractMembers(block, maskedBlock, { implicitPublic: kw === 'interface' })) {
         // The disclosure marker carries no offsets; anchor it at the class body.
         const declIdx = meth.declIdx || 0;
         const endIdx = meth.endIdx || 0;
@@ -7069,29 +7111,89 @@ __factories["./src/extractors/java"] = function(module, exports) {
     return capWithNotice(sigs, MAX_SIGS_PER_FILE, 'signatures');
   }
 
-  function extractBlock(src, startIndex) {
+  // Depth-counted on the MASKED surface (a brace inside a string can no longer
+  // open or close a block); content sliced from the stripped surface.
+  function extractBlock(stripped, masked, startIndex) {
     let depth = 1;
     let i = startIndex;
-    const end = Math.min(src.length, startIndex + MAX_CLASS_BODY_CHARS);
+    const end = Math.min(masked.length, startIndex + MAX_CLASS_BODY_CHARS);
     while (i < end && depth > 0) {
-      if (src[i] === '{') depth++;
-      else if (src[i] === '}') depth--;
+      if (masked[i] === '{') depth++;
+      else if (masked[i] === '}') depth--;
       i++;
     }
-    return src.slice(startIndex, i - 1);
+    return stripped.slice(startIndex, i - 1);
   }
 
-  function extractMembers(block) {
+  const MODIFIER_RE = /^(?:public|protected|private|static|final|synchronized|abstract|default|native|strictfp)\b/;
+
+  /**
+   * Member scan over a type body. Class/enum/record mode requires a
+   * public/protected modifier (statements inside method bodies never carry
+   * one at declaration position). Interface mode additionally accepts
+   * modifier-less declarations — interface bodies hold no statements, so a
+   * `name(params)` parse there is safe.
+   */
+  function extractMembers(block, maskedBlock, opts = {}) {
     const members = [];
-    const methodRe = /^\s+(?:public|protected)\s+(?:static\s+)?(?:final\s+)?(?:synchronized\s+)?(?:<[^>]+>\s+)?([\w<>\[\], ?.]+)\s+(\w+)\s*\(([^)]*)\)/gm;
-    for (const m of block.matchAll(methodRe)) {
-      const ret = normalizeType(m[1]);
+    const seen = new Set();
+    const wsB = (i) => { while (block[i] === ' ' || block[i] === '\t') i++; return i; };
+    const headRe = opts.implicitPublic
+      ? /^([ \t]+)(?=[A-Za-z_<])/gm
+      : /^([ \t]+)(?=(?:public|protected)\b)/gm;
+    for (const m of block.matchAll(headRe)) {
+      let i = m.index + m[1].length;
+      const declIdx = i;
+      // Modifiers (any, in any order).
+      let sawVisible = false;
+      for (;;) {
+        const mm = MODIFIER_RE.exec(block.slice(i, i + 16));
+        if (!mm) break;
+        if (mm[0] === 'public' || mm[0] === 'protected') sawVisible = true;
+        if (mm[0] === 'private') { sawVisible = false; break; }
+        i = wsB(i + mm[0].length);
+      }
+      if (!opts.implicitPublic && !sawVisible) continue;
+      // Optional generic type parameters: `<T extends Comparable<T>>`.
+      if (block[i] === '<') {
+        const c = readBalanced(maskedBlock, i, '<', '>');
+        if (c < 0) continue;
+        i = wsB(c + 1);
+      }
+      // Return type: identifier chain + optional generics + array brackets.
+      const t0 = i;
+      const idM = /^[\w.]+/.exec(block.slice(i, i + 200));
+      if (!idM) continue;
+      i += idM[0].length;
+      if (block[i] === '<') {
+        const c = readBalanced(maskedBlock, i, '<', '>');
+        if (c < 0) continue;
+        i = c + 1;
+      }
+      while (block.slice(i, i + 2) === '[]') i += 2;
+      const retText = block.slice(t0, i);
+      i = wsB(i);
+      // Name, then params — anything else (field, constructor) is skipped.
+      const nameM = /^\w+/.exec(block.slice(i, i + 200));
+      if (!nameM) continue;
+      const name = nameM[0];
+      i = wsB(i + name.length);
+      if (block[i] !== '(') continue;
+      const close = readBalanced(maskedBlock, i);
+      if (close < 0) continue;
+      const params = block.slice(i + 1, close);
+      const nl = block.indexOf('\n', close);
+      const lineEnd = nl < 0 ? block.length : nl;
+      const key = `${name}::${declIdx}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const ret = normalizeType(retText);
       const retStr = ret ? ` → ${ret}` : '';
       members.push({
-        text: `${m[2]}(${normalizeParams(m[3])})${retStr}`,
-        name: m[2],
-        declIdx: m.index + (m[0].length - m[0].trimStart().length),
-        endIdx: m.index + m[0].length,
+        text: `${name}(${normalizeParams(params)})${retStr}`,
+        name,
+        declIdx,
+        endIdx: lineEnd,
       });
     }
     return capMembersWithNotice(members, MAX_MEMBERS_PER_CLASS);
@@ -7099,7 +7201,7 @@ __factories["./src/extractors/java"] = function(module, exports) {
 
   function normalizeParams(params) {
     if (!params) return '';
-    return params.trim().replace(/\s+/g, ' ');
+    return params.trim().replace(/\s+/g, ' ').replace(/,\s*$/, '');
   }
 
   function normalizeType(type) {
@@ -7116,7 +7218,7 @@ __factories["./src/extractors/java"] = function(module, exports) {
   function buildDocHints(src) {
     const hints = new Map();
     const patterns = [
-      /\/\*\*((?:[^*]|\*(?!\/))*)\*\/\s*(?:@\w+(?:\([^)]*\))?\s*)*(?:public\s+|protected\s+)?(?:abstract\s+|final\s+)?(?:class|interface|enum)\s+(\w+)/g,
+      /\/\*\*((?:[^*]|\*(?!\/))*)\*\/\s*(?:@\w+(?:\([^)]*\))?\s*)*(?:public\s+|protected\s+)?(?:abstract\s+|final\s+|sealed\s+|non-sealed\s+)?(?:class|interface|enum|record)\s+(\w+)/g,
       /\/\*\*((?:[^*]|\*(?!\/))*)\*\/\s*(?:@\w+(?:\([^)]*\))?\s*)*(?:public|protected)\s+(?:static\s+)?(?:final\s+)?(?:synchronized\s+)?(?:<[^>]+>\s+)?[\w<>\[\], ?.]+\s+(\w+)\s*\(/g,
     ];
     for (const re of patterns) {
@@ -17828,7 +17930,7 @@ __factories["./src/mcp/server"] = function(module, exports) {
 
   const SERVER_INFO = {
     name: 'sigmap',
-    version: '8.46.0',
+    version: '8.47.0',
     description: 'SigMap MCP server — code signatures on demand',
   };
 
@@ -22705,7 +22807,10 @@ __factories["./src/verify/arity"] = function(module, exports) {
   const { maskCode, readBalanced } = __require('./src/extractors/scan');
 
   // Files whose signature params are exact (JS/TS via scan.js, Python via AST,
-  // Go via the balanced scanner — G4 #643).
+  // Go via the balanced scanner — G4 #643). Java params are exact too (#646)
+  // but `.java` is deliberately absent: Java has no top-level callables —
+  // every method is an indented member and answer calls are dotted, both
+  // excluded by design — so nothing from a .java file could ever be indexed.
   const EXACT_PARAM_EXTS = new Set(['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.py', '.go']);
 
   const CTRL_KEYWORDS = new Set([
@@ -24351,7 +24456,7 @@ function __tryGit(args, opts = {}) {
   catch (_) { return ''; }
 }
 
-const VERSION = '8.46.0';
+const VERSION = '8.47.0';
 const MARKER = '\n\n## Auto-generated signatures\n<!-- Updated by gen-context.js -->\n';
 
 function requireSourceOrBundled(key) {
