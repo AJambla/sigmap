@@ -10,6 +10,13 @@ Format: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [8.37.0] — 2026-09-14
+
+### Added
+- **T3 spike: zero-dep LSP client with a per-file quality guard** (#612, PR #613) — the second rung of the #542 host-toolchain ladder. `exactness: { lsp: true }` asks a language server the machine already has (clangd/gopls/rust-analyzer, or `exactness.lspServers` command overrides) for `textDocument/documentSymbol` and renders the hierarchical result — server-typed details, exact multiline ranges — into the signature vocabulary. The session is pipelined and synchronous: all six frames written up front via `spawnSync` (args array, never a shell), responses parsed from captured stdout; ~300ms per file with clangd, and a cross-run cache in `.context/lsp-cache.json` keyed by content hash + server binary size/mtime makes warm regenerates free. Measurement forced two designs the plan did not predict: a **per-file quality guard** — a server parsing standalone can be macro-blind (clangd reported 7 of `fmt/format.h`'s hundreds of symbols because `FMT_BEGIN_NAMESPACE` never expanded), so an LSP result is accepted only when it does not lose surface vs the regex tier, ties to LSP for exact anchors — and **dead-server marking scoped to true spawn errors only**, after one transient per-file failure poisoned the server for 12 of 19 files. Guarded, the tier is strictly non-losing: libuv (C) +37%, spdlog +15%, fmt +2% effective signatures vs regex alone. The header labels `toolchain=<server>@<version>` only for results actually accepted, composing with `typescript@<version>` from #609. Hermetic tests run a fake LSP server speaking the real framed protocol — positive path, both fallback shapes, cache hit/invalidation, and guard refusal all run in CI with no host tools
+
+---
+
 ## [8.36.0] — 2026-09-14
 
 ### Added

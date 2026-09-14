@@ -1,13 +1,13 @@
 ---
 title: Roadmap
-description: SigMap version history and roadmap. From v0.0 to v8.36.0, with recent releases completing the grounded-codegen plan — a realistic §9 ablation (real-symbol corpus, exact-signature grounding, --verbose), a Gemini (AI Studio) provider for the §9 ablation, the init Creation-workflow CLAUDE.md block, scaffold persistence, the LLM A/B hallucination ablation harness, the sigmap create orchestrator and its four guard stages (scaffold, verify-plan, verify-ai-output, review-pr), the conventions command with its full flag set (--conflicts, --inject, --report, --ci, --fix, --update), the grounding benchmark, read-time self-heal, live-index MCP write hooks, the get_callee_signatures MCP tool (exact callee signatures), realistic per-query savings, release-pipeline robustness (bundle integrity + version.json gates, standalone-bundle smoke test), the sigmap gain token-savings dashboard, supply-chain hardening (zero system-shell access), Squeeze input minimization with symbol enrichment, source-of-truth llms.txt, the verify-ai-output Hallucination Guard, and Memory tools (note, status, read_memory MCP tool).
+description: SigMap version history and roadmap. From v0.0 to v8.37.0, with recent releases completing the grounded-codegen plan — a realistic §9 ablation (real-symbol corpus, exact-signature grounding, --verbose), a Gemini (AI Studio) provider for the §9 ablation, the init Creation-workflow CLAUDE.md block, scaffold persistence, the LLM A/B hallucination ablation harness, the sigmap create orchestrator and its four guard stages (scaffold, verify-plan, verify-ai-output, review-pr), the conventions command with its full flag set (--conflicts, --inject, --report, --ci, --fix, --update), the grounding benchmark, read-time self-heal, live-index MCP write hooks, the get_callee_signatures MCP tool (exact callee signatures), realistic per-query savings, release-pipeline robustness (bundle integrity + version.json gates, standalone-bundle smoke test), the sigmap gain token-savings dashboard, supply-chain hardening (zero system-shell access), Squeeze input minimization with symbol enrichment, source-of-truth llms.txt, the verify-ai-output Hallucination Guard, and Memory tools (note, status, read_memory MCP tool).
 head:
   - - meta
     - property: og:title
       content: "SigMap Roadmap — version history and upcoming features"
   - - meta
     - property: og:description
-      content: "175 versions shipped. See what changed in each release and what is coming next."
+      content: "176 versions shipped. See what changed in each release and what is coming next."
   - - meta
     - property: og:url
       content: "https://sigmap.io/guide/roadmap"
@@ -20,7 +20,7 @@ head:
 ---
 # Roadmap
 
-One hundred seventy-five versions shipped. MIT open source from day one.
+One hundred seventy-six versions shipped. MIT open source from day one.
 
 **Stats:** 96.6% overall token reduction · 78.6% retrieval hit@5 (1.73× measured lift vs single-shot grep) · 98.0% test-discovery F1 · installed-library grounding (JS/TS + Python) · method-level call-graph (JS/TS, Python, Java, Go, Rust, Kotlin, Scala) · 21 MCP tools · 33 languages · 17-language source resolver · 0 npm deps
 
@@ -835,6 +835,18 @@ Two milestones in one release. **`verify-ai-output` Reliable MVP** (#232) grows 
 **Tags:** `KNOWN_LIMITATIONS.md` · `extraction honesty` · `tier label` · `drift guard` · `G1` · `#520` · `PR #521`
 
 **Impact:** the credibility gap a skeptical reviewer finds first is closed in writing; 6 new guard checks (133 files); zero runtime changes.
+
+---
+
+### v8.37.0 — one client, every language server ✓ (2026-09-14)
+
+**Minor release — the T3 rung of #542, and the tier ladder's first server-agnostic step.** `exactness: { lsp: true }` asks a language server the machine already has for `textDocument/documentSymbol` — clangd (ships with Xcode CLT) measured; gopls/rust-analyzer registered; `exactness.lspServers` maps any extension to any server command. The client is ~90 lines of the same JSON-RPC-over-stdio SigMap already speaks as an MCP server, run in reverse and **pipelined synchronously**: all six frames written up front via `spawnSync`, responses parsed from captured stdout, ~300ms per file cold and free on cache hits (content hash + server binary keyed).
+
+Measurement forced the release's defining feature: the **per-file quality guard**. A server parsing a file standalone can be macro-blind — clangd reported 7 of `fmt/format.h`'s hundreds of symbols because `FMT_BEGIN_NAMESPACE` never expanded without a compilation database — so an LSP result is accepted only when it does not lose surface vs the regex tier, ties to LSP for exact anchors. Guarded, the tier cannot regress: libuv (C) +37%, spdlog +15%, fmt +2% effective signatures, with the macro-blind 16 of fmt's 19 files correctly refused per file. A transient-failure lesson landed too: only a true spawn error retires a server for the run, after one per-file null had silently cost 12 of 19 files. Toolchain honesty composes — `toolchain=typescript@5.9.3, clangd@21.0.0` when both tiers serve.
+
+**Tags:** `src/lsp/client.js` · `exactness.lsp` · `lspServers` · `quality guard` · `T3` · `#542` · `#612` · `PR #613`
+
+**Impact:** effective signatures with clangd: libuv +37%, spdlog +15%, fmt +2% — strictly non-losing by construction; default output unchanged everywhere (flag ships dark). Hermetic fake-server tests cover the full protocol path in CI. 23 extractor + 153 integration tests passing.
 
 ---
 

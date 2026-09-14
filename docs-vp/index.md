@@ -78,12 +78,12 @@ features:
 
 <div style="max-width:840px;margin:0 auto;padding:18px 24px 0;text-align:center">
 <div style="display:inline-flex;flex-wrap:wrap;gap:.5rem;justify-content:center;background:var(--vp-c-brand-soft,#ede9fe);border:1px solid rgba(124,106,247,.25);border-radius:999px;padding:.55rem .9rem;font-size:.9rem;color:var(--vp-c-text-1)">
-  <span><strong>Release:</strong> v8.36.0</span>
+  <span><strong>Release:</strong> v8.37.0</span>
   <span>·</span>
-  <span><strong>New — your repo's own compiler, if it has one:</strong> opt-in <code>exactness.typescript</code> parses <code>.ts</code> with the target repo's own <code>node_modules/typescript</code> — nothing bundled, silent byte-identical regex fallback, and the generated header labels <code>toolchain=typescript@version</code> when the AST tier fired. Measured +54% signatures on zod with zero parse failures; typescript@7's Go-native compiler is rejected by design (its path is the future LSP tier). Zero dependencies, offline, deterministic.</span>
+  <span><strong>New — one client, every language server:</strong> opt-in <code>exactness.lsp</code> asks a server your machine already has (clangd, gopls, rust-analyzer, or your own via <code>lspServers</code>) for exact symbols — with a per-file quality guard so the tier never loses surface to the regex floor, a content-keyed cache making warm runs free, and toolchain-labeled headers. Measured with clangd: libuv +37%, spdlog +15% effective signatures. Zero dependencies, offline, deterministic.</span>
 </div>
 <div style="margin-top:.4rem;display:inline-flex;flex-wrap:wrap;gap:.5rem;justify-content:center;background:var(--vp-c-default-soft,#f3f4f6);border:1px solid rgba(0,0,0,.08);border-radius:999px;padding:.55rem .9rem;font-size:.9rem;color:var(--vp-c-text-2)">
-  <span><strong>Benchmark:</strong> sigmap-v8.36-main</span>
+  <span><strong>Benchmark:</strong> sigmap-v8.37-main</span>
   <span>·</span>
   <span>78.6% hit@5 · 96.6% token reduction · 2026-09-13</span>
 </div>
@@ -176,7 +176,7 @@ See the full [end-to-end walkthrough](/guide/walkthrough) to watch this in actio
 | Overall token reduction | — | **96.6%** |
 | GPT-4o overflow repos | 16/21 | **0/21** |
 
-Latest saved benchmark run: **2026-09-13 (v8.36.0)**.
+Latest saved benchmark run: **2026-09-13 (v8.37.0)**.
 
 </div>
 
