@@ -1014,4 +1014,34 @@ function squeezeOutput(args, cwd) {
   return header + sq.squeezed;
 }
 
-module.exports = { readContext, searchSignatures, getMap, createCheckpoint, getRouting, explainFile, listModules, queryContext, getMethodImpact, getImpact, getLines, readMemory, getCalleeSignatures, notifyFileCreated, notifySymbolAdded, notifyFileDeleted, getDiffContext, getArchitectureOverview, verifySuggestion, squeezeOutput, getBudget };
+// query_knowledge_map({ library | file }) → string (#626, increment 1 of #543)
+function queryKnowledgeMap(args, cwd) {
+  const km = require('../map/knowledge-map');
+  const map = km.loadOrBuild(cwd);
+  if (args && args.library) {
+    const impact = km.upgradeImpact(map, String(args.library));
+    if (!impact) return `No library node for "${args.library}" — not a declared dependency, or no file imports it.`;
+    const lines = [`Upgrade impact for ${impact.library}:`];
+    lines.push(`  importing files (${impact.importers.length}):`);
+    for (const f of impact.importers) lines.push(`    ${f.replace(/^file:/, '')}`);
+    lines.push(`  callers/importers of those (${impact.callers.length}):`);
+    for (const f of impact.callers) lines.push(`    ${f.replace(/^file:/, '')}`);
+    lines.push(`  covering tests (${impact.tests.length}):`);
+    for (const f of impact.tests) lines.push(`    ${f.replace(/^file:/, '')}`);
+    return lines.join('\n');
+  }
+  if (args && args.file) {
+    const n = km.fileNeighbors(map, String(args.file));
+    if (!n) return `No file node for "${args.file}" in the knowledge map.`;
+    const lines = [`Knowledge-map neighbors of ${args.file}:`];
+    for (const [k, v] of Object.entries(n)) {
+      if (v.length === 0) continue;
+      lines.push(`  ${k} (${v.length}): ${v.map((x) => x.replace(/^(file|symbol|lib|route):/, '')).slice(0, 20).join(', ')}${v.length > 20 ? ` … +${v.length - 20} more` : ''}`);
+    }
+    if (lines.length === 1) lines.push('  (no edges)');
+    return lines.join('\n');
+  }
+  return `Knowledge map: schema v${map.schema} · ${map.nodes.length} nodes · ${map.edges.length} edges. Pass { library } for upgrade impact or { file } for neighbors.`;
+}
+
+module.exports = { readContext, searchSignatures, getMap, createCheckpoint, getRouting, explainFile, listModules, queryContext, getMethodImpact, getImpact, getLines, readMemory, getCalleeSignatures, notifyFileCreated, notifySymbolAdded, notifyFileDeleted, getDiffContext, getArchitectureOverview, verifySuggestion, squeezeOutput, getBudget, queryKnowledgeMap };

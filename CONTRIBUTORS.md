@@ -35,6 +35,9 @@ To ensure proper attribution:
 
 We welcome contributions! See [Contributing](./docs/CONTRIBUTING.md) for guidelines.
 
+### Recent Contributors (v8.41.0)
+- **@manojmallick** — feat(map): unified knowledge map, increment 1 of #543 — typed nodes/edges over the existing signature, graph, library, and route sources with canonical NUL-delimited serialization and an mtime-keyed cache, plus the `query_knowledge_map` MCP tool (22nd) answering upgrade-impact / neighbors / summary (#626, PR #627)
+
 ### Recent Contributors (v8.40.0)
 - **@manojmallick** — feat(extractors): Elixir Tier 3 with resolving alias/import graph edges (#538, PR #623) and Astro SFC via TS-extractor delegation (#539, PR #624), completing the #541 ranked build list at 35 languages; fix: the drifted CLI resolution map deleted — Lua and GDScript had been silently falling to the generic fallback in the generate pipeline
 

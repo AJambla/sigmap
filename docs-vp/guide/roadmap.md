@@ -1,13 +1,13 @@
 ---
 title: Roadmap
-description: SigMap version history and roadmap. From v0.0 to v8.40.0, with recent releases completing the grounded-codegen plan — a realistic §9 ablation (real-symbol corpus, exact-signature grounding, --verbose), a Gemini (AI Studio) provider for the §9 ablation, the init Creation-workflow CLAUDE.md block, scaffold persistence, the LLM A/B hallucination ablation harness, the sigmap create orchestrator and its four guard stages (scaffold, verify-plan, verify-ai-output, review-pr), the conventions command with its full flag set (--conflicts, --inject, --report, --ci, --fix, --update), the grounding benchmark, read-time self-heal, live-index MCP write hooks, the get_callee_signatures MCP tool (exact callee signatures), realistic per-query savings, release-pipeline robustness (bundle integrity + version.json gates, standalone-bundle smoke test), the sigmap gain token-savings dashboard, supply-chain hardening (zero system-shell access), Squeeze input minimization with symbol enrichment, source-of-truth llms.txt, the verify-ai-output Hallucination Guard, and Memory tools (note, status, read_memory MCP tool).
+description: SigMap version history and roadmap. From v0.0 to v8.41.0, with recent releases completing the grounded-codegen plan — a realistic §9 ablation (real-symbol corpus, exact-signature grounding, --verbose), a Gemini (AI Studio) provider for the §9 ablation, the init Creation-workflow CLAUDE.md block, scaffold persistence, the LLM A/B hallucination ablation harness, the sigmap create orchestrator and its four guard stages (scaffold, verify-plan, verify-ai-output, review-pr), the conventions command with its full flag set (--conflicts, --inject, --report, --ci, --fix, --update), the grounding benchmark, read-time self-heal, live-index MCP write hooks, the get_callee_signatures MCP tool (exact callee signatures), realistic per-query savings, release-pipeline robustness (bundle integrity + version.json gates, standalone-bundle smoke test), the sigmap gain token-savings dashboard, supply-chain hardening (zero system-shell access), Squeeze input minimization with symbol enrichment, source-of-truth llms.txt, the verify-ai-output Hallucination Guard, and Memory tools (note, status, read_memory MCP tool).
 head:
   - - meta
     - property: og:title
       content: "SigMap Roadmap — version history and upcoming features"
   - - meta
     - property: og:description
-      content: "180 versions shipped. See what changed in each release and what is coming next."
+      content: "181 versions shipped. See what changed in each release and what is coming next."
   - - meta
     - property: og:url
       content: "https://sigmap.io/guide/roadmap"
@@ -20,9 +20,9 @@ head:
 ---
 # Roadmap
 
-One hundred eighty versions shipped. MIT open source from day one.
+One hundred eighty-one versions shipped. MIT open source from day one.
 
-**Stats:** 96.6% overall token reduction · 78.6% retrieval hit@5 (1.73× measured lift vs single-shot grep) · 98.0% test-discovery F1 · installed-library grounding (JS/TS + Python) · method-level call-graph (JS/TS, Python, Java, Go, Rust, Kotlin, Scala) · 21 MCP tools · 35 languages · 17-language source resolver · 0 npm deps
+**Stats:** 96.6% overall token reduction · 78.6% retrieval hit@5 (1.73× measured lift vs single-shot grep) · 98.0% test-discovery F1 · installed-library grounding (JS/TS + Python) · method-level call-graph (JS/TS, Python, Java, Go, Rust, Kotlin, Scala) · 22 MCP tools · 35 languages · 17-language source resolver · 0 npm deps
 
 ## Token reduction by version
 
@@ -835,6 +835,18 @@ Two milestones in one release. **`verify-ai-output` Reliable MVP** (#232) grows 
 **Tags:** `KNOWN_LIMITATIONS.md` · `extraction honesty` · `tier label` · `drift guard` · `G1` · `#520` · `PR #521`
 
 **Impact:** the credibility gap a skeptical reviewer finds first is closed in writing; 6 new guard checks (133 files); zero runtime changes.
+
+---
+
+### v8.41.0 — one map over every graph ✓ (2026-09-14)
+
+**Minor release — increment 1 of the #543 unified-knowledge-map epic.** SigMap already extracted five overlapping views of a repo — the signature index, the dependency graph, the call graph, the installed-library index, and the route table — but they answered questions separately. `src/map/knowledge-map.js` assembles them into **one typed store**: nodes for files, symbols, `library@version` pins, and routes; edges for `imports`, `calls`, `defines`, `tests`, `uses-lib`, and `exposes-route`. No new scan — the map is built from what the existing passes already know, serialized canonically (sorted keys, NUL-delimited edge identity so route ids containing spaces survive round-trips), and cached at `.context/knowledge-map.json` keyed on context mtime.
+
+The first consumer is the **`query_knowledge_map` MCP tool — the 22nd**: `library` answers the upgrade-impact question ("what breaks if I bump `zod`?" — lib → importing files → their dependents → covering tests), `file` returns every typed edge touching one file, and no arguments returns the node/edge census. Path identity was the hard part: the graph builder lowercases keys and macOS tmpdirs are symlinks, so the store realpath-normalizes and matches through a lowercased abs→rel table. Later increments re-base `get_impact`, `get_architecture_overview`, and evidence packs as views over this same store.
+
+**Tags:** `src/map/knowledge-map.js` · `query_knowledge_map` · `typed nodes/edges` · `canonical serialization` · `#543 increment 1` · `#626` · `PR #627`
+
+**Impact:** first cross-source query surface (lib → files → dependents → tests in one call); 22 MCP tools; schema-versioned cached store. 25 fixture + 158 integration tests passing.
 
 ---
 

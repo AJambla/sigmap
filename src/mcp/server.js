@@ -14,11 +14,11 @@
 
 const readline = require('readline');
 const { TOOLS } = require('./tools');
-const { readContext, searchSignatures, getMap, createCheckpoint, getRouting, explainFile, listModules, queryContext, getMethodImpact, getImpact, getLines, readMemory, getCalleeSignatures, notifyFileCreated, notifySymbolAdded, notifyFileDeleted, getDiffContext, getArchitectureOverview, verifySuggestion, squeezeOutput, getBudget } = require('./handlers');
+const { readContext, searchSignatures, getMap, createCheckpoint, getRouting, explainFile, listModules, queryContext, getMethodImpact, getImpact, getLines, readMemory, getCalleeSignatures, notifyFileCreated, notifySymbolAdded, notifyFileDeleted, getDiffContext, getArchitectureOverview, verifySuggestion, squeezeOutput, getBudget, queryKnowledgeMap } = require('./handlers');
 
 const SERVER_INFO = {
   name: 'sigmap',
-  version: '8.40.0',
+  version: '8.41.0',
   description: 'SigMap MCP server — code signatures on demand',
 };
 
@@ -129,6 +129,7 @@ function dispatch(msg, cwd) {
       else if (name === 'verify_suggestion') text = verifySuggestion(args, cwd);
       else if (name === 'squeeze_output') text = squeezeOutput(args, cwd);
       else if (name === 'get_budget') text = getBudget(args, cwd);
+      else if (name === 'query_knowledge_map') text = queryKnowledgeMap(args, cwd);
       else {
         respondError(id, -32601, `Unknown tool: ${name}`);
         return;
