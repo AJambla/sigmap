@@ -61,12 +61,20 @@ function walk(dir, cwd, depth, out) {
   }
 }
 
-function analyze(files, cwd) {
+/**
+ * Structured migration rows (#629), sorted by repo-relative file path.
+ * @returns {Array<{version: string, name: string, file: string}>}
+ */
+function collectMigrations(cwd) {
   const found = [];
   walk(cwd, cwd, 0, found);
-  if (found.length === 0) return '';
-
   found.sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : 0));
+  return found;
+}
+
+function analyze(files, cwd) {
+  const found = collectMigrations(cwd);
+  if (found.length === 0) return '';
 
   const lines = [
     '| Version | Migration | File |',
@@ -81,4 +89,4 @@ function analyze(files, cwd) {
   return lines.join('\n');
 }
 
-module.exports = { analyze };
+module.exports = { analyze, collectMigrations };

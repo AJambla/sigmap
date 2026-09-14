@@ -15192,11 +15192,20 @@ __factories["./src/map/build-ci"] = function(module, exports) {
     }
   }
 
-  function analyze(files, cwd) {
+  /**
+   * Structured build/CI target rows (#629): npm scripts, workflow files, and
+   * Makefile targets, each `{ kind: 'script'|'ci'|'make', name, detail }`.
+   */
+  function collectTargets(cwd) {
     const rows = [];
     npmScripts(cwd, rows);
     ciWorkflows(cwd, rows);
     makeTargets(cwd, rows);
+    return rows;
+  }
+
+  function analyze(files, cwd) {
+    const rows = collectTargets(cwd);
     if (rows.length === 0) return '';
 
     const lines = [
@@ -15212,7 +15221,7 @@ __factories["./src/map/build-ci"] = function(module, exports) {
     return lines.join('\n');
   }
 
-  module.exports = { analyze };
+  module.exports = { analyze, collectTargets };
   
 };
 
@@ -15496,8 +15505,13 @@ __factories["./src/map/env-schema"] = function(module, exports) {
     return keys;
   }
 
-  function analyze(files, cwd) {
-    const fromCode = new Set();
+  /**
+   * Structured env reads with per-file attribution (#629): one row per variable,
+   * reader files repo-relative and sorted, plus the committed-example flag.
+   * @returns {Array<{name: string, files: string[], inExample: boolean}>}
+   */
+  function collectEnvReads(files, cwd) {
+    const readers = new Map(); // name → Set<rel file>
 
     for (const filePath of files) {
       const ext = path.extname(filePath).toLowerCase();
@@ -15505,34 +15519,50 @@ __factories["./src/map/env-schema"] = function(module, exports) {
       let content;
       try { content = fs.readFileSync(filePath, 'utf8'); } catch (_) { continue; }
 
-      if (ext === '.py') collectMatches(PY_RE, content, fromCode);
-      else if (ext === '.rb') collectMatches(RB_RE, content, fromCode);
-      else if (ext === '.go') collectMatches(GO_RE, content, fromCode);
-      else collectMatches(JS_RE, content, fromCode);
+      const found = new Set();
+      if (ext === '.py') collectMatches(PY_RE, content, found);
+      else if (ext === '.rb') collectMatches(RB_RE, content, found);
+      else if (ext === '.go') collectMatches(GO_RE, content, found);
+      else collectMatches(JS_RE, content, found);
+      if (found.size === 0) continue;
+
+      const rel = path.relative(cwd, filePath).replace(/\\/g, '/');
+      for (const name of found) {
+        if (!readers.has(name)) readers.set(name, new Set());
+        readers.get(name).add(rel);
+      }
     }
 
     const fromExample = readExampleKeys(cwd);
-    const all = new Set([...fromCode, ...fromExample]);
-    if (all.size === 0) return '';
+    const names = [...new Set([...readers.keys(), ...fromExample])].sort();
+    return names.map((name) => ({
+      name,
+      files: [...(readers.get(name) || [])].sort(),
+      inExample: fromExample.has(name),
+    }));
+  }
 
-    const names = [...all].sort();
+  function analyze(files, cwd) {
+    const rows = collectEnvReads(files, cwd);
+    if (rows.length === 0) return '';
+
     const lines = [
       '| Variable | Source |',
       '|----------|--------|',
     ];
-    for (const name of names.slice(0, MAX_ROWS)) {
+    for (const r of rows.slice(0, MAX_ROWS)) {
       const src = [];
-      if (fromCode.has(name)) src.push('code');
-      if (fromExample.has(name)) src.push('.env.example');
-      lines.push(`| ${name} | ${src.join(', ')} |`);
+      if (r.files.length > 0) src.push('code');
+      if (r.inExample) src.push('.env.example');
+      lines.push(`| ${r.name} | ${src.join(', ')} |`);
     }
-    if (names.length > MAX_ROWS) {
-      lines.push(`| … | +${names.length - MAX_ROWS} more |`);
+    if (rows.length > MAX_ROWS) {
+      lines.push(`| … | +${rows.length - MAX_ROWS} more |`);
     }
     return lines.join('\n');
   }
 
-  module.exports = { analyze };
+  module.exports = { analyze, collectEnvReads };
   
 };
 
@@ -15736,16 +15766,20 @@ __factories["./src/map/knowledge-map"] = function(module, exports) {
   const { parseAnchor, findRelatedTests } = __require('./src/evidence/pack');
   const { directDeps, collectVersionPins } = __require('./src/verify/lib-index');
   const { collectRoutes } = __require('./src/map/route-table');
+  const { collectEnvReads } = __require('./src/map/env-schema');
+  const { collectMigrations } = __require('./src/map/migrations');
+  const { collectTargets } = __require('./src/map/build-ci');
 
   // Unified knowledge map (#626, increment 1 of #543). SigMap already computes
   // the pieces — import graph, call-file graph, signature index, installed
   // library pins, route table, impl↔test discovery — but they live behind
   // separate tools. This assembles them into ONE typed, deterministic store.
   //
-  // ── Schema draft (v1) ──────────────────────────────────────────────────────
+  // ── Schema draft (v2) ──────────────────────────────────────────────────────
   // Node ids (also the sort key):
   //   file:<rel-path>          symbol:<rel-path>#<name> (anchor start-end kept)
   //   lib:<name>@<version>     route:<METHOD> <path>
+  //   env:<NAME>               migration:<rel-path>     script:<runner>:<name>
   // Edge kinds, serialized as { from, kind, to }:
   //   imports        file → file          (import graph)
   //   calls          file → file          (call-file graph)
@@ -15753,11 +15787,12 @@ __factories["./src/map/knowledge-map"] = function(module, exports) {
   //   tests          test-file → file    (impl↔test discovery)
   //   uses-lib       file → lib          (bare imports matching declared deps)
   //   exposes-route  file → route        (route table)
+  //   reads-env      file → env          (per-file env reads, #629)
   // Serialization: nodes sorted by id, edges by (from, kind, to), keys sorted
   // recursively — two builds of the same tree are byte-identical. Symbol nodes
   // are capped per file and the cap is disclosed in `truncated`.
 
-  const SCHEMA_VERSION = 1;
+  const SCHEMA_VERSION = 2;
   const MAX_SYMBOLS_PER_FILE = 50;
   const CACHE_FILE = 'knowledge-map.json';
 
@@ -15801,10 +15836,10 @@ __factories["./src/map/knowledge-map"] = function(module, exports) {
     // abs→rel lookup or every membership check silently misses.
     try { cwd = fs.realpathSync(cwd); } catch (_) {}
     const nodes = new Map(); // id → node
-    const edges = new Set(); // canonical "from kind to"
+    const edges = new Set(); // canonical "from\u0000kind\u0000to"
     const truncated = [];
     const addNode = (node) => { if (!nodes.has(node.id)) nodes.set(node.id, node); };
-    const addEdge = (from, kind, to) => { edges.add(`${from} ${kind} ${to}`); };
+    const addEdge = (from, kind, to) => { edges.add(`${from}\u0000${kind}\u0000${to}`); };
 
     // Files + symbols + defines — from the signature index (anchors included).
     const sigIndex = buildSigIndex(cwd);
@@ -15881,8 +15916,8 @@ __factories["./src/map/knowledge-map"] = function(module, exports) {
     }
 
     // Routes.
+    const absFiles = relFiles.map((r) => path.join(cwd, r));
     try {
-      const absFiles = relFiles.map((r) => path.join(cwd, r));
       for (const r of collectRoutes(absFiles, cwd) || []) {
         if (!r.method || !r.path) continue;
         const id = `route:${r.method} ${r.path}`;
@@ -15893,11 +15928,36 @@ __factories["./src/map/knowledge-map"] = function(module, exports) {
       }
     } catch (_) {}
 
+    // Env vars + reads-env — per-file attribution from the env-schema collector.
+    try {
+      for (const row of collectEnvReads(absFiles, cwd) || []) {
+        const id = `env:${row.name}`;
+        addNode({ id, kind: 'env-var', name: row.name, inExample: row.inExample });
+        for (const rel of row.files) {
+          if (nodes.has(`file:${rel}`)) addEdge(`file:${rel}`, 'reads-env', id);
+        }
+      }
+    } catch (_) {}
+
+    // Migrations — files outside srcDirs get nodes of their own.
+    try {
+      for (const m of collectMigrations(cwd) || []) {
+        addNode({ id: `migration:${m.file}`, kind: 'migration', version: m.version, name: m.name });
+      }
+    } catch (_) {}
+
+    // Scripts — npm scripts, CI workflows, and Makefile targets.
+    try {
+      for (const t of collectTargets(cwd) || []) {
+        addNode({ id: `script:${t.kind}:${t.name}`, kind: 'script', runner: t.kind, name: t.name, detail: t.detail });
+      }
+    } catch (_) {}
+
     return {
       schema: SCHEMA_VERSION,
       nodes: [...nodes.values()].sort((a, b) => a.id.localeCompare(b.id)),
       edges: [...edges].sort().map((e) => {
-        const [from, kind, to] = e.split(' ');
+        const [from, kind, to] = e.split('\u0000');
         return { from, kind, to };
       }),
       truncated: [...new Set(truncated)].sort(),
@@ -15957,11 +16017,20 @@ __factories["./src/map/knowledge-map"] = function(module, exports) {
     };
   }
 
+  /** Readers of one env var: the files that read it, and the committed-example flag. */
+  function envReaders(map, name) {
+    const id = `env:${name}`;
+    const node = map.nodes.find((n) => n.id === id);
+    if (!node) return null;
+    const readers = map.edges.filter((e) => e.kind === 'reads-env' && e.to === id).map((e) => e.from).sort();
+    return { env: id, inExample: !!node.inExample, readers };
+  }
+
   /** Typed neighbors of one file node. */
   function fileNeighbors(map, rel) {
     const id = `file:${rel.replace(/\\/g, '/')}`;
     if (!map.nodes.some((n) => n.id === id)) return null;
-    const out = { imports: [], importedBy: [], calls: [], calledBy: [], tests: [], testedBy: [], usesLibs: [], defines: [], routes: [] };
+    const out = { imports: [], importedBy: [], calls: [], calledBy: [], tests: [], testedBy: [], usesLibs: [], defines: [], routes: [], readsEnv: [] };
     for (const e of map.edges) {
       if (e.from === id) {
         if (e.kind === 'imports') out.imports.push(e.to);
@@ -15970,6 +16039,7 @@ __factories["./src/map/knowledge-map"] = function(module, exports) {
         else if (e.kind === 'uses-lib') out.usesLibs.push(e.to);
         else if (e.kind === 'defines') out.defines.push(e.to);
         else if (e.kind === 'exposes-route') out.routes.push(e.to);
+        else if (e.kind === 'reads-env') out.readsEnv.push(e.to);
       } else if (e.to === id) {
         if (e.kind === 'imports') out.importedBy.push(e.from);
         else if (e.kind === 'calls') out.calledBy.push(e.from);
@@ -15980,7 +16050,7 @@ __factories["./src/map/knowledge-map"] = function(module, exports) {
     return out;
   }
 
-  module.exports = { buildKnowledgeMap, loadOrBuild, upgradeImpact, fileNeighbors, canonicalJson, SCHEMA_VERSION };
+  module.exports = { buildKnowledgeMap, loadOrBuild, upgradeImpact, fileNeighbors, envReaders, canonicalJson, SCHEMA_VERSION };
   
 };
 
@@ -16048,12 +16118,20 @@ __factories["./src/map/migrations"] = function(module, exports) {
     }
   }
 
-  function analyze(files, cwd) {
+  /**
+   * Structured migration rows (#629), sorted by repo-relative file path.
+   * @returns {Array<{version: string, name: string, file: string}>}
+   */
+  function collectMigrations(cwd) {
     const found = [];
     walk(cwd, cwd, 0, found);
-    if (found.length === 0) return '';
-
     found.sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : 0));
+    return found;
+  }
+
+  function analyze(files, cwd) {
+    const found = collectMigrations(cwd);
+    if (found.length === 0) return '';
 
     const lines = [
       '| Version | Migration | File |',
@@ -16068,7 +16146,7 @@ __factories["./src/map/migrations"] = function(module, exports) {
     return lines.join('\n');
   }
 
-  module.exports = { analyze };
+  module.exports = { analyze, collectMigrations };
   
 };
 
@@ -17291,12 +17369,21 @@ __factories["./src/mcp/handlers"] = function(module, exports) {
       const lines = [`Knowledge-map neighbors of ${args.file}:`];
       for (const [k, v] of Object.entries(n)) {
         if (v.length === 0) continue;
-        lines.push(`  ${k} (${v.length}): ${v.map((x) => x.replace(/^(file|symbol|lib|route):/, '')).slice(0, 20).join(', ')}${v.length > 20 ? ` … +${v.length - 20} more` : ''}`);
+        lines.push(`  ${k} (${v.length}): ${v.map((x) => x.replace(/^(file|symbol|lib|route|env):/, '')).slice(0, 20).join(', ')}${v.length > 20 ? ` … +${v.length - 20} more` : ''}`);
       }
       if (lines.length === 1) lines.push('  (no edges)');
       return lines.join('\n');
     }
-    return `Knowledge map: schema v${map.schema} · ${map.nodes.length} nodes · ${map.edges.length} edges. Pass { library } for upgrade impact or { file } for neighbors.`;
+    if (args && args.env) {
+      const r = km.envReaders(map, String(args.env));
+      if (!r) return `No env-var node for "${args.env}" — nothing reads it and no committed .env example declares it.`;
+      const lines = [`Env var ${r.env}:`];
+      lines.push(`  declared in a committed .env example: ${r.inExample ? 'yes' : 'no'}`);
+      lines.push(`  reader files (${r.readers.length}):`);
+      for (const f of r.readers) lines.push(`    ${f.replace(/^file:/, '')}`);
+      return lines.join('\n');
+    }
+    return `Knowledge map: schema v${map.schema} · ${map.nodes.length} nodes · ${map.edges.length} edges. Pass { library } for upgrade impact, { file } for neighbors, or { env } for readers of an environment variable.`;
   }
 
   module.exports = { readContext, searchSignatures, getMap, createCheckpoint, getRouting, explainFile, listModules, queryContext, getMethodImpact, getImpact, getLines, readMemory, getCalleeSignatures, notifyFileCreated, notifySymbolAdded, notifyFileDeleted, getDiffContext, getArchitectureOverview, verifySuggestion, squeezeOutput, getBudget, queryKnowledgeMap };
@@ -18084,17 +18171,19 @@ __factories["./src/mcp/tools"] = function(module, exports) {
     {
       name: 'query_knowledge_map',
       description:
-        'Query the unified knowledge map — typed nodes (file, symbol, library@version, route) ' +
-        'and edges (imports, calls, defines, tests, uses-lib, exposes-route) assembled from ' +
-        "SigMap's existing graphs. Pass { library: \"express\" } for upgrade impact: the " +
-        'lib → importing files → their callers → covering tests chain. Pass { file: ' +
-        '\"src/x.js\" } for a file\'s typed neighbors. Deterministic, cached in .context, ' +
-        'local-only; no LLM, no network.',
+        'Query the unified knowledge map — typed nodes (file, symbol, library@version, route, ' +
+        'env-var, migration, script) and edges (imports, calls, defines, tests, uses-lib, ' +
+        "exposes-route, reads-env) assembled from SigMap's existing graphs. Pass { library: " +
+        '\"express\" } for upgrade impact: the lib → importing files → their callers → covering ' +
+        'tests chain. Pass { file: \"src/x.js\" } for a file\'s typed neighbors. Pass { env: ' +
+        '\"DATABASE_URL\" } for the files reading an environment variable. Deterministic, ' +
+        'cached in .context, local-only; no LLM, no network.',
       inputSchema: {
         type: 'object',
         properties: {
           library: { type: 'string', description: 'Declared dependency name for the upgrade-impact walk' },
           file: { type: 'string', description: 'Repo-relative file path for a typed-neighbors view' },
+          env: { type: 'string', description: 'Environment variable name — which files read it, and whether a committed .env example declares it' },
         },
       },
     },

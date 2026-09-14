@@ -51,8 +51,13 @@ function readExampleKeys(cwd) {
   return keys;
 }
 
-function analyze(files, cwd) {
-  const fromCode = new Set();
+/**
+ * Structured env reads with per-file attribution (#629): one row per variable,
+ * reader files repo-relative and sorted, plus the committed-example flag.
+ * @returns {Array<{name: string, files: string[], inExample: boolean}>}
+ */
+function collectEnvReads(files, cwd) {
+  const readers = new Map(); // name → Set<rel file>
 
   for (const filePath of files) {
     const ext = path.extname(filePath).toLowerCase();
@@ -60,31 +65,47 @@ function analyze(files, cwd) {
     let content;
     try { content = fs.readFileSync(filePath, 'utf8'); } catch (_) { continue; }
 
-    if (ext === '.py') collectMatches(PY_RE, content, fromCode);
-    else if (ext === '.rb') collectMatches(RB_RE, content, fromCode);
-    else if (ext === '.go') collectMatches(GO_RE, content, fromCode);
-    else collectMatches(JS_RE, content, fromCode);
+    const found = new Set();
+    if (ext === '.py') collectMatches(PY_RE, content, found);
+    else if (ext === '.rb') collectMatches(RB_RE, content, found);
+    else if (ext === '.go') collectMatches(GO_RE, content, found);
+    else collectMatches(JS_RE, content, found);
+    if (found.size === 0) continue;
+
+    const rel = path.relative(cwd, filePath).replace(/\\/g, '/');
+    for (const name of found) {
+      if (!readers.has(name)) readers.set(name, new Set());
+      readers.get(name).add(rel);
+    }
   }
 
   const fromExample = readExampleKeys(cwd);
-  const all = new Set([...fromCode, ...fromExample]);
-  if (all.size === 0) return '';
+  const names = [...new Set([...readers.keys(), ...fromExample])].sort();
+  return names.map((name) => ({
+    name,
+    files: [...(readers.get(name) || [])].sort(),
+    inExample: fromExample.has(name),
+  }));
+}
 
-  const names = [...all].sort();
+function analyze(files, cwd) {
+  const rows = collectEnvReads(files, cwd);
+  if (rows.length === 0) return '';
+
   const lines = [
     '| Variable | Source |',
     '|----------|--------|',
   ];
-  for (const name of names.slice(0, MAX_ROWS)) {
+  for (const r of rows.slice(0, MAX_ROWS)) {
     const src = [];
-    if (fromCode.has(name)) src.push('code');
-    if (fromExample.has(name)) src.push('.env.example');
-    lines.push(`| ${name} | ${src.join(', ')} |`);
+    if (r.files.length > 0) src.push('code');
+    if (r.inExample) src.push('.env.example');
+    lines.push(`| ${r.name} | ${src.join(', ')} |`);
   }
-  if (names.length > MAX_ROWS) {
-    lines.push(`| … | +${names.length - MAX_ROWS} more |`);
+  if (rows.length > MAX_ROWS) {
+    lines.push(`| … | +${rows.length - MAX_ROWS} more |`);
   }
   return lines.join('\n');
 }
 
-module.exports = { analyze };
+module.exports = { analyze, collectEnvReads };
