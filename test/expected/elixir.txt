@@ -1,0 +1,7 @@
+defmodule MyApp.Accounts  # The Accounts context
+  def get_user!(id) → User.t()  # Gets a single user by id
+  def list_users() → [User.t()]  # Lists all users, newest first
+  def create_user(attrs)  # Creates a user from attrs
+  def update_user(user, attrs)
+  defp normalize_email(email)
+  defmacro __using__(_opts)

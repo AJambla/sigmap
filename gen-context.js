@@ -1666,7 +1666,7 @@ __factories["./src/config/loader"] = function(module, exports) {
     '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs',
     '.py', '.pyw', '.java', '.kt', '.kts', '.go', '.rs', '.cs',
     '.cpp', '.c', '.h', '.hpp', '.cc', '.rb', '.rake', '.php',
-    '.swift', '.dart', '.scala', '.sc', '.lua', '.vue', '.svelte',
+    '.swift', '.dart', '.scala', '.sc', '.lua', '.ex', '.exs', '.vue', '.svelte',
     '.html', '.htm', '.css', '.scss', '.sass', '.less',
     '.yml', '.yaml', '.sh', '.bash', '.zsh', '.fish',
     '.sql', '.graphql', '.gql', '.tf', '.tfvars', '.proto',
@@ -3151,6 +3151,7 @@ __factories["./src/discovery/language-detector"] = function(module, exports) {
     '.c': 'cpp', '.h': 'cpp', '.hpp': 'cpp', '.swift': 'swift',
     '.dart': 'dart', '.scala': 'scala', '.php': 'php',
     '.lua': 'lua',
+    '.ex': 'elixir', '.exs': 'elixir',
     '.gd': 'gdscript',
     '.r': 'r', '.R': 'r',
   };
@@ -6045,6 +6046,21 @@ __factories["./src/extractors/deps"] = function(module, exports) {
     return [...deps].slice(0, 5);
   }
 
+  /**
+   * Extract Elixir module dependencies: `alias A.B`, `import A.B`, `use A.B`,
+   * `require A.B` — module names for repo-local resolution (#538).
+   * @param {string} src
+   * @returns {string[]}
+   */
+  function extractElixirDeps(src) {
+    const deps = new Set();
+    const stripped = String(src || '').replace(/#[^\n]*/g, '');
+    for (const m of stripped.matchAll(/^\s*(?:alias|import|use|require)\s+([A-Z][\w.]*)/gm)) {
+      deps.add(m[1]);
+    }
+    return [...deps].slice(0, 5);
+  }
+
   function stripLuaComments(src) {
     return String(src || '')
       .replace(/--\[\[[\s\S]*?\]\]/g, '')
@@ -6069,7 +6085,7 @@ __factories["./src/extractors/deps"] = function(module, exports) {
     return reverse;
   }
 
-  module.exports = { extractPythonDeps, extractTSDeps, extractRDeps, extractLuaDeps, buildReverseDepMap };
+  module.exports = { extractPythonDeps, extractTSDeps, extractRDeps, extractLuaDeps, extractElixirDeps, buildReverseDepMap };
   
 };
 
@@ -6104,6 +6120,7 @@ __factories["./src/extractors/dispatch"] = function(module, exports) {
     swift: __require('./src/extractors/swift'),
     dart: __require('./src/extractors/dart'),
     scala: __require('./src/extractors/scala'),
+    elixir: __require('./src/extractors/elixir'),
     lua: __require('./src/extractors/lua'),
     gdscript: __require('./src/extractors/gdscript'),
     r: __require('./src/extractors/r'),
@@ -6155,6 +6172,8 @@ __factories["./src/extractors/dispatch"] = function(module, exports) {
     '.swift': 'swift',
     '.dart': 'dart',
     '.scala': 'scala', '.sc': 'scala',
+    '.ex': 'elixir',
+    '.exs': 'elixir',
     '.lua': 'lua',
     '.gd': 'gdscript',
     '.r': 'r', '.R': 'r',
@@ -6258,6 +6277,151 @@ __factories["./src/extractors/dockerfile"] = function(module, exports) {
     }
 
     return capWithNotice(sigs, PER_FILE_LIMIT, 'signatures');
+  }
+
+  module.exports = { extract };
+  
+};
+
+// ── ./src/extractors/elixir ──
+__factories["./src/extractors/elixir"] = function(module, exports) {
+  
+  const { capWithNotice } = __require('./src/util/truncate');
+
+  // Ceiling discloses what it drops rather than truncating silently (#576).
+  const PER_FILE_LIMIT = 200;
+  const HINT_CHARS = 60;
+  const SPEC_CHARS = 30;
+
+  /**
+   * Extract signatures from Elixir source code (.ex/.exs) — Tier 3 (#538).
+   *
+   * Recognised constructs:
+   *   - `defmodule Mod.Name do` blocks, with `@moduledoc` first sentence
+   *   - `def`/`defp`/`defmacro`/`defmacrop name(params)` (parens optional,
+   *     `when` guards stripped), indented under their module
+   *   - `@spec name(...) :: ret` as a `→ ret` return hint on the next def
+   *   - `@doc "..."` / `@doc \"\"\"..."\"\"` first sentence as a doc hint
+   *
+   * Regex-only and zero-dependency, in the Lua/Ruby Tier-3 family.
+   *
+   * @param {string} src - Raw file content
+   * @returns {string[]} Array of signature strings
+   */
+  function extract(src) {
+    if (!src || typeof src !== 'string') return [];
+    const sigs = [];
+    const lines = stripComments(src).split('\n');
+
+    // Pending attribute state: @doc/@spec bind to the NEXT def; @moduledoc to
+    // the enclosing module line just emitted.
+    let pendingDoc = '';
+    let pendingSpec = '';
+    let moduleIdx = -1; // index in sigs of the current module line, for @moduledoc
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+
+      const mod = /^\s*defmodule\s+([A-Z][\w.]*)\s+do\b/.exec(line);
+      if (mod) {
+        sigs.push(`defmodule ${mod[1]}`);
+        moduleIdx = sigs.length - 1;
+        pendingDoc = '';
+        pendingSpec = '';
+        continue;
+      }
+
+      const moduledoc = /^\s*@moduledoc\s+(.*)/.exec(line);
+      if (moduledoc && moduleIdx !== -1) {
+        const text = docText(moduledoc[1], lines, i);
+        if (text && !sigs[moduleIdx].includes('  # ')) sigs[moduleIdx] += `  # ${text}`;
+        continue;
+      }
+
+      const doc = /^\s*@doc\s+(.*)/.exec(line);
+      if (doc) {
+        pendingDoc = docText(doc[1], lines, i);
+        continue;
+      }
+
+      const spec = /^\s*@spec\s+\w+[?!]?\s*\(.*::\s*(.+?)\s*$/.exec(line)
+        || /^\s*@spec\s+\w+[?!]?\s+::\s*(.+?)\s*$/.exec(line);
+      if (spec) {
+        pendingSpec = spec[1].replace(/\s+/g, ' ').slice(0, SPEC_CHARS);
+        continue;
+      }
+
+      const def = /^(\s*)(defmacrop?|defp?)\s+([a-z_]\w*[?!]?)\s*(?:\(([^)]*)\))?/.exec(line);
+      if (def) {
+        const name = def[3];
+        if (name.startsWith('_') && !name.startsWith('__')) { pendingDoc = ''; pendingSpec = ''; continue; }
+        const params = normalizeParams(def[4] || '');
+        const ret = pendingSpec ? ` → ${pendingSpec}` : '';
+        const hint = pendingDoc ? `  # ${pendingDoc}` : '';
+        const indent = moduleIdx !== -1 ? '  ' : '';
+        sigs.push(`${indent}${def[2]} ${name}(${params})${ret}${hint}`);
+        pendingDoc = '';
+        pendingSpec = '';
+      }
+    }
+
+    return capWithNotice(sigs, PER_FILE_LIMIT, 'signatures');
+  }
+
+  /** First sentence of a @doc/@moduledoc value; follows heredocs one line in. */
+  function docText(rest, lines, i) {
+    let text = rest.trim();
+    if (text.startsWith('"""') || text.startsWith("'''")) {
+      text = text.slice(3).trim();
+      // Heredoc: take the first non-empty following line when the opener is bare.
+      for (let j = i + 1; !text && j < lines.length && j < i + 4; j++) {
+        const l = lines[j].trim();
+        if (l.startsWith('"""') || l.startsWith("'''")) break;
+        text = l;
+      }
+    }
+    text = text.replace(/^["']|["']\s*\)?\s*$/g, '').replace(/\\n[\s\S]*$/, '');
+    if (text === 'false') return '';
+    return text.split(/[.!?]/)[0].trim().slice(0, HINT_CHARS);
+  }
+
+  function normalizeParams(params) {
+    if (!params) return '';
+    // Strip default values (`\\ default`) and pattern-match internals down to
+    // the binding name where one is visible.
+    return params
+      .split(',')
+      .map((p) => {
+        let s = p.trim().split('\\\\')[0].trim();
+        const asMatch = /=\s*([a-z_]\w*)\s*$/.exec(s); // %{...} = user
+        if (asMatch) s = asMatch[1];
+        return s.replace(/\s+/g, ' ');
+      })
+      .filter(Boolean)
+      .join(', ');
+  }
+
+  /** Blank `#` comments while preserving line structure; strings kept. */
+  function stripComments(src) {
+    return String(src)
+      .split('\n')
+      .map((line) => {
+        let out = '';
+        let quote = null;
+        for (let i = 0; i < line.length; i++) {
+          const ch = line[i];
+          if (quote) {
+            out += ch;
+            if (ch === quote && line[i - 1] !== '\\') quote = null;
+            continue;
+          }
+          if (ch === '"' || ch === "'") { quote = ch; out += ch; continue; }
+          if (ch === '#') break;
+          out += ch;
+        }
+        return out;
+      })
+      .join('\n');
   }
 
   module.exports = { extract };
@@ -12374,6 +12538,7 @@ __factories["./src/graph/builder"] = function(module, exports) {
   const JVM_EXTS = new Set(['.java', '.kt', '.kts', '.scala', '.sc']);
   const RB_EXTS  = new Set(['.rb', '.rake']);
   const R_EXTS   = new Set(['.r', '.R']);
+  const EX_EXTS  = new Set(['.ex', '.exs']);
 
   /**
    * Probe an absolute base path for a JS/TS module file in fileSet, trying the
@@ -12684,6 +12849,33 @@ __factories["./src/graph/builder"] = function(module, exports) {
       }
     }
 
+    // ── Elixir ────────────────────────────────────────────────────────────────
+    // Module references (`alias A.B`, `import A.B`, `use A.B`, `require A.B`)
+    // resolve to repo files by the lib/ snake_case convention: A.B.C →
+    // .../b/c.ex, longest suffix first. External modules miss fileSet, so no
+    // false edges (#538).
+    if (EX_EXTS.has(ext)) {
+      const stripped = content.replace(/#[^\n]*/g, '');
+      const snake = (seg) => seg.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
+      const re = /^\s*(?:alias|import|use|require)\s+([A-Z][\w.]*)/gm;
+      let m;
+      while ((m = re.exec(stripped)) !== null) {
+        const segs = m[1].split('.').map(snake);
+        const suffixes = [];
+        if (segs.length >= 2) suffixes.push(segs.slice(-2).join('/') + '.ex');
+        suffixes.push(segs[segs.length - 1] + '.ex');
+        let hit = null;
+        for (const suf of suffixes) {
+          for (const f of fileSet) {
+            if (f === filePath) continue;
+            if (normalizePath(f).endsWith('/' + suf)) { hit = f; break; }
+          }
+          if (hit) break;
+        }
+        if (hit) found.push(hit);
+      }
+    }
+
     // ── R ─────────────────────────────────────────────────────────────────────
     // R doesn't have JS-style relative imports inside packages — files in R/ are
     // auto-sourced in alphabetical order. We emit edges for:
@@ -12844,7 +13036,7 @@ __factories["./src/graph/builder"] = function(module, exports) {
           const ext = path.extname(e.name).toLowerCase();
           if (JS_EXTS.has(ext) || PY_EXTS.has(ext) || GO_EXTS.has(ext) ||
               RS_EXTS.has(ext) || JVM_EXTS.has(ext) || RB_EXTS.has(ext) ||
-              R_EXTS.has(ext)) {
+              R_EXTS.has(ext) || EX_EXTS.has(ext)) {
             out.push(full);
           }
         }
@@ -23404,39 +23596,12 @@ const { DEFAULTS } = requireSourceOrBundled('./src/config/defaults');
 // ---------------------------------------------------------------------------
 // Language → extractor mapping (by file extension)
 // ---------------------------------------------------------------------------
-const EXT_MAP = {
-  '.ts': 'typescript', '.tsx': 'typescript_react',
-  '.js': 'javascript', '.jsx': 'javascript', '.mjs': 'javascript', '.cjs': 'javascript',
-  '.py': 'python', '.pyw': 'python',
-  '.java': 'java',
-  '.kt': 'kotlin', '.kts': 'kotlin',
-  '.go': 'go',
-  '.rs': 'rust',
-  '.cs': 'csharp',
-  '.cpp': 'cpp', '.c': 'cpp', '.h': 'cpp', '.hpp': 'cpp', '.cc': 'cpp',
-  '.rb': 'ruby', '.rake': 'ruby',
-  '.php': 'php',
-  '.swift': 'swift',
-  '.dart': 'dart',
-  '.scala': 'scala', '.sc': 'scala',
-  '.r': 'r', '.R': 'r',
-  '.vue': 'vue_sfc',
-  '.svelte': 'svelte',
-  '.html': 'html', '.htm': 'html',
-  '.css': 'css', '.scss': 'css', '.sass': 'css', '.less': 'css',
-  '.yml': 'yaml', '.yaml': 'yaml',
-  '.sh': 'shell', '.bash': 'shell', '.zsh': 'shell', '.fish': 'shell',
-  // P1 languages
-  '.sql': 'sql',
-  '.graphql': 'graphql', '.gql': 'graphql',
-  '.tf': 'terraform', '.tfvars': 'terraform',
-  '.proto': 'protobuf',
-  // Phase A formats
-  '.toml': 'toml',
-  '.properties': 'properties',
-  '.xml': 'xml',
-  '.md': 'markdown',
-};
+// Resolution delegates to src/extractors/dispatch.js — the single source of
+// truth (#591). A CLI-local copy of this map had drifted: it lacked .lua,
+// .gd, and .ex, silently sending those languages to the generic fallback in
+// the generate pipeline while their extractors passed every direct test.
+// Deleted rather than patched (#538).
+const { EXT_MAP } = requireSourceOrBundled('./src/extractors/dispatch');
 
 // Dockerfile handled separately (no extension)
 function isDockerfile(filename) {
@@ -23705,11 +23870,12 @@ function detectAndExtract(filePath, content, maxSigsPerFile, exactness, cwd) {
 function extractFileDeps(filePath, content, config) {
   if (config && config.depMap === false) return [];
   try {
-    const { extractPythonDeps, extractTSDeps, extractRDeps } = requireSourceOrBundled('./src/extractors/deps');
+    const { extractPythonDeps, extractTSDeps, extractRDeps, extractElixirDeps } = requireSourceOrBundled('./src/extractors/deps');
     const ext = path.extname(filePath).toLowerCase();
     if (ext === '.py' || ext === '.pyw') return extractPythonDeps(content);
     if (['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'].includes(ext)) return extractTSDeps(content);
     if (ext === '.r') return extractRDeps ? extractRDeps(content) : [];
+    if (ext === '.ex' || ext === '.exs') return extractElixirDeps ? extractElixirDeps(content) : [];
   } catch (_) {}
   return [];
 }
