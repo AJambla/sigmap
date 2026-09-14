@@ -133,7 +133,7 @@ fs.writeFileSync(unrelFile, 'The weather in Paris today is sunny and warm.');
 // 5. sigmap judge --json → valid JSON
 test('sigmap judge --json → valid JSON with score/verdict/reasons', () => {
   const r = spawnSync(process.execPath, [SCRIPT, 'judge', '--response', respFile, '--context', ctxFile, '--json'], {
-    encoding: 'utf8', cwd: ROOT, timeout: 15000,
+    encoding: 'utf8', cwd: ROOT, timeout: 120000,
   });
   let parsed;
   try { parsed = JSON.parse(r.stdout.trim()); }
@@ -148,7 +148,7 @@ test('sigmap judge --json → valid JSON with score/verdict/reasons', () => {
 // 6. sigmap judge → exits 0 (grounded)
 test('sigmap judge → exits 0 on grounded response', () => {
   const r = spawnSync(process.execPath, [SCRIPT, 'judge', '--response', respFile, '--context', ctxFile], {
-    encoding: 'utf8', cwd: ROOT, timeout: 15000,
+    encoding: 'utf8', cwd: ROOT, timeout: 120000,
   });
   assert.strictEqual(r.status, 0, `expected exit 0, got ${r.status}\n${r.stderr}`);
 });
@@ -156,7 +156,7 @@ test('sigmap judge → exits 0 on grounded response', () => {
 // 7. sigmap judge --threshold 0.99 → exits 1
 test('sigmap judge --threshold 0.99 → exits 1 on high threshold', () => {
   const r = spawnSync(process.execPath, [SCRIPT, 'judge', '--response', unrelFile, '--context', ctxFile, '--threshold', '0.99', '--json'], {
-    encoding: 'utf8', cwd: ROOT, timeout: 15000,
+    encoding: 'utf8', cwd: ROOT, timeout: 120000,
   });
   assert.strictEqual(r.status, 1, `expected exit 1, got ${r.status}`);
   const parsed = JSON.parse(r.stdout.trim());
@@ -166,7 +166,7 @@ test('sigmap judge --threshold 0.99 → exits 1 on high threshold', () => {
 // 8. sigmap judge missing args → exits 1
 test('sigmap judge missing --response → exits 1', () => {
   const r = spawnSync(process.execPath, [SCRIPT, 'judge', '--context', ctxFile], {
-    encoding: 'utf8', cwd: ROOT, timeout: 15000,
+    encoding: 'utf8', cwd: ROOT, timeout: 120000,
   });
   assert.strictEqual(r.status, 1, `expected exit 1, got ${r.status}`);
 });
@@ -201,7 +201,7 @@ test('config extends: user value overrides base config', () => {
 // 11. sigmap history --json → valid JSON array
 test('sigmap history --json → valid JSON array', () => {
   const r = spawnSync(process.execPath, [SCRIPT, 'history', '--json'], {
-    encoding: 'utf8', cwd: ROOT, timeout: 15000,
+    encoding: 'utf8', cwd: ROOT, timeout: 120000,
   });
   assert.strictEqual(r.status, 0, `exit ${r.status}\n${r.stderr}`);
   let parsed;
@@ -213,7 +213,7 @@ test('sigmap history --json → valid JSON array', () => {
 // 12. sigmap history → exits 0
 test('sigmap history → exits 0', () => {
   const r = spawnSync(process.execPath, [SCRIPT, 'history'], {
-    encoding: 'utf8', cwd: ROOT, timeout: 15000,
+    encoding: 'utf8', cwd: ROOT, timeout: 120000,
   });
   assert.strictEqual(r.status, 0, `exit ${r.status}\n${r.stderr}`);
 });

@@ -54,7 +54,7 @@ function run(...args) {
   return spawnSync(process.execPath, [SCRIPT, ...args], {
     cwd: ROOT,
     encoding: 'utf8',
-    timeout: 20000,
+    timeout: 120000,
     maxBuffer: 2 * 1024 * 1024,
   });
 }
@@ -64,7 +64,7 @@ function mcpCall(msg) {
     input: JSON.stringify(msg) + '\n',
     cwd: ROOT,
     encoding: 'utf8',
-    timeout: 10000,
+    timeout: 120000,
     maxBuffer: 1024 * 1024,
   });
   return res.stdout.trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));

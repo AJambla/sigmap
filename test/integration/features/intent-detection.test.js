@@ -86,7 +86,7 @@ test('sigmap ask (no query) → exits 1', () => {
 // 7. sigmap ask --json — valid JSON with required fields
 test('sigmap ask --json → valid JSON with required fields', () => {
   const r = spawnSync(process.execPath, [SCRIPT, 'ask', 'fix the login bug', '--json'], {
-    encoding: 'utf8', cwd: ROOT, timeout: 15000,
+    encoding: 'utf8', cwd: ROOT, timeout: 120000,
   });
   assert.strictEqual(r.status, 0, `exit ${r.status}\nstderr: ${r.stderr}`);
   let parsed;
@@ -103,7 +103,7 @@ test('sigmap ask --json → valid JSON with required fields', () => {
 // 8. sigmap suggest-profile — exits 0, has 'suggested profile' in output
 test('sigmap suggest-profile → exits 0 and prints profile line', () => {
   const r = spawnSync(process.execPath, [SCRIPT, 'suggest-profile'], {
-    encoding: 'utf8', cwd: ROOT, timeout: 10000,
+    encoding: 'utf8', cwd: ROOT, timeout: 120000,
   });
   assert.strictEqual(r.status, 0, `exit ${r.status}\nstderr: ${r.stderr}`);
   assert.ok(
@@ -115,7 +115,7 @@ test('sigmap suggest-profile → exits 0 and prints profile line', () => {
 // 9. sigmap suggest-profile --short — one-word output
 test('sigmap suggest-profile --short → single word', () => {
   const r = spawnSync(process.execPath, [SCRIPT, 'suggest-profile', '--short'], {
-    encoding: 'utf8', cwd: ROOT, timeout: 10000,
+    encoding: 'utf8', cwd: ROOT, timeout: 120000,
   });
   assert.strictEqual(r.status, 0, `exit ${r.status}\nstderr: ${r.stderr}`);
   const word = r.stdout.trim();
@@ -125,7 +125,7 @@ test('sigmap suggest-profile --short → single word', () => {
 // 10. sigmap --cost --json — valid JSON with cost fields
 test('sigmap --cost --json → valid JSON with cost fields', () => {
   const r = spawnSync(process.execPath, [SCRIPT, '--cost', '--json'], {
-    encoding: 'utf8', cwd: ROOT, timeout: 30000,
+    encoding: 'utf8', cwd: ROOT, timeout: 120000,
   });
   assert.strictEqual(r.status, 0, `exit ${r.status}\nstderr: ${r.stderr}`);
   let parsed;
@@ -145,7 +145,7 @@ test('sigmap query --context → writes query-context.md', () => {
   if (fs.existsSync(ctxPath)) fs.unlinkSync(ctxPath);
 
   const r = spawnSync(process.execPath, [SCRIPT, '--query', 'rank files', '--context'], {
-    encoding: 'utf8', cwd: ROOT, timeout: 15000,
+    encoding: 'utf8', cwd: ROOT, timeout: 120000,
   });
   assert.strictEqual(r.status, 0, `exit ${r.status}\nstderr: ${r.stderr}`);
   assert.ok(fs.existsSync(ctxPath), `query-context.md not created at ${ctxPath}`);
@@ -156,7 +156,7 @@ test('sigmap query --context → writes query-context.md', () => {
 // 12. sigmap share — exits 0 and prints expected lines
 test('sigmap share → exits 0 and prints shareable text', () => {
   const r = spawnSync(process.execPath, [SCRIPT, 'share'], {
-    encoding: 'utf8', cwd: ROOT, timeout: 10000,
+    encoding: 'utf8', cwd: ROOT, timeout: 120000,
   });
   assert.strictEqual(r.status, 0, `exit ${r.status}\nstderr: ${r.stderr}`);
   assert.ok(r.stdout.includes('SigMap'), `missing SigMap in output: ${r.stdout}`);

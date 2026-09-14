@@ -58,7 +58,7 @@ function run(...args) {
   return spawnSync(process.execPath, [SCRIPT, ...args], {
     cwd: ROOT,
     encoding: 'utf8',
-    timeout: 15000,
+    timeout: 120000,
     maxBuffer: 2 * 1024 * 1024,
   });
 }

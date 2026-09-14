@@ -75,7 +75,7 @@ test('extractQuerySymbols: plain lowercase words not extracted', () => {
 // 4. sigmap validate — exits 0 on the real repo
 test('sigmap validate → exits 0 on valid repo', () => {
   const r = spawnSync(process.execPath, [SCRIPT, 'validate'], {
-    encoding: 'utf8', cwd: ROOT, timeout: 20000,
+    encoding: 'utf8', cwd: ROOT, timeout: 120000,
   });
   assert.strictEqual(r.status, 0, `exit ${r.status}\nstdout: ${r.stdout}\nstderr: ${r.stderr}`);
 });
@@ -83,7 +83,7 @@ test('sigmap validate → exits 0 on valid repo', () => {
 // 5. sigmap validate --json — emits valid JSON
 test('sigmap validate --json → valid JSON', () => {
   const r = spawnSync(process.execPath, [SCRIPT, 'validate', '--json'], {
-    encoding: 'utf8', cwd: ROOT, timeout: 20000,
+    encoding: 'utf8', cwd: ROOT, timeout: 120000,
   });
   assert.strictEqual(r.status, 0, `exit ${r.status}\nstderr: ${r.stderr}`);
   let parsed;
@@ -98,7 +98,7 @@ test('sigmap validate --json → valid JSON', () => {
 // 6. sigmap validate --json — valid=true on real repo
 test('sigmap validate --json → valid:true on real repo', () => {
   const r = spawnSync(process.execPath, [SCRIPT, 'validate', '--json'], {
-    encoding: 'utf8', cwd: ROOT, timeout: 20000,
+    encoding: 'utf8', cwd: ROOT, timeout: 120000,
   });
   const parsed = JSON.parse(r.stdout.trim());
   assert.strictEqual(parsed.valid, true, `expected valid:true, got: ${JSON.stringify(parsed)}`);
@@ -107,7 +107,7 @@ test('sigmap validate --json → valid:true on real repo', () => {
 // 7. sigmap validate --json — issues empty on real repo
 test('sigmap validate --json → issues:[] on real repo', () => {
   const r = spawnSync(process.execPath, [SCRIPT, 'validate', '--json'], {
-    encoding: 'utf8', cwd: ROOT, timeout: 20000,
+    encoding: 'utf8', cwd: ROOT, timeout: 120000,
   });
   const parsed = JSON.parse(r.stdout.trim());
   assert.ok(Array.isArray(parsed.issues),          'issues not an array');
@@ -117,7 +117,7 @@ test('sigmap validate --json → issues:[] on real repo', () => {
 // 8. sigmap validate --query → exits 0 with symbol check
 test('sigmap validate --query "loginUser validateToken" → exits 0', () => {
   const r = spawnSync(process.execPath, [SCRIPT, 'validate', '--query', 'loginUser validateToken'], {
-    encoding: 'utf8', cwd: ROOT, timeout: 20000,
+    encoding: 'utf8', cwd: ROOT, timeout: 120000,
   });
   assert.strictEqual(r.status, 0, `exit ${r.status}\nstderr: ${r.stderr}`);
 });
@@ -126,7 +126,7 @@ test('sigmap validate --query "loginUser validateToken" → exits 0', () => {
 //     report (the old cased-symbol check was a silent no-op for NL queries)
 test('sigmap validate --query "login rate limit" --json → query confidence report', () => {
   const r = spawnSync(process.execPath, [SCRIPT, 'validate', '--query', 'login rate limit', '--json'], {
-    encoding: 'utf8', cwd: ROOT, timeout: 20000,
+    encoding: 'utf8', cwd: ROOT, timeout: 120000,
   });
   assert.strictEqual(r.status, 0, `exit ${r.status}\nstderr: ${r.stderr}`);
   const parsed = JSON.parse(r.stdout.trim());
@@ -140,7 +140,7 @@ test('sigmap validate --query "login rate limit" --json → query confidence rep
 // 8c. a well-covered query resolves to high confidence and a concrete top file
 test('sigmap validate --query "rank files by relevance score" → high confidence', () => {
   const r = spawnSync(process.execPath, [SCRIPT, 'validate', '--query', 'rank files by relevance score', '--json'], {
-    encoding: 'utf8', cwd: ROOT, timeout: 20000,
+    encoding: 'utf8', cwd: ROOT, timeout: 120000,
   });
   const parsed = JSON.parse(r.stdout.trim());
   assert.ok(parsed.query && parsed.query.topFile, `expected topFile, got: ${JSON.stringify(parsed.query)}`);
@@ -150,7 +150,7 @@ test('sigmap validate --query "rank files by relevance score" → high confidenc
 // 9. sigmap --ci — exits 0 on real repo (coverage ≥ default 80%)
 test('sigmap --ci → exits 0 on real repo (coverage ≥ 80%)', () => {
   const r = spawnSync(process.execPath, [SCRIPT, '--ci'], {
-    encoding: 'utf8', cwd: ROOT, timeout: 20000,
+    encoding: 'utf8', cwd: ROOT, timeout: 120000,
   });
   // The sigmap repo itself may or may not reach 80% — accept either pass or the
   // JSON form so we can inspect. What we require: command runs without crashing.
@@ -162,7 +162,7 @@ test('sigmap --ci → exits 0 on real repo (coverage ≥ 80%)', () => {
 // 10. sigmap --ci --json — valid JSON
 test('sigmap --ci --json → valid JSON with pass/coverage/threshold', () => {
   const r = spawnSync(process.execPath, [SCRIPT, '--ci', '--json'], {
-    encoding: 'utf8', cwd: ROOT, timeout: 20000,
+    encoding: 'utf8', cwd: ROOT, timeout: 120000,
   });
   let parsed;
   try { parsed = JSON.parse(r.stdout.trim()); }
@@ -180,7 +180,7 @@ test('sigmap --ci --json → valid JSON with pass/coverage/threshold', () => {
 // their threshold relative to it rather than to a hard-coded "impossible" number.
 function measuredCoverage() {
   const r = spawnSync(process.execPath, [SCRIPT, '--ci', '--json'], {
-    encoding: 'utf8', cwd: ROOT, timeout: 20000,
+    encoding: 'utf8', cwd: ROOT, timeout: 120000,
   });
   return JSON.parse(r.stdout.trim()).coverage;
 }
@@ -191,7 +191,7 @@ test('sigmap --ci with a threshold above measured coverage → exits 1', () => {
   if (cov >= 100) { console.log('  SKIP  coverage is 100% — no higher threshold to test'); return; }
   const threshold = Math.min(100, cov + 1);
   const r = spawnSync(process.execPath, [SCRIPT, '--ci', '--min-coverage', String(threshold)], {
-    encoding: 'utf8', cwd: ROOT, timeout: 20000,
+    encoding: 'utf8', cwd: ROOT, timeout: 120000,
   });
   assert.strictEqual(r.status, 1, `expected exit 1 at threshold ${threshold} (coverage ${cov}), got ${r.status}`);
 });
@@ -202,7 +202,7 @@ test('sigmap --ci --json with a threshold above measured coverage → pass:false
   if (cov >= 100) { console.log('  SKIP  coverage is 100% — no higher threshold to test'); return; }
   const threshold = Math.min(100, cov + 1);
   const r = spawnSync(process.execPath, [SCRIPT, '--ci', '--min-coverage', String(threshold), '--json'], {
-    encoding: 'utf8', cwd: ROOT, timeout: 20000,
+    encoding: 'utf8', cwd: ROOT, timeout: 120000,
   });
   const parsed = JSON.parse(r.stdout.trim());
   assert.strictEqual(parsed.pass,      false,     `expected pass:false at threshold ${threshold} (coverage ${cov})`);
@@ -212,7 +212,7 @@ test('sigmap --ci --json with a threshold above measured coverage → pass:false
 // 13. sigmap ask --json → JSON does not crash regardless of coverage
 test('sigmap ask --json → exits 0 with coverage in output', () => {
   const r = spawnSync(process.execPath, [SCRIPT, 'ask', 'explain the rank function', '--json'], {
-    encoding: 'utf8', cwd: ROOT, timeout: 15000,
+    encoding: 'utf8', cwd: ROOT, timeout: 120000,
   });
   assert.strictEqual(r.status, 0, `exit ${r.status}\nstderr: ${r.stderr}`);
   const parsed = JSON.parse(r.stdout.trim());

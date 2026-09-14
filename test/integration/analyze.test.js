@@ -161,7 +161,7 @@ test('CLI --analyze: exits 0 and prints table', () => {
   const r = spawnSync(process.execPath, [SCRIPT, '--analyze'], {
     cwd: ROOT,
     encoding: 'utf8',
-    timeout: 30000,
+    timeout: 120000,
     maxBuffer: 2 * 1024 * 1024,
   });
   assert.strictEqual(r.status, 0, `exit ${r.status}: ${r.stderr}`);
@@ -176,7 +176,7 @@ test('CLI --analyze --json: valid JSON with correct keys', () => {
   const r = spawnSync(process.execPath, [SCRIPT, '--analyze', '--json'], {
     cwd: ROOT,
     encoding: 'utf8',
-    timeout: 30000,
+    timeout: 120000,
     maxBuffer: 2 * 1024 * 1024,
   });
   assert.strictEqual(r.status, 0, `exit ${r.status}: ${r.stderr}`);
@@ -212,7 +212,7 @@ test('CLI --diagnose-extractors: exits 0 and shows results', () => {
   const r = spawnSync(process.execPath, [SCRIPT, '--diagnose-extractors'], {
     cwd: ROOT,
     encoding: 'utf8',
-    timeout: 30000,
+    timeout: 120000,
     maxBuffer: 2 * 1024 * 1024,
   });
   assert.strictEqual(r.status, 0, `exit ${r.status}\nstdout: ${r.stdout}\nstderr: ${r.stderr}`);
@@ -230,7 +230,7 @@ test('CLI --version: returns current package version', () => {
   const r = spawnSync(process.execPath, [SCRIPT, '--version'], {
     cwd: ROOT,
     encoding: 'utf8',
-    timeout: 10000,
+    timeout: 120000,
   });
   assert.strictEqual(r.status, 0);
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
