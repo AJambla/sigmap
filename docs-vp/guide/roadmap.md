@@ -1,13 +1,13 @@
 ---
 title: Roadmap
-description: SigMap version history and roadmap. From v0.0 to v8.42.0, with recent releases completing the grounded-codegen plan — a realistic §9 ablation (real-symbol corpus, exact-signature grounding, --verbose), a Gemini (AI Studio) provider for the §9 ablation, the init Creation-workflow CLAUDE.md block, scaffold persistence, the LLM A/B hallucination ablation harness, the sigmap create orchestrator and its four guard stages (scaffold, verify-plan, verify-ai-output, review-pr), the conventions command with its full flag set (--conflicts, --inject, --report, --ci, --fix, --update), the grounding benchmark, read-time self-heal, live-index MCP write hooks, the get_callee_signatures MCP tool (exact callee signatures), realistic per-query savings, release-pipeline robustness (bundle integrity + version.json gates, standalone-bundle smoke test), the sigmap gain token-savings dashboard, supply-chain hardening (zero system-shell access), Squeeze input minimization with symbol enrichment, source-of-truth llms.txt, the verify-ai-output Hallucination Guard, and Memory tools (note, status, read_memory MCP tool).
+description: SigMap version history and roadmap. From v0.0 to v8.43.0, with recent releases completing the grounded-codegen plan — a realistic §9 ablation (real-symbol corpus, exact-signature grounding, --verbose), a Gemini (AI Studio) provider for the §9 ablation, the init Creation-workflow CLAUDE.md block, scaffold persistence, the LLM A/B hallucination ablation harness, the sigmap create orchestrator and its four guard stages (scaffold, verify-plan, verify-ai-output, review-pr), the conventions command with its full flag set (--conflicts, --inject, --report, --ci, --fix, --update), the grounding benchmark, read-time self-heal, live-index MCP write hooks, the get_callee_signatures MCP tool (exact callee signatures), realistic per-query savings, release-pipeline robustness (bundle integrity + version.json gates, standalone-bundle smoke test), the sigmap gain token-savings dashboard, supply-chain hardening (zero system-shell access), Squeeze input minimization with symbol enrichment, source-of-truth llms.txt, the verify-ai-output Hallucination Guard, and Memory tools (note, status, read_memory MCP tool).
 head:
   - - meta
     - property: og:title
       content: "SigMap Roadmap — version history and upcoming features"
   - - meta
     - property: og:description
-      content: "182 versions shipped. See what changed in each release and what is coming next."
+      content: "183 versions shipped. See what changed in each release and what is coming next."
   - - meta
     - property: og:url
       content: "https://sigmap.io/guide/roadmap"
@@ -20,7 +20,7 @@ head:
 ---
 # Roadmap
 
-One hundred eighty-two versions shipped. MIT open source from day one.
+One hundred eighty-three versions shipped. MIT open source from day one.
 
 **Stats:** 96.6% overall token reduction · 78.6% retrieval hit@5 (1.73× measured lift vs single-shot grep) · 98.0% test-discovery F1 · installed-library grounding (JS/TS + Python) · method-level call-graph (JS/TS, Python, Java, Go, Rust, Kotlin, Scala) · 22 MCP tools · 35 languages · 17-language source resolver · 0 npm deps
 
@@ -835,6 +835,18 @@ Two milestones in one release. **`verify-ai-output` Reliable MVP** (#232) grows 
 **Tags:** `KNOWN_LIMITATIONS.md` · `extraction honesty` · `tier label` · `drift guard` · `G1` · `#520` · `PR #521`
 
 **Impact:** the credibility gap a skeptical reviewer finds first is closed in writing; 6 new guard checks (133 files); zero runtime changes.
+
+---
+
+### v8.43.0 — the views come home ✓ (2026-09-14)
+
+**Minor release — knowledge map increment 3, and the #543 derived-views plan lands.** `get_impact` and `get_architecture_overview` rebuilt the import graph and signature index on **every MCP call**; both are now views over the mtime-cached store. `impactView` reproduces the graph path's BFS exactly — direct at level 1, transitive deeper, depth 0 unlimited, parity pinned by a realpath-normalized set-equality test — and then answers better than the original: affected tests include the store's discovered test↔impl edges (a test covering an impacted file counts even when it never imports it), and route totals count real route nodes where the old code counted every table row in PROJECT_MAP.md.
+
+Two smaller truths surfaced. File nodes now carry a `tokens` estimate and graph-only endpoints get nodes via realpath recovery (`SCHEMA_VERSION` 3), making the store the superset of both producers. And the parity test caught the old path mangling displayed paths whenever the cwd contains a capital letter (`../../t/…` artifacts on macOS tmpdirs — the builder lowercases keys, `path.relative` got the original case); the store's realpath handling is the correct one. Evidence packs deliberately stay on their own path — a schema-stable, hash-anchored artifact re-bases on its own schedule.
+
+**Tags:** `impactView` · `architectureView` · `loadOrBuild` · `BFS parity` · `SCHEMA_VERSION 3` · `#543 increment 3` · `#632` · `PR #633`
+
+**Impact:** zero per-call graph rebuilds on the two heaviest read tools; richer test/route answers from typed edges; honest route counts. 25 fixture + 158 integration tests passing (knowledge-map suite 14 → 19).
 
 ---
 
