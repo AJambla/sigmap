@@ -1,13 +1,13 @@
 ---
 title: Roadmap
-description: SigMap version history and roadmap. From v0.0 to v8.37.0, with recent releases completing the grounded-codegen plan — a realistic §9 ablation (real-symbol corpus, exact-signature grounding, --verbose), a Gemini (AI Studio) provider for the §9 ablation, the init Creation-workflow CLAUDE.md block, scaffold persistence, the LLM A/B hallucination ablation harness, the sigmap create orchestrator and its four guard stages (scaffold, verify-plan, verify-ai-output, review-pr), the conventions command with its full flag set (--conflicts, --inject, --report, --ci, --fix, --update), the grounding benchmark, read-time self-heal, live-index MCP write hooks, the get_callee_signatures MCP tool (exact callee signatures), realistic per-query savings, release-pipeline robustness (bundle integrity + version.json gates, standalone-bundle smoke test), the sigmap gain token-savings dashboard, supply-chain hardening (zero system-shell access), Squeeze input minimization with symbol enrichment, source-of-truth llms.txt, the verify-ai-output Hallucination Guard, and Memory tools (note, status, read_memory MCP tool).
+description: SigMap version history and roadmap. From v0.0 to v8.37.1, with recent releases completing the grounded-codegen plan — a realistic §9 ablation (real-symbol corpus, exact-signature grounding, --verbose), a Gemini (AI Studio) provider for the §9 ablation, the init Creation-workflow CLAUDE.md block, scaffold persistence, the LLM A/B hallucination ablation harness, the sigmap create orchestrator and its four guard stages (scaffold, verify-plan, verify-ai-output, review-pr), the conventions command with its full flag set (--conflicts, --inject, --report, --ci, --fix, --update), the grounding benchmark, read-time self-heal, live-index MCP write hooks, the get_callee_signatures MCP tool (exact callee signatures), realistic per-query savings, release-pipeline robustness (bundle integrity + version.json gates, standalone-bundle smoke test), the sigmap gain token-savings dashboard, supply-chain hardening (zero system-shell access), Squeeze input minimization with symbol enrichment, source-of-truth llms.txt, the verify-ai-output Hallucination Guard, and Memory tools (note, status, read_memory MCP tool).
 head:
   - - meta
     - property: og:title
       content: "SigMap Roadmap — version history and upcoming features"
   - - meta
     - property: og:description
-      content: "176 versions shipped. See what changed in each release and what is coming next."
+      content: "177 versions shipped. See what changed in each release and what is coming next."
   - - meta
     - property: og:url
       content: "https://sigmap.io/guide/roadmap"
@@ -20,7 +20,7 @@ head:
 ---
 # Roadmap
 
-One hundred seventy-six versions shipped. MIT open source from day one.
+One hundred seventy-seven versions shipped. MIT open source from day one.
 
 **Stats:** 96.6% overall token reduction · 78.6% retrieval hit@5 (1.73× measured lift vs single-shot grep) · 98.0% test-discovery F1 · installed-library grounding (JS/TS + Python) · method-level call-graph (JS/TS, Python, Java, Go, Rust, Kotlin, Scala) · 21 MCP tools · 33 languages · 17-language source resolver · 0 npm deps
 
@@ -835,6 +835,18 @@ Two milestones in one release. **`verify-ai-output` Reliable MVP** (#232) grows 
 **Tags:** `KNOWN_LIMITATIONS.md` · `extraction honesty` · `tier label` · `drift guard` · `G1` · `#520` · `PR #521`
 
 **Impact:** the credibility gap a skeptical reviewer finds first is closed in writing; 6 new guard checks (133 files); zero runtime changes.
+
+---
+
+### v8.37.1 — ninety-three percent of everything ✓ (2026-09-14)
+
+**Patch release — one function was 93.6% of the runtime.** A CPU profile of the 15-second self-generate landed almost entirely on the two JSDoc `@returns` regexes in `buildReturnHints`: lazy `[\s\S]*?` gaps free to scan across comment boundaries, so every docblock without a matching declaration tail walked toward end-of-file — O(n²) on docblock-dense files, and the true cause of the CI timeout flakes v8.37.0 had recalibrated around. Rewritten as one linear docblock pass with sticky declaration matches: **15.0s → 0.97s**, CI suite wall-time roughly halved.
+
+The correctness check paid unexpectedly: compared against the old implementation on 947 real files, all 13 divergences were the old pattern's own bug — the unbounded gap could bind a hint across an intervening comment to a later declaration, so `composeHealth` carried a distant `object` tag instead of its own docblock's type and express's `stringify()` was labeled `ServerResponse`. Fixing the performance fixed the data.
+
+**Tags:** `buildReturnHints` · `catastrophic backtracking` · `linear docblock pass` · `#615` · `PR #616`
+
+**Impact:** full self-generate 15.0s → 0.97s (15×); CI test jobs ~3m30s → ~1m40s; 13 mis-bound return hints corrected across real corpora; gate hit@5 identical, baseline re-recorded (MRR −0.001). 23 extractor + 154 integration tests passing.
 
 ---
 

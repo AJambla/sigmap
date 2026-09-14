@@ -1,6 +1,6 @@
 {
-  "version": "8.37.0",
-  "timestamp": "2026-09-14T09:29:12.467Z",
+  "version": "8.37.1",
+  "timestamp": "2026-09-14T10:53:04.611Z",
   "assumptions": {
     "callsPerDay": 10,
     "models": [
@@ -44,7 +44,7 @@
       "repo": "express",
       "language": "JavaScript",
       "rawTokens": 72064,
-      "finalTokens": 1340,
+      "finalTokens": 1336,
       "groundedSymbols": 11,
       "estimatedRawSymbols": 360,
       "darkSymbols": 349,
@@ -59,32 +59,32 @@
         {
           "model": "GPT-4o",
           "rawDayRegular": 1.8016,
-          "sigDayRegular": 0.0335,
-          "savedDayRegular": 1.7681,
+          "sigDayRegular": 0.0334,
+          "savedDayRegular": 1.7682,
           "rawDayCached": 0.9008,
-          "sigDayCached": 0.01675,
-          "savedDayCached": 0.88405,
-          "savedMonthRegular": 53.043
+          "sigDayCached": 0.0167,
+          "savedDayCached": 0.8841,
+          "savedMonthRegular": 53.046
         },
         {
           "model": "Claude Sonnet",
           "rawDayRegular": 2.16192,
-          "sigDayRegular": 0.0402,
-          "savedDayRegular": 2.12172,
+          "sigDayRegular": 0.04007999999999999,
+          "savedDayRegular": 2.1218399999999997,
           "rawDayCached": 0.21619200000000002,
-          "sigDayCached": 0.00402,
-          "savedDayCached": 0.21217200000000003,
-          "savedMonthRegular": 63.651599999999995
+          "sigDayCached": 0.004007999999999999,
+          "savedDayCached": 0.212184,
+          "savedMonthRegular": 63.655199999999994
         },
         {
           "model": "Claude Haiku",
           "rawDayRegular": 0.7206400000000001,
-          "sigDayRegular": 0.0134,
-          "savedDayRegular": 0.7072400000000001,
+          "sigDayRegular": 0.01336,
+          "savedDayRegular": 0.70728,
           "rawDayCached": 0.072064,
-          "sigDayCached": 0.00134,
-          "savedDayCached": 0.07072400000000001,
-          "savedMonthRegular": 21.217200000000002
+          "sigDayCached": 0.001336,
+          "savedDayCached": 0.070728,
+          "savedMonthRegular": 21.2184
         }
       ]
     },
@@ -293,10 +293,10 @@
       "repo": "axios",
       "language": "TypeScript",
       "rawTokens": 72322,
-      "finalTokens": 3421,
-      "groundedSymbols": 59,
+      "finalTokens": 3415,
+      "groundedSymbols": 58,
       "estimatedRawSymbols": 362,
-      "darkSymbols": 303,
+      "darkSymbols": 304,
       "groundingPct": 16,
       "overflowModels": [],
       "filesVisible": 64,
@@ -308,32 +308,32 @@
         {
           "model": "GPT-4o",
           "rawDayRegular": 1.80805,
-          "sigDayRegular": 0.08552499999999999,
-          "savedDayRegular": 1.7225249999999999,
+          "sigDayRegular": 0.085375,
+          "savedDayRegular": 1.722675,
           "rawDayCached": 0.904025,
-          "sigDayCached": 0.042762499999999995,
-          "savedDayCached": 0.8612624999999999,
-          "savedMonthRegular": 51.675749999999994
+          "sigDayCached": 0.0426875,
+          "savedDayCached": 0.8613375,
+          "savedMonthRegular": 51.68025
         },
         {
           "model": "Claude Sonnet",
           "rawDayRegular": 2.16966,
-          "sigDayRegular": 0.10263,
-          "savedDayRegular": 2.06703,
+          "sigDayRegular": 0.10245000000000001,
+          "savedDayRegular": 2.0672099999999998,
           "rawDayCached": 0.216966,
-          "sigDayCached": 0.010263,
-          "savedDayCached": 0.206703,
-          "savedMonthRegular": 62.0109
+          "sigDayCached": 0.010245,
+          "savedDayCached": 0.206721,
+          "savedMonthRegular": 62.016299999999994
         },
         {
           "model": "Claude Haiku",
           "rawDayRegular": 0.72322,
-          "sigDayRegular": 0.03421,
-          "savedDayRegular": 0.68901,
+          "sigDayRegular": 0.03415,
+          "savedDayRegular": 0.68907,
           "rawDayCached": 0.072322,
-          "sigDayCached": 0.0034210000000000004,
-          "savedDayCached": 0.06890099999999999,
-          "savedMonthRegular": 20.6703
+          "sigDayCached": 0.003415,
+          "savedDayCached": 0.068907,
+          "savedMonthRegular": 20.6721
         }
       ]
     },
@@ -798,11 +798,11 @@
       "repo": "svelte",
       "language": "Svelte",
       "rawTokens": 438182,
-      "finalTokens": 21912,
-      "groundedSymbols": 392,
+      "finalTokens": 21856,
+      "groundedSymbols": 378,
       "estimatedRawSymbols": 2191,
-      "darkSymbols": 1799,
-      "groundingPct": 18,
+      "darkSymbols": 1813,
+      "groundingPct": 17,
       "overflowModels": [
         "GPT-4o",
         "Claude Sonnet"
@@ -816,32 +816,32 @@
         {
           "model": "GPT-4o",
           "rawDayRegular": 10.954550000000001,
-          "sigDayRegular": 0.5478000000000001,
-          "savedDayRegular": 10.40675,
+          "sigDayRegular": 0.5464,
+          "savedDayRegular": 10.408150000000001,
           "rawDayCached": 5.477275000000001,
-          "sigDayCached": 0.27390000000000003,
-          "savedDayCached": 5.203375,
-          "savedMonthRegular": 312.20250000000004
+          "sigDayCached": 0.2732,
+          "savedDayCached": 5.2040750000000005,
+          "savedMonthRegular": 312.2445
         },
         {
           "model": "Claude Sonnet",
           "rawDayRegular": 13.14546,
-          "sigDayRegular": 0.65736,
-          "savedDayRegular": 12.4881,
+          "sigDayRegular": 0.65568,
+          "savedDayRegular": 12.48978,
           "rawDayCached": 1.314546,
-          "sigDayCached": 0.065736,
-          "savedDayCached": 1.24881,
-          "savedMonthRegular": 374.643
+          "sigDayCached": 0.065568,
+          "savedDayCached": 1.248978,
+          "savedMonthRegular": 374.6934
         },
         {
           "model": "Claude Haiku",
           "rawDayRegular": 4.38182,
-          "sigDayRegular": 0.21912,
-          "savedDayRegular": 4.1627,
+          "sigDayRegular": 0.21856,
+          "savedDayRegular": 4.16326,
           "rawDayCached": 0.438182,
-          "sigDayCached": 0.021912000000000004,
-          "savedDayCached": 0.41627000000000003,
-          "savedMonthRegular": 124.881
+          "sigDayCached": 0.021856,
+          "savedDayCached": 0.41632600000000003,
+          "savedMonthRegular": 124.8978
         }
       ]
     },
@@ -850,9 +850,9 @@
       "language": "JavaScript",
       "rawTokens": 62784,
       "finalTokens": 3329,
-      "groundedSymbols": 164,
+      "groundedSymbols": 163,
       "estimatedRawSymbols": 314,
-      "darkSymbols": 150,
+      "darkSymbols": 151,
       "groundingPct": 52,
       "overflowModels": [],
       "filesVisible": 29,
@@ -1099,9 +1099,9 @@
   "summary": {
     "repoCount": 21,
     "overflowGPT4oCount": 16,
-    "totalGroundedSymbols": 9476,
-    "totalDarkSymbols": 58078,
+    "totalGroundedSymbols": 9460,
+    "totalDarkSymbols": 58094,
     "totalHiddenFiles": 5186,
-    "gpt4oSavedPerMonth": 9952.97
+    "gpt4oSavedPerMonth": 9953.02
   }
 }
