@@ -10,9 +10,10 @@
  * missing tests, security-sensitive files). Posted as a PR comment, it answers
  * "what changed, what it touches, and what to test" — without an LLM.
  *
- * Built entirely from shipped zero-dep modules (reviewPr, graph/impact,
- * evidence/pack, extractors/dispatch). Carries NO wall-clock timestamp, so the
- * report is byte-stable given a fixed tree — diff-friendly as a comment.
+ * Built entirely from shipped zero-dep modules (reviewPr, map/knowledge-map,
+ * graph/impact, evidence/pack, extractors/dispatch). Carries NO wall-clock
+ * timestamp, so the report is byte-stable given a fixed tree — diff-friendly
+ * as a comment.
  */
 
 const fs = require('fs');
@@ -39,16 +40,34 @@ function buildPrEvidence(changedFiles, cwd, opts = {}) {
   try { ({ riskLabelFor, findRelatedTests } = require('../evidence/pack')); } catch (_) { /* defaults */ }
   const { extractFile, langFor } = require('../extractors/dispatch');
 
-  let allFiles = [];
-  try { const { buildSigIndex } = require('../retrieval/ranker'); allFiles = [...buildSigIndex(cwd).keys()]; } catch (_) { /* no index */ }
-
   const depth = Number.isFinite(opts.depth) ? opts.depth : 2;
   const srcPaths = files.filter((f) => f.status !== 'D' && langFor(f.path)).map((f) => f.path);
+
+  // Blast radius + related tests are views over the knowledge-map store
+  // (#635): cached typed edges instead of rebuilding the signature index and
+  // import graph per call. The legacy rebuild remains the fallback.
   let impactByFile = new Map();
+  let storeTests = null;
   try {
-    const { analyzeImpact } = require('../graph/impact');
-    impactByFile = new Map(analyzeImpact(srcPaths, cwd, { depth }).map((r) => [r.file, r.impact]));
-  } catch (_) { /* graph optional */ }
+    const km = require('../map/knowledge-map');
+    const map = km.loadOrBuild(cwd);
+    storeTests = km.relatedTestsView(map, files.filter((f) => f.status !== 'D').map((f) => f.path));
+    impactByFile = new Map(srcPaths.map((p) => [p, km.impactView(map, p, depth)]));
+  } catch (_) {
+    try {
+      const { analyzeImpact } = require('../graph/impact');
+      impactByFile = new Map(analyzeImpact(srcPaths, cwd, { depth }).map((r) => [r.file, r.impact]));
+    } catch (_) { /* graph optional */ }
+  }
+
+  let allFiles = null; // built lazily, only when the store missed a file
+  const relatedFor = (p) => {
+    if (storeTests && storeTests.has(p)) return storeTests.get(p);
+    if (allFiles === null) {
+      try { const { buildSigIndex } = require('../retrieval/ranker'); allFiles = [...buildSigIndex(cwd).keys()]; } catch (_) { allFiles = []; }
+    }
+    return findRelatedTests(p, allFiles);
+  };
 
   // GR2: method-level blast radius per changed file (reviewPr already computed
   // it when the call graph resolved — reuse, don't rebuild the graph).
@@ -76,7 +95,7 @@ function buildPrEvidence(changedFiles, cwd, opts = {}) {
         tests: impact.tests || [],
         routes: impact.routes || [],
       } : null,
-      relatedTests: deleted ? [] : findRelatedTests(f.path, allFiles),
+      relatedTests: deleted ? [] : relatedFor(f.path),
     };
   });
 

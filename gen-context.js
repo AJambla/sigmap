@@ -5079,6 +5079,7 @@ __factories["./src/evidence/pack"] = function(module, exports) {
    *   - retrieval/ranker        → ranked files, scores, signals
    *   - extractors/line-anchor  → `:start-end` suffix parsing (sourceLines)
    *   - security/scanner        → secret redaction of symbols
+   *   - map/knowledge-map       → relatedTests view over the store's tests edges
    *   - crypto (node builtin)    → sha256 grounding hash
    *
    * Determinism: the pack carries NO wall-clock timestamp. Given an unchanged
@@ -5264,6 +5265,7 @@ __factories["./src/evidence/pack"] = function(module, exports) {
    * @param {number} [opts.budget=6000]      - token budget for included files
    * @param {number} [opts.top=12]           - max ranked files to consider
    * @param {Map<string,string[]>} [opts.sigIndex] - pre-built index (else built from cwd)
+   * @param {object} [opts.map]             - pre-loaded knowledge map (else loaded from cwd)
    * @returns {object} Evidence Pack v1
    */
   function buildEvidencePack(query, cwd, opts = {}) {
@@ -5277,6 +5279,19 @@ __factories["./src/evidence/pack"] = function(module, exports) {
     const ranked = rank(query, sigIndex, { topK: top, cwd })
       .filter((r) => r.score > 0 || ranked0Empty(query));
     const maxScore = ranked.reduce((m, r) => Math.max(m, r.score), 0);
+
+    // Related tests are a view over the knowledge-map store (#635) — same bytes
+    // as per-file discovery (the store's tests edges come from findRelatedTests
+    // over the same index). Injected-index callers keep the legacy path: loading
+    // the store would build and cache under an arbitrary cwd.
+    let kmap = opts.map || null;
+    if (!kmap && !(opts.sigIndex instanceof Map)) {
+      try { kmap = __require('./src/map/knowledge-map').loadOrBuild(cwd); } catch (_) { kmap = null; }
+    }
+    let storeTests = null;
+    if (kmap) {
+      try { storeTests = __require('./src/map/knowledge-map').relatedTestsView(kmap, ranked.map((r) => r.file)); } catch (_) { storeTests = null; }
+    }
 
     // Greedy budget fill in rank order; the remainder is reported as dropped.
     const files = [];
@@ -5307,7 +5322,7 @@ __factories["./src/evidence/pack"] = function(module, exports) {
         reason: reasonFor(r.signals),
         confidence: maxScore > 0 ? Math.round((r.score / maxScore) * 100) / 100 : 0,
         sourceLines,
-        relatedTests: findRelatedTests(r.file, allFiles),
+        relatedTests: storeTests && storeTests.has(r.file) ? storeTests.get(r.file) : findRelatedTests(r.file, allFiles),
         riskLabel: riskFactors[0],
         riskFactors,
       });
@@ -15868,12 +15883,20 @@ __factories["./src/map/knowledge-map"] = function(module, exports) {
     const relOfGraphKey = (abs) => {
       const hit = relOf(abs);
       if (hit) return hit;
+      const key = String(abs);
       try {
-        const real = fs.realpathSync(String(abs));
+        const real = fs.realpathSync(key);
         if (real.toLowerCase().startsWith(cwd.toLowerCase() + path.sep)) {
           return real.slice(cwd.length + 1).replace(/\\/g, '/');
         }
-      } catch (_) {}
+      } catch (_) {
+        // Graph keys are lowercased (graphKey), so on a case-sensitive fs the
+        // realpath probe fails whenever the true path has uppercase — prefix-
+        // match the lowercased cwd instead of dropping the file (#635/#636 CI).
+        if (key.toLowerCase().startsWith(cwd.toLowerCase() + path.sep)) {
+          return key.slice(cwd.length + 1).replace(/\\/g, '/');
+        }
+      }
       return null;
     };
     const importGraph = buildFromCwd(cwd);
@@ -16145,6 +16168,34 @@ __factories["./src/map/knowledge-map"] = function(module, exports) {
     return { env: id, inExample: !!node.inExample, readers };
   }
 
+  /**
+   * Related tests per file, from the store's `tests` edges (test → impl) — the
+   * evidence view (#635). One edge pass for a whole file list; keys are the
+   * caller's original path strings, and files absent from the store are omitted
+   * so callers can fall back to per-file discovery.
+   * @param {object} map
+   * @param {string[]} rels
+   * @returns {Map<string, string[]>} input path → sorted test rel paths
+   */
+  function relatedTestsView(map, rels) {
+    const want = new Map(); // "file:<rel>" → original input string
+    for (const r of rels || []) {
+      const orig = String(r);
+      want.set(`file:${orig.replace(/\\/g, '/')}`, orig);
+    }
+    const out = new Map();
+    for (const n of map.nodes) {
+      if (want.has(n.id)) out.set(want.get(n.id), []);
+    }
+    for (const e of map.edges) {
+      if (e.kind !== 'tests') continue;
+      const orig = want.get(e.to);
+      if (orig !== undefined && out.has(orig)) out.get(orig).push(e.from.slice(5));
+    }
+    for (const list of out.values()) list.sort();
+    return out;
+  }
+
   /** Typed neighbors of one file node. */
   function fileNeighbors(map, rel) {
     const id = `file:${rel.replace(/\\/g, '/')}`;
@@ -16169,7 +16220,7 @@ __factories["./src/map/knowledge-map"] = function(module, exports) {
     return out;
   }
 
-  module.exports = { buildKnowledgeMap, loadOrBuild, upgradeImpact, fileNeighbors, envReaders, impactView, architectureView, canonicalJson, SCHEMA_VERSION };
+  module.exports = { buildKnowledgeMap, loadOrBuild, upgradeImpact, fileNeighbors, envReaders, impactView, architectureView, relatedTestsView, canonicalJson, SCHEMA_VERSION };
   
 };
 
@@ -19998,9 +20049,10 @@ __factories["./src/review/pr-evidence"] = function(module, exports) {
    * missing tests, security-sensitive files). Posted as a PR comment, it answers
    * "what changed, what it touches, and what to test" — without an LLM.
    *
-   * Built entirely from shipped zero-dep modules (reviewPr, graph/impact,
-   * evidence/pack, extractors/dispatch). Carries NO wall-clock timestamp, so the
-   * report is byte-stable given a fixed tree — diff-friendly as a comment.
+   * Built entirely from shipped zero-dep modules (reviewPr, map/knowledge-map,
+   * graph/impact, evidence/pack, extractors/dispatch). Carries NO wall-clock
+   * timestamp, so the report is byte-stable given a fixed tree — diff-friendly
+   * as a comment.
    */
 
   const fs = require('fs');
@@ -20027,16 +20079,34 @@ __factories["./src/review/pr-evidence"] = function(module, exports) {
     try { ({ riskLabelFor, findRelatedTests } = __require('./src/evidence/pack')); } catch (_) { /* defaults */ }
     const { extractFile, langFor } = __require('./src/extractors/dispatch');
 
-    let allFiles = [];
-    try { const { buildSigIndex } = __require('./src/retrieval/ranker'); allFiles = [...buildSigIndex(cwd).keys()]; } catch (_) { /* no index */ }
-
     const depth = Number.isFinite(opts.depth) ? opts.depth : 2;
     const srcPaths = files.filter((f) => f.status !== 'D' && langFor(f.path)).map((f) => f.path);
+
+    // Blast radius + related tests are views over the knowledge-map store
+    // (#635): cached typed edges instead of rebuilding the signature index and
+    // import graph per call. The legacy rebuild remains the fallback.
     let impactByFile = new Map();
+    let storeTests = null;
     try {
-      const { analyzeImpact } = __require('./src/graph/impact');
-      impactByFile = new Map(analyzeImpact(srcPaths, cwd, { depth }).map((r) => [r.file, r.impact]));
-    } catch (_) { /* graph optional */ }
+      const km = __require('./src/map/knowledge-map');
+      const map = km.loadOrBuild(cwd);
+      storeTests = km.relatedTestsView(map, files.filter((f) => f.status !== 'D').map((f) => f.path));
+      impactByFile = new Map(srcPaths.map((p) => [p, km.impactView(map, p, depth)]));
+    } catch (_) {
+      try {
+        const { analyzeImpact } = __require('./src/graph/impact');
+        impactByFile = new Map(analyzeImpact(srcPaths, cwd, { depth }).map((r) => [r.file, r.impact]));
+      } catch (_) { /* graph optional */ }
+    }
+
+    let allFiles = null; // built lazily, only when the store missed a file
+    const relatedFor = (p) => {
+      if (storeTests && storeTests.has(p)) return storeTests.get(p);
+      if (allFiles === null) {
+        try { const { buildSigIndex } = __require('./src/retrieval/ranker'); allFiles = [...buildSigIndex(cwd).keys()]; } catch (_) { allFiles = []; }
+      }
+      return findRelatedTests(p, allFiles);
+    };
 
     // GR2: method-level blast radius per changed file (reviewPr already computed
     // it when the call graph resolved — reuse, don't rebuild the graph).
@@ -20064,7 +20134,7 @@ __factories["./src/review/pr-evidence"] = function(module, exports) {
           tests: impact.tests || [],
           routes: impact.routes || [],
         } : null,
-        relatedTests: deleted ? [] : findRelatedTests(f.path, allFiles),
+        relatedTests: deleted ? [] : relatedFor(f.path),
       };
     });
 
