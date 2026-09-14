@@ -35,6 +35,9 @@ To ensure proper attribution:
 
 We welcome contributions! See [Contributing](./docs/CONTRIBUTING.md) for guidelines.
 
+### Recent Contributors (v8.39.0)
+- **@manojmallick** — feat(extractors): web-component surface — Lit tags + reactive fields, Angular selectors + inputs/outputs, vanilla customElements.define, with byte-identity for non-component code verified across 1,291 real files (#537, PR #621)
+
 ### Recent Contributors (v8.38.0)
 - **@manojmallick** — feat(scip): read-only SCIP import behind exactness.scip — zero-dep protobuf reader, compiler-typed signatures from CI-produced index.scip, per-file never-lose-vs-regex guard; +590% effective signatures on zod, completing the #542 host-toolchain ladder (#618, PR #619)
 

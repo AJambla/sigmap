@@ -3,6 +3,7 @@
 const { lineAt, withAnchor } = require('./line-anchor');
 const { capWithNotice, capMembersWithNotice } = require('../util/truncate');
 const { stripComments, maskCode, readBalanced } = require('./scan');
+const { scanComponentMarkers, markersForClass, componentMembers } = require('./component-surface');
 
 // Class bodies are scanned to this many characters — guard against
 // pathological input only; the old 4KB window silently hid members (#576).
@@ -53,15 +54,31 @@ function extract(src) {
   };
 
   // Classes
-  const classRegex = /^(export\s+(?:default\s+)?)?class\s+(\w+)(?:\s+extends\s+[\w.]+)?\s*\{/gm;
+  const classRegex = /^(export\s+(?:default\s+)?)?class\s+(\w+)(?:\s+extends\s+([\w.]+))?\s*\{/gm;
+  // Web-component surface (#537) — gated on detection, see typescript.js.
+  const compMarkers = scanComponentMarkers(stripped);
   for (const m of stripped.matchAll(classRegex)) {
     const prefix = m[1] ? m[1].trim() + ' ' : '';
     const bodyStart = m.index + m[0].length;
     const blockEnd = blockEndIdx(bodyStart);
-    sigs.push(`${prefix}class ${m[2]}`);
-    anchors.push([lineAt(stripped, m.index), lineAt(stripped, blockEnd)]);
+    const marker = markersForClass(compMarkers.decorated, stripped, m.index, m[0]);
+    const definedTag = compMarkers.defined.get(m[2]);
+    const isComponent = !!(marker || definedTag);
+    const base = isComponent && m[3] ? ` extends ${m[3]}` : '';
+    sigs.push(`${prefix}class ${m[2]}${base}`);
+    const classStartLn = lineAt(stripped, m.index);
+    anchors.push([classStartLn, lineAt(stripped, blockEnd)]);
     const block = stripped.slice(bodyStart, blockEnd);
     const maskedBlock = masked.slice(bodyStart, blockEnd);
+    if (isComponent) {
+      const tag = (marker && marker.tag) || definedTag;
+      if (tag) { sigs.push(`  custom element <${tag}>`); anchors.push([classStartLn, classStartLn]); }
+      else if (marker && marker.selector) { sigs.push(`  selector '${marker.selector}'`); anchors.push([classStartLn, classStartLn]); }
+      for (const cm of componentMembers(block)) {
+        sigs.push(`  ${cm.text}`);
+        anchors.push([lineAt(stripped, bodyStart + cm.start), lineAt(stripped, bodyStart + cm.end)]);
+      }
+    }
     for (const meth of extractClassMembers(block, maskedBlock, returnHints)) {
       sigs.push(`  ${meth.text}`);
       anchors.push([lineAt(stripped, bodyStart + meth.start), lineAt(stripped, bodyStart + meth.end)]);
