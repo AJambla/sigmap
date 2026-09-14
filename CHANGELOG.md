@@ -10,6 +10,13 @@ Format: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [8.38.0] — 2026-09-14
+
+### Added
+- **T4: read-only SCIP import with a quality guard** (#618, PR #619) — the final rung of the #542 host-toolchain ladder; every checkbox on that epic is now done. `exactness: { scip: true }` reads a CI-produced `index.scip` at the repo root as a signature source: compiler-typed signatures free at extraction time, import only. A ~100-line **zero-dep protobuf wire reader** (varints + length-delimited, unknown fields skipped by wire type) parses the index — field numbers grounded from the scip bindings vendored by scip-typescript and validated against a real index that tool produced, never guessed. `documentation[0]` fences carry the compiler's own rendering (`function fetchUser<T extends { id: string; }>(id: string, opts?: ...)` — richer than the regex tier or the T2 AST walker), `documentation[1]` becomes the doc hint, definition occurrences give start anchors and `enclosing_range` real end lines, and `Metadata.tool_info` names the acceptance-gated header label (`toolchain=scip:<tool>@<version>`, composing with the T2/T3 labels). Same per-file quality guard as the LSP tier — a sparse or stale index entry can never lose surface vs the regex floor. Measured on zod with a real scip-typescript index (11 MB, parsed once in ~0.4s): 228 of 286 files served, 0 guard refusals, 58 uncovered files fell back silently — **effective signatures 1,185 → 8,173 (+590%)**. The ladder on one corpus: regex 1,185 · T2 AST 1,831 · T4 SCIP 8,173. Hermetic tests write their own minimal valid index with a ~30-line wire writer, so CI needs no SCIP tooling
+
+---
+
 ## [8.37.1] — 2026-09-14
 
 ### Fixed

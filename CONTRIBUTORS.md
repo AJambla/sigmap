@@ -35,6 +35,9 @@ To ensure proper attribution:
 
 We welcome contributions! See [Contributing](./docs/CONTRIBUTING.md) for guidelines.
 
+### Recent Contributors (v8.38.0)
+- **@manojmallick** — feat(scip): read-only SCIP import behind exactness.scip — zero-dep protobuf reader, compiler-typed signatures from CI-produced index.scip, per-file never-lose-vs-regex guard; +590% effective signatures on zod, completing the #542 host-toolchain ladder (#618, PR #619)
+
 ### Recent Contributors (v8.37.1)
 - **@manojmallick** — perf(extractors): linear buildReturnHints — full generate 15s → 0.97s, CI suite wall-time halved, and 13 silently mis-bound @returns hints corrected along the way (#615, PR #616)
 
