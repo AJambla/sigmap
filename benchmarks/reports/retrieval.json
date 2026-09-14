@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-14T20:45:52.485Z",
+  "generated": "2026-09-14T21:29:13.457Z",
   "repos": [
     {
       "repo": "express",
@@ -209,12 +209,12 @@
       "sigCount": 78,
       "tasks": 8,
       "hitAt5": 1,
-      "mrr": 0.844,
+      "mrr": 0.938,
       "randomBaseline": 0.047,
       "improvement": 21.4,
       "tiers": {
-        "correct": 6,
-        "partial": 2,
+        "correct": 7,
+        "partial": 1,
         "wrong": 0
       },
       "taskDetails": [
@@ -237,9 +237,9 @@
             "binding/form.go",
             "binding/binding.go"
           ],
-          "top1": "mode.go",
-          "firstHitRank": 4,
-          "tier": "partial"
+          "top1": "binding/form.go",
+          "firstHitRank": 1,
+          "tier": "correct"
         },
         {
           "id": "gin-t003",

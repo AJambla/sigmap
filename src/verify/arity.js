@@ -14,8 +14,9 @@
 const path = require('path');
 const { maskCode, readBalanced } = require('../extractors/scan');
 
-// Files whose signature params are exact (JS/TS via scan.js, Python via AST).
-const EXACT_PARAM_EXTS = new Set(['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.py']);
+// Files whose signature params are exact (JS/TS via scan.js, Python via AST,
+// Go via the balanced scanner — G4 #643).
+const EXACT_PARAM_EXTS = new Set(['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.py', '.go']);
 
 const CTRL_KEYWORDS = new Set([
   'if', 'for', 'while', 'switch', 'catch', 'return', 'typeof', 'await',
@@ -29,6 +30,9 @@ const CALLABLE_RES = [
   /^(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(/,
   /^(?:export\s+)?const\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s+)?\(/,
   /^(?:async\s+)?def\s+([A-Za-z_]\w*)\s*\(/,
+  // Go: plain top-level funcs only — receiver methods (`func (r) Name(`) are
+  // called dotted in answers, and dotted calls are never flagged.
+  /^func\s+([A-Za-z_]\w*)\s*\(/,
 ];
 
 /** Strip the `  :start-end` anchor and `  # hint` tail from a sig line. */
@@ -66,6 +70,21 @@ function parseParams(paramText) {
     const p = piece.raw.trim();
     if (!p) continue;
     if (/^(\.\.\.|\*)/.test(p)) { variadic = true; continue; }
+    // Go variadics put `...` on the TYPE (`nums ...int`) — a depth-0 `...`
+    // anywhere in the piece marks the signature variadic. A nested func
+    // param's `...` (`f func(a ...int)`) sits at depth > 0 and never leaks.
+    {
+      let dd = 0;
+      let goVariadic = false;
+      const pm0 = piece.masked;
+      for (let i = 0; i < pm0.length; i++) {
+        const ch = pm0[i];
+        if (ch === '(' || ch === '[' || ch === '{') dd++;
+        else if (ch === ')' || ch === ']' || ch === '}') dd--;
+        else if (ch === '.' && dd === 0 && pm0[i + 1] === '.' && pm0[i + 2] === '.') { goVariadic = true; break; }
+      }
+      if (goVariadic) { variadic = true; continue; }
+    }
     max++;
     // Optional: a top-level `=` default (scan the masked piece at depth 0) or
     // a `?`-suffixed name (TS optional, survives type stripping as `x?`).

@@ -10,6 +10,13 @@ Format: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [8.46.0] — 2026-09-14
+
+### Added
+- **Go extractor on the balanced scanner + Go joins arity-checked verification (G4 increment 2)** (#643, PR #644) — the Go extractor still parsed with `[^)]*` and a hand-rolled comment strip: a nested func-typed param (`func Apply(f func(int) error, n int)`) truncated at the first `)`, a generic function (`func Map[T, U any](…)`) was missed entirely, a generic receiver (`func (s *Stack[T]) Push(…)`) failed the receiver regex, and a `//` inside a string corrupted the rest of the line. It now runs on the shared `scan.js` core (the v8.27.0 JS/TS precedent): string-aware comment stripping, `readBalanced` parameter capture (nested func types, multiline lists), type parameters on funcs **and** types, generic receivers, and balanced interface-method params — existing fixture output stays byte-identical, nine new signature shapes are pinned. With Go params exact, `.go` joins `EXACT_PARAM_EXTS`: plain top-level funcs enter the D1 arity index (receiver methods stay out — dotted calls are never flagged), `parseParams` learns Go type-variadics via a depth-0 `...` scan (strictly conservative: variadic only suppresses flags), and ` ```go `/` ```golang ` blocks pass the guard's arity filter. Retrieval gate PASS (67/90 tasks, floor 70%, 4 tasks of headroom)
+
+---
+
 ## [8.45.0] — 2026-09-14
 
 ### Added

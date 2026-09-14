@@ -11,20 +11,20 @@ ranking keeps the relevant context in scope (cutting tokens ~97% as a side
 effect), with no LLM calls, embeddings, or vector database. Works with Claude,
 Cursor, GitHub Copilot, Aider, Windsurf, local LLMs, and MCP.
 
-# Version: 8.45.0 | Benchmark: sigmap-v8.45-main (2026-09-14)
+# Version: 8.46.0 | Benchmark: sigmap-v8.46-main (2026-09-14)
 # Source: auto-generated from package.json, version.json, benchmarks/latest.json, src/mcp/tools.js, src/config/defaults.js
 # Regenerate: npm run generate:llms   |   Validate: npm run validate:llms
 
 ---
 
-## Core metrics (benchmark: sigmap-v8.45-main, 2026-09-14)
+## Core metrics (benchmark: sigmap-v8.46-main, 2026-09-14)
 
 | Metric | Without SigMap | With SigMap |
 |--------|----------------|-------------|
 | Retrieval hit@5 | 44.0% (single-shot grep) | 78.6% (1.73× lift) |
 | Token reduction | — | 96.6% average |
-| Task-success proxy (modeled) | — | 61.0% |
-| Prompts per task | 2.84 | 1.61 (43.4% fewer) |
+| Task-success proxy (modeled) | — | 61.9% |
+| Prompts per task | 2.84 | 1.6 (43.7% fewer) |
 | Supported languages | — | 35 |
 | MCP tools | — | 22 |
 | npm runtime dependencies | — | 0 |
