@@ -35,6 +35,9 @@ To ensure proper attribution:
 
 We welcome contributions! See [Contributing](./docs/CONTRIBUTING.md) for guidelines.
 
+### Recent Contributors (v8.45.0)
+- **@manojmallick** — feat(judge): the judge-convergence tranche — J1 structural claim grounding via the verify engine (`checks` summary field, repo + installed-lib symbols ground at the judge surface, cwd-less behavior byte-identical) and J2 configurable learning thresholds with mixture-corpus-derived, drift-guarded defaults (#638, PR #639; #640, PR #641)
+
 ### Recent Contributors (v8.44.0)
 - **@manojmallick** — feat(evidence): knowledge map increment 4 — evidence packs re-based as views over the store: `relatedTestsView` over tests edges, byte-identical `buildEvidencePack` (contextHash parity pinned), `buildPrEvidence` blast + related tests from the cached store without per-call index/graph rebuilds; plus the case-sensitive-fs fix keeping graph-only file nodes in context-less stores (#635, PR #636)
 

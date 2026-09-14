@@ -107,10 +107,13 @@ sigmap verify-ai-output answer.md --json
     "symbolsIndexed": 1842,
     "withSuggestion": 1,
     "librariesIndexed": 12,
-    "libraries": [{ "name": "express", "version": "4.19.2", "symbols": 41, "typed": true }]
+    "libraries": [{ "name": "express", "version": "4.19.2", "symbols": 41, "typed": true }],
+    "checks": { "symbols": true, "files": true, "relativeImports": true, "bareImports": true, "scripts": true }
   }
 }
 ```
+
+`checks` (v8.45.0, J1) states which claim classes actually ran — `symbols` is `false` when no signature index exists, `bareImports`/`scripts` when there is no `package.json` — so a consumer never mistakes "not flagged" for "verified". [`sigmap judge`](/guide/cli#judge) keys its structural claim grounding off this field.
 
 ### HTML report
 
