@@ -2,3 +2,14 @@ class UserService  :4-22
   getUser(String id) → User  :11-11
   createUser(CreateUserDto dto) → User  :15-15
   validateUser(User user) → void  :19-19
+interface Repository  :24-28
+  findById(ID id) → T  :25-25
+  save(T entity) → T  :26-26
+  delete(ID id) → void  :27-27
+record Point(int x, int y)  :30-34
+  dist(Point o) → double  :31-31
+class Shape  :36-41
+  url() → String  :37-37
+class Validators  :43-50
+  max(List<T> xs) → T  :44-44
+  check(@Size(max = 10) String name, Map<String, List<String>> index) → void  :48-48
