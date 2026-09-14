@@ -218,10 +218,186 @@ test('sigmap history → exits 0', () => {
   assert.strictEqual(r.status, 0, `exit ${r.status}\n${r.stderr}`);
 });
 
+// ── J2: configurable learning thresholds (#638) ──────────────────────────────
+
+const { DEFAULTS } = require('../../../src/config/defaults');
+
+/** Temp cwd with one real source file and a context that names it in a heading. */
+function learnFixture() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sigmap-judge-band-'));
+  fs.mkdirSync(path.join(dir, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'src', 'a.js'), 'module.exports = 1;\n');
+  return dir;
+}
+
+// 13. loader merges a partial judge section over defaults
+test('config: partial judge section merges over defaults', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sigmap-judge-cfg-'));
+  fs.writeFileSync(path.join(dir, 'gen-context.config.json'),
+    JSON.stringify({ judge: { learnBoostAbove: 0.9 } }));
+  const cfg = loadConfig(dir);
+  assert.strictEqual(cfg.judge.learnBoostAbove, 0.9, 'user override lost');
+  assert.strictEqual(cfg.judge.learnPenalizeBelow, DEFAULTS.judge.learnPenalizeBelow, 'sibling default lost');
+  assert.strictEqual(cfg.judge.threshold, DEFAULTS.judge.threshold, 'threshold default lost');
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+// 14. engine respects a configured band: the same score flips boost → no-op
+test('judge --learn: configured band flips boost to no-op at the same score', () => {
+  const dir = learnFixture();
+  const context = '## src/a.js\nfunction rank sorts results relevance score tokens';
+  const response = 'rank sorts results relevance score tokens'; // fully grounded → score 1.0
+  const def = judge(response, context, { learn: true, cwd: dir });
+  assert.strictEqual(def.learning.action, 'boost', `default band should boost: ${JSON.stringify(def.learning)}`);
+  const moved = judge(response, context, { learn: true, cwd: dir, learnBoostAbove: 1.0 });
+  assert.strictEqual(moved.learning.action, 'none', `band 1.0 must not boost a 1.0 score: ${JSON.stringify(moved.learning)}`);
+  assert.ok(moved.learning.reason.includes('(0.4-1)'), `no-op reason must report the active band: ${moved.learning.reason}`);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+// 15. engine respects penalizeBelow: zero score stops penalizing when the band is 0
+test('judge --learn: penalizeBelow 0 turns a penalize into a no-op', () => {
+  const dir = learnFixture();
+  const context = '## src/a.js\nfunction rank sorts results relevance score tokens';
+  const response = 'weather paris sunny warm holiday'; // score 0
+  const def = judge(response, context, { learn: true, cwd: dir });
+  assert.strictEqual(def.learning.action, 'penalize', `default band should penalize: ${JSON.stringify(def.learning)}`);
+  const moved = judge(response, context, { learn: true, cwd: dir, learnPenalizeBelow: 0 });
+  assert.strictEqual(moved.learning.action, 'none', `band 0 must not penalize a 0 score: ${JSON.stringify(moved.learning)}`);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+// 16. CLI: judge.threshold from config flips the verdict; --threshold still wins
+test('sigmap judge: config threshold applies, --threshold flag overrides it', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sigmap-judge-cli-'));
+  fs.writeFileSync(path.join(dir, 'gen-context.config.json'),
+    JSON.stringify({ judge: { threshold: 0.99 } }));
+  const strict = spawnSync(process.execPath, [SCRIPT, 'judge', '--response', respFile, '--context', ctxFile, '--json'], {
+    encoding: 'utf8', cwd: dir, timeout: 120000,
+  });
+  assert.strictEqual(strict.status, 1, `config threshold 0.99 should fail a grounded answer, got exit ${strict.status}: ${strict.stdout}`);
+  const flagged = spawnSync(process.execPath, [SCRIPT, 'judge', '--response', respFile, '--context', ctxFile, '--threshold', '0.25', '--json'], {
+    encoding: 'utf8', cwd: dir, timeout: 120000,
+  });
+  assert.strictEqual(flagged.status, 0, `--threshold 0.25 must override config 0.99, got exit ${flagged.status}: ${flagged.stdout}`);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+// 17. Derivation guard (#638): the shipped band separates measured mixtures.
+//     Answers built from the repo's own vocabulary at 80% grounded tokens must
+//     land in the boost band; at 30% grounded they must land in the penalize
+//     band. Pins band ordering so a config edit can't silently invert it.
+test('judge band: derived defaults separate 80%/30% grounded mixtures', () => {
+  const src = fs.readFileSync(path.join(ROOT, 'src/judge/judge-engine.js'), 'utf8');
+  // ≥7-char tokens only: the engine's STOP words are all ≤6 chars, so none of
+  // the mixture is stop-filtered and the constructed ratios stay exact.
+  const vocab = [...new Set((src.toLowerCase().match(/\b[a-z][a-z0-9_]{6,}\b/g) || []))].slice(0, 40);
+  assert.ok(vocab.length === 40, `expected 40 vocab tokens, got ${vocab.length}`);
+  const context = vocab.join(' ');
+  const novel = Array.from({ length: 14 }, (_, i) => `zzqxword${i}`);
+  const boostMix = vocab.slice(0, 16).concat(novel.slice(0, 4)).join(' ');    // 16/20 = 0.8
+  const penalizeMix = vocab.slice(0, 6).concat(novel).join(' ');              // 6/20 = 0.3
+  const hi = groundedness(boostMix, context);
+  const lo = groundedness(penalizeMix, context);
+  const { learnBoostAbove, learnPenalizeBelow } = DEFAULTS.judge;
+  assert.ok(hi > learnBoostAbove, `80% mixture (${hi}) must exceed learnBoostAbove (${learnBoostAbove})`);
+  assert.ok(lo < learnPenalizeBelow, `30% mixture (${lo}) must sit below learnPenalizeBelow (${learnPenalizeBelow})`);
+  assert.ok(learnPenalizeBelow > 0 && learnPenalizeBelow < learnBoostAbove && learnBoostAbove < 1,
+    `band ordering violated: 0 < ${learnPenalizeBelow} < ${learnBoostAbove} < 1`);
+});
+
+// ── J1: structural claim grounding via the verify engine (#640) ──────────────
+
+/** Fixture repo with an indexed symbol and an installed, typed direct dep. */
+function structuralFixture() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sigmap-judge-struct-'));
+  fs.mkdirSync(path.join(dir, 'src'), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'node_modules', 'leftpad'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({
+    name: 'judge-fixture', version: '1.0.0', dependencies: { leftpad: '^9.1.0' },
+  }));
+  fs.writeFileSync(path.join(dir, 'node_modules', 'leftpad', 'package.json'),
+    JSON.stringify({ name: 'leftpad', version: '9.1.4', main: 'index.js', types: 'index.d.ts' }));
+  fs.writeFileSync(path.join(dir, 'node_modules', 'leftpad', 'index.js'), 'module.exports = (s) => s;\n');
+  fs.writeFileSync(path.join(dir, 'node_modules', 'leftpad', 'index.d.ts'),
+    'export declare function leftpad(s: string, n: number): string;\n');
+  fs.writeFileSync(path.join(dir, 'src', 'pad.js'),
+    "const leftpad = require('leftpad');\nfunction padded(s) {\n  return leftpad(s, 8);\n}\nmodule.exports = { padded };\n");
+  fs.writeFileSync(path.join(dir, 'gen-context.config.json'), JSON.stringify({ srcDirs: ['src'], changes: false }));
+  spawnSync(process.execPath, [SCRIPT], { cwd: dir, encoding: 'utf8', timeout: 120000 });
+  return dir;
+}
+
+const dirS = structuralFixture();
+const unrelatedCtx = 'completely unrelated prose about nothing in particular';
+
+// 18. repo symbol absent from context grounds structurally; fabricated fails
+test('claimGrounding: repo symbol grounds via the index; fabricated still fails (#640)', () => {
+  const real = claimGrounding('Call `padded()` to pad.', unrelatedCtx, { cwd: dirS });
+  assert.strictEqual(real.structural, true, 'structural pass did not run');
+  assert.strictEqual(real.grounded, 1, JSON.stringify(real));
+  const fake = claimGrounding('Call `fabricatedQuantumFn()` to pad.', unrelatedCtx, { cwd: dirS });
+  assert.strictEqual(fake.ungrounded.length, 1, JSON.stringify(fake));
+});
+
+// 19. installed-lib symbol, declared import, and real file ground; fakes fail
+test('claimGrounding: lib symbol + declared import + real file ground; fakes fail (#640)', () => {
+  const lib = claimGrounding('Use `leftpad()` here.', unrelatedCtx, { cwd: dirS });
+  assert.strictEqual(lib.grounded, 1, `lib symbol should ground via the .d.ts index: ${JSON.stringify(lib)}`);
+  const imp = claimGrounding("import leftpad from 'leftpad'", unrelatedCtx, { cwd: dirS });
+  assert.strictEqual(imp.ungrounded.length, 0, `declared import should ground: ${JSON.stringify(imp)}`);
+  const bad = claimGrounding("import x from 'not-a-real-dep-zzqx'", unrelatedCtx, { cwd: dirS });
+  assert.ok(bad.ungrounded.some((c) => c.kind === 'import'), JSON.stringify(bad));
+  const file = claimGrounding('See src/pad.js for the implementation.', unrelatedCtx, { cwd: dirS });
+  assert.strictEqual(file.grounded, 1, `real file should ground: ${JSON.stringify(file)}`);
+  const nofile = claimGrounding('See src/nonexistent-thing.js for the implementation.', unrelatedCtx, { cwd: dirS });
+  assert.ok(nofile.ungrounded.some((c) => c.kind === 'file'), JSON.stringify(nofile));
+});
+
+// 20. verify summary exposes which claim classes ran
+test('verify summary.checks reports which claim classes ran (#640)', () => {
+  const { verify } = require('../../../src/verify/hallucination-guard');
+  const withIndex = verify('nothing here', dirS);
+  assert.deepStrictEqual(withIndex.summary.checks,
+    { symbols: true, files: true, relativeImports: true, bareImports: true, scripts: false },
+    JSON.stringify(withIndex.summary.checks));
+  const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'sigmap-judge-nochecks-'));
+  const empty = verify('nothing here', bare);
+  assert.strictEqual(empty.summary.checks.symbols, false, 'no index → symbols check must not count as run');
+  assert.strictEqual(empty.summary.checks.bareImports, false, 'no package.json → bareImports must not count as run');
+  fs.rmSync(bare, { recursive: true, force: true });
+});
+
+// 21. with cwd the verdict still fails on fabricated symbols, reason names the index
+test('judge with cwd: fabricated symbol fails and the reason names the repo index (#640)', () => {
+  const response = 'The padded helper calls `fabricatedQuantumFn()` for padding things.';
+  const ctx = 'the padded helper pads things for padding';
+  const r = judge(response, ctx, { threshold: 0.1, cwd: dirS });
+  assert.strictEqual(r.verdict, 'fail', JSON.stringify(r));
+  assert.ok(r.reasons.some((x) => x.includes('context or repo index')), JSON.stringify(r.reasons));
+});
+
+// 22. CLI end-to-end: a repo-true symbol claim the context never quotes now passes
+test('sigmap judge: repo-true symbol claim passes end-to-end (#640)', () => {
+  const resp2 = path.join(dirS, 'r.txt');
+  const ctx2 = path.join(dirS, 'c.txt');
+  fs.writeFileSync(resp2, 'The padding helper calls `padded()` internally.');
+  fs.writeFileSync(ctx2, 'the padding helper lives in src and pads strings internally');
+  const pre = claimGrounding(fs.readFileSync(resp2, 'utf8'), fs.readFileSync(ctx2, 'utf8'));
+  assert.strictEqual(pre.ungrounded.length, 1, 'precondition: lexical-only must NOT ground this claim');
+  const r = spawnSync(process.execPath, [SCRIPT, 'judge', '--response', resp2, '--context', ctx2, '--json'], {
+    encoding: 'utf8', cwd: dirS, timeout: 120000,
+  });
+  const parsed = JSON.parse(r.stdout.trim());
+  assert.strictEqual(parsed.verdict, 'pass', r.stdout);
+  assert.strictEqual(r.status, 0, `expected exit 0, got ${r.status}`);
+});
+
 // Cleanup
 try {
   fs.rmSync(tmpDir, { recursive: true });
   fs.rmSync(extendsTmpDir, { recursive: true });
+  fs.rmSync(dirS, { recursive: true });
 } catch (_) {}
 
 // ── Summary ───────────────────────────────────────────────────────────────────

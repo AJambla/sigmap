@@ -100,6 +100,18 @@ const DEFAULTS = {
   // Routes files to fast/balanced/powerful model tiers based on complexity
   routing: false,
 
+  // sigmap judge — verdict threshold and the --learn boost/penalize band (J2).
+  // The band is measured, not hand-picked: answers built from ≥ ~80% context-
+  // grounded vocabulary score above learnBoostAbove, answers under ~30%
+  // grounded score below learnPenalizeBelow (guard-tested on a mixture corpus
+  // drawn from the repo's own signatures — see judge.test.js). CLI flags
+  // override; scores between the two bounds neither boost nor penalize.
+  judge: {
+    threshold: 0.25,          // verdict pass/fail floor (--threshold overrides)
+    learnBoostAbove: 0.75,    // --learn boosts context files above this score
+    learnPenalizeBelow: 0.40, // --learn penalizes context files below this score
+  },
+
   // Output format: 'default' (markdown only) | 'cache' (also write Anthropic prompt-cache JSON)
   format: 'default',
 

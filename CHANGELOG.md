@@ -10,6 +10,14 @@ Format: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [8.45.0] — 2026-09-14
+
+### Added
+- **Structural judge — the last grounding surface converges on the one engine (J1)** (#640, PR #641) — `sigmap judge` checked an answer's symbol/file/import claims with `ctxLower.includes()` against the context text alone, so a real repo symbol the context happened not to quote was flagged as a hallucination and the installed-library moat never fired at the judge surface. `claimGrounding` now delegates its structural half to the verify engine (the same `buildSymbolSet` + `buildLibraryIndex` map `sigmap verify` uses): with a cwd, a claim is grounded when the context quotes it **or** its check class ran and the guard did not flag it — repo symbols, `.d.ts`-exported library symbols, declared imports, and existing files stop false-flagging while fabrications still fail. `verify()`'s summary gains an additive `checks` field (`symbols`/`files`/`relativeImports`/`bareImports`/`scripts`) stating which claim classes actually ran, so "not flagged" is never mistaken for "verified" on a repo with no index. The CLI always passes cwd; cwd-less behavior is byte-identical; reasons say "not grounded in context or repo index" when the structural pass ran. One grounding engine, two commands
+- **Configurable judge learning thresholds with derived defaults (J2)** (#638, PR #639) — the `--learn` boost/penalize band (0.75/0.40) and the 0.25 verdict threshold move from hardcoded constants into a new `judge` config section (`threshold`, `learnBoostAbove`, `learnPenalizeBelow`); the CLI seeds judge options from `loadConfig` and `--threshold` still overrides. The defaults are measured, not hand-picked: a drift-guard test constructs exact-ratio mixture answers from the repo's own ≥7-char vocabulary (stop-list-proof) — 80% context-grounded must land in the boost band, 30% in the penalize band — and pins the band ordering. Behavior at defaults is unchanged
+
+---
+
 ## [8.44.0] — 2026-09-14
 
 ### Added

@@ -243,6 +243,23 @@ sigmap --analyze          # files scanned, signatures per file
 | `exactness.lsp` | `boolean` | `false` | **v8.37.0, opt-in.** Ask a language server already on the machine (clangd/gopls/rust-analyzer) for `documentSymbol` per file — server-typed details and exact multiline ranges, cached across runs by content hash + server binary. A per-file quality guard accepts the LSP result only when it does not lose surface vs the regex tier (a server parsing standalone can be macro-blind), so the tier is strictly non-losing. Header labels `toolchain=<server>@<version>` when used. Measured with clangd: libuv +37%, spdlog +15% effective signatures. See [exactness.lsp](#exactness-lsp). |
 | `exactness.scip` | `boolean` | `false` | **v8.38.0, opt-in.** Read a CI-produced `index.scip` at the repo root as a signature source (import only): compiler-typed signatures with definition-occurrence anchors, parsed by a zero-dep protobuf reader. Same per-file never-lose-vs-regex guard as the LSP tier; header labels `toolchain=scip:<tool>@<version>` on acceptance. Measured on zod: +590% effective signatures. See [exactness.scip](#exactness-scip). |
 | `exactness.lspServers` | `object` | `{}` | Extension → command-array overrides laid over the built-in server registry, e.g. `{ ".rs": ["rust-analyzer"] }`. Commands are spawned directly with an argument array — never a shell. |
+| `judge.threshold` | `number` | `0.25` | **v8.45.0 (J2).** Verdict pass/fail floor for [`sigmap judge`](/guide/cli#judge): groundedness below this fails. The `--threshold` flag overrides the config value. |
+| `judge.learnBoostAbove` | `number` | `0.75` | **v8.45.0 (J2).** With `--learn`, context files are boosted when the groundedness score exceeds this bound. See [judge](#judge) for how the default is derived. |
+| `judge.learnPenalizeBelow` | `number` | `0.40` | **v8.45.0 (J2).** With `--learn`, context files are penalized when the score falls below this bound; scores between the two bounds neither boost nor penalize. |
+
+### judge
+
+**v8.45.0 (J2).** The [`sigmap judge --learn`](/guide/cli#judge) feedback loop boosts or penalizes context-file weights based on the groundedness score. The band was previously hardcoded; these keys make it tunable per repo, and the defaults are **measured, not hand-picked**: answers built from ≥ ~80% context-grounded vocabulary score above `learnBoostAbove`, answers under ~30% grounded score below `learnPenalizeBelow` — verified by a drift-guard test that constructs exact-ratio mixtures from the repo's own signature vocabulary and pins the band ordering (`0 < learnPenalizeBelow < learnBoostAbove < 1`). Tighten the band (e.g. `0.85`/`0.30`) to make learning more conservative on noisy corpora.
+
+```json
+{
+  "judge": {
+    "threshold": 0.25,
+    "learnBoostAbove": 0.75,
+    "learnPenalizeBelow": 0.40
+  }
+}
+```
 
 ### sigCache
 

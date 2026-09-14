@@ -366,7 +366,7 @@ sigmap plan "refactor the auth middleware" --json
 
 ## judge
 
-Rule-based groundedness scoring for LLM responses. Combines token overlap with **claim-level grounding** (v8.10.0): it extracts the answer's concrete symbol/file/import claims and fails any the context never contains — catching a hallucinated symbol that pure word-overlap would pass. Zero dependencies, no LLM API required.
+Rule-based groundedness scoring for LLM responses. Combines token overlap with **claim-level grounding** (v8.10.0): it extracts the answer's concrete symbol/file/import claims and fails any that nothing grounds. Since **v8.45.0 (J1)** the claim check is **structural**: it runs the same verify engine as [`verify-ai-output`](/guide/verify-ai-output) — repo symbols from the signature index, installed-library symbols from the `.d.ts`/site-packages index, declared dependencies, and real file paths all ground a claim even when the context never quotes it verbatim, while fabrications still fail (one grounding engine, two commands; without a repo, matching falls back to the context text alone). Zero dependencies, no LLM API required.
 
 ```bash
 sigmap judge --response response.txt --context .context/copilot-instructions.md
@@ -377,25 +377,25 @@ sigmap judge --response response.txt --context .context/query-context.md --learn
 ```
 ────────────────────────────────────────────
  sigmap judge
- Groundedness       : 0.72
- Support level      : pass
- Unsupported symbols: none
+ Score     : 0.72
+ Verdict   : pass
+ Reasons   : none
 ────────────────────────────────────────────
 ```
 
-JSON output:
+JSON output (`--json`) carries `score`, `reasons`, the claim report, and a `verdict` field that drives the exit code:
 
 ```json
-{ "groundedness": 0.72, "supportLevel": "high", "reasons": [], "learning": null }
+{ "score": 0.72, "reasons": [], "claims": { "total": 2, "grounded": 2, "ungrounded": [], "structural": true } }
 ```
 
-With `--learn`, judge becomes an opt-in feedback loop. It reads file headings from the context file (`### path` in generated context or `## path` in `.context/query-context.md`) and applies a small learned boost or penalty when groundedness is confidently high or low.
+With `--learn`, judge becomes an opt-in feedback loop. It reads file headings from the context file (`### path` in generated context or `## path` in `.context/query-context.md`) and applies a small learned boost or penalty when groundedness is confidently high or low. Since **v8.45.0 (J2)** the verdict threshold and the learn band are configurable per repo via the [`judge` config section](/guide/config#judge) (`threshold`, `learnBoostAbove`, `learnPenalizeBelow`) — defaults are derived from a measured mixture corpus, and `--threshold` still overrides the config.
 
 | Option | Description |
 |--------|-------------|
 | `--response <file>` | Path to the LLM response text file (required) |
 | `--context <file>` | Path to the context/source file (required) |
-| `--threshold <n>` | Minimum score to pass (default: `0.25`) |
+| `--threshold <n>` | Minimum score to pass (default: `0.25`; overrides `judge.threshold` from config) |
 | `--learn` | Apply opt-in learned boosts/penalties to files referenced by context headings |
 | `--json` | Emit JSON instead of human-readable output |
 
@@ -1423,8 +1423,8 @@ sigmap bench --submit --json
 ────────────────────────────────────────────────────────
  SigMap Community Benchmark Submission
 ────────────────────────────────────────────────────────
- SigMap version : 8.44.0
- Benchmark ID   : sigmap-v8.44-main
+ SigMap version : 8.45.0
+ Benchmark ID   : sigmap-v8.45-main
  Submitted      : 2026-09-13
 ────────────────────────────────────────────────────────
  Canonical metrics (official release):
