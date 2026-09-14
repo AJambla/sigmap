@@ -30,6 +30,7 @@ const RS_EXTS  = new Set(['.rs']);
 const JVM_EXTS = new Set(['.java', '.kt', '.kts', '.scala', '.sc']);
 const RB_EXTS  = new Set(['.rb', '.rake']);
 const R_EXTS   = new Set(['.r', '.R']);
+const EX_EXTS  = new Set(['.ex', '.exs']);
 
 /**
  * Probe an absolute base path for a JS/TS module file in fileSet, trying the
@@ -340,6 +341,33 @@ function extractFileDeps(filePath, content, fileSet, cwd, ctx) {
     }
   }
 
+  // ── Elixir ────────────────────────────────────────────────────────────────
+  // Module references (`alias A.B`, `import A.B`, `use A.B`, `require A.B`)
+  // resolve to repo files by the lib/ snake_case convention: A.B.C →
+  // .../b/c.ex, longest suffix first. External modules miss fileSet, so no
+  // false edges (#538).
+  if (EX_EXTS.has(ext)) {
+    const stripped = content.replace(/#[^\n]*/g, '');
+    const snake = (seg) => seg.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
+    const re = /^\s*(?:alias|import|use|require)\s+([A-Z][\w.]*)/gm;
+    let m;
+    while ((m = re.exec(stripped)) !== null) {
+      const segs = m[1].split('.').map(snake);
+      const suffixes = [];
+      if (segs.length >= 2) suffixes.push(segs.slice(-2).join('/') + '.ex');
+      suffixes.push(segs[segs.length - 1] + '.ex');
+      let hit = null;
+      for (const suf of suffixes) {
+        for (const f of fileSet) {
+          if (f === filePath) continue;
+          if (normalizePath(f).endsWith('/' + suf)) { hit = f; break; }
+        }
+        if (hit) break;
+      }
+      if (hit) found.push(hit);
+    }
+  }
+
   // ── R ─────────────────────────────────────────────────────────────────────
   // R doesn't have JS-style relative imports inside packages — files in R/ are
   // auto-sourced in alphabetical order. We emit edges for:
@@ -500,7 +528,7 @@ function buildFromCwd(cwd, opts) {
         const ext = path.extname(e.name).toLowerCase();
         if (JS_EXTS.has(ext) || PY_EXTS.has(ext) || GO_EXTS.has(ext) ||
             RS_EXTS.has(ext) || JVM_EXTS.has(ext) || RB_EXTS.has(ext) ||
-            R_EXTS.has(ext)) {
+            R_EXTS.has(ext) || EX_EXTS.has(ext)) {
           out.push(full);
         }
       }

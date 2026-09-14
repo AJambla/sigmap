@@ -89,7 +89,7 @@ export class UserService
 - Generated files (`*.pb.*`, `*.generated.*`)
 - Any credential, key, token, or secret pattern
 
-## All 31 languages
+## All 35 languages
 
 | Language | Extensions | Extracts |
 |----------|------------|----------|
@@ -124,6 +124,9 @@ export class UserService
 | XML | `.xml` | root element, bean/route/kind, top-level named elements, Spring beans |
 | Markdown | `.md` | h1–h3 headings, code-fence languages, link titles |
 | GDScript | `.gd` | class definition, extends, signal, enum, constant, function definition |
+| Lua | `.lua` | function, module-table methods (M.name / M:name), local functions, require hints, LDoc hints |
+| Elixir | `.ex` `.exs` | defmodule, def/defp/defmacro, @spec return hints, @doc hints, alias/import deps |
+| Astro | `.astro` | frontmatter via the TS extractor (Props, functions, consts), Astro.props destructure, component usages |
 
 ## Extraction quality tiers
 

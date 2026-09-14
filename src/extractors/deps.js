@@ -105,6 +105,21 @@ function extractLuaDeps(src) {
   return [...deps].slice(0, 5);
 }
 
+/**
+ * Extract Elixir module dependencies: `alias A.B`, `import A.B`, `use A.B`,
+ * `require A.B` — module names for repo-local resolution (#538).
+ * @param {string} src
+ * @returns {string[]}
+ */
+function extractElixirDeps(src) {
+  const deps = new Set();
+  const stripped = String(src || '').replace(/#[^\n]*/g, '');
+  for (const m of stripped.matchAll(/^\s*(?:alias|import|use|require)\s+([A-Z][\w.]*)/gm)) {
+    deps.add(m[1]);
+  }
+  return [...deps].slice(0, 5);
+}
+
 function stripLuaComments(src) {
   return String(src || '')
     .replace(/--\[\[[\s\S]*?\]\]/g, '')
@@ -129,4 +144,4 @@ function buildReverseDepMap(forwardMap) {
   return reverse;
 }
 
-module.exports = { extractPythonDeps, extractTSDeps, extractRDeps, extractLuaDeps, buildReverseDepMap };
+module.exports = { extractPythonDeps, extractTSDeps, extractRDeps, extractLuaDeps, extractElixirDeps, buildReverseDepMap };
