@@ -169,6 +169,12 @@ const DEFAULTS = {
   // toolchain version, and the generated header labels the version used.
   exactness: {
     typescript: false,
+    // T3 spike (#612): LSP documentSymbol via a server already on the machine
+    // (clangd/gopls/rust-analyzer), cached per content hash + server binary,
+    // silent regex fallback. lspServers lays { ".ext": ["cmd", ...] } entries
+    // over the built-in registry — commands are spawned directly, never a shell.
+    lsp: false,
+    lspServers: {},
   },
 
   // Impact layer settings (v2.5)

@@ -1557,6 +1557,12 @@ __factories["./src/config/defaults"] = function(module, exports) {
     // toolchain version, and the generated header labels the version used.
     exactness: {
       typescript: false,
+      // T3 spike (#612): LSP documentSymbol via a server already on the machine
+      // (clangd/gopls/rust-analyzer), cached per content hash + server binary,
+      // silent regex fallback. lspServers lays { ".ext": ["cmd", ...] } entries
+      // over the built-in registry — commands are spawned directly, never a shell.
+      lsp: false,
+      lspServers: {},
     },
 
     // Impact layer settings (v2.5)
@@ -7087,6 +7093,200 @@ __factories["./src/extractors/line-anchor"] = function(module, exports) {
   }
 
   module.exports = { lineAt, anchor, withAnchor };
+  
+};
+
+// ── ./src/extractors/lsp_symbols ──
+__factories["./src/extractors/lsp_symbols"] = function(module, exports) {
+  
+  const fs = require('fs');
+  const path = require('path');
+  const crypto = require('crypto');
+  const { documentSymbols } = __require('./src/lsp/client');
+  const { anchor } = __require('./src/extractors/line-anchor');
+  const { capWithNotice, capMembersWithNotice } = __require('./src/util/truncate');
+
+  // LSP documentSymbol → signature lines (#612, tier T3 of #542). One client,
+  // every LSP language: symbols come back language-neutral (SymbolKind + name
+  // + a server-rendered `detail` type string + exact ranges), so the mapping
+  // below is server-agnostic. Only clangd is measured; the gopls and
+  // rust-analyzer rows ship designed-but-unmeasured, and any server that is
+  // absent, crashes, or answers nothing falls back to the regex tier silently.
+  //
+  // A session costs a process spawn (~300ms with clangd), so results are
+  // cached across runs in .context/lsp-cache.json keyed by content hash +
+  // server command + the server binary's size/mtime — cheap to compute with
+  // no extra spawn, and invalidated by either a file edit or a server upgrade.
+
+  const MEMBER_LIMIT = 120;
+  const PER_FILE_LIMIT = 200;
+
+  // Built-in extension → server command. `exactness.lspServers` in config lays
+  // entries over this (command arrays, spawned directly — never a shell).
+  const DEFAULT_SERVERS = {
+    '.c': ['clangd'], '.cc': ['clangd'], '.cpp': ['clangd'], '.cxx': ['clangd'],
+    '.h': ['clangd'], '.hpp': ['clangd'], '.hh': ['clangd'],
+    '.go': ['gopls'],
+    '.rs': ['rust-analyzer'],
+  };
+
+  const LANGUAGE_IDS = {
+    '.c': 'c', '.cc': 'cpp', '.cpp': 'cpp', '.cxx': 'cpp',
+    '.h': 'cpp', '.hpp': 'cpp', '.hh': 'cpp',
+    '.go': 'go', '.rs': 'rust',
+  };
+
+  // LSP SymbolKind — containers get their own top-level line; leaf kinds
+  // inside a container render as indented members.
+  const KIND_WORDS = {
+    2: 'module', 3: 'namespace', 5: 'class', 10: 'enum', 11: 'interface', 23: 'struct',
+  };
+  const CONTAINER_KINDS = new Set(Object.keys(KIND_WORDS).map(Number));
+  const LEAF_KINDS = new Set([6, 7, 8, 9, 12, 13, 14]); // method, property, field, ctor, function, variable, constant
+
+  // Per-run state: failed server commands are not retried (a repo with the
+  // flag on but no server pays one fast ENOENT, not one per file), and the
+  // cache file is loaded once and written through on miss.
+  const _deadServers = new Set();
+  const _serverStat = new Map(); // cmd key → binary stat fragment | null
+  let _cache = null;
+  let _cachePath = null;
+  const _labels = new Set();
+
+  function _resolveBinaryStat(cmd0) {
+    if (_serverStat.has(cmd0)) return _serverStat.get(cmd0);
+    let out = null;
+    const candidates = path.isAbsolute(cmd0)
+      ? [cmd0]
+      : String(process.env.PATH || '').split(path.delimiter).map((d) => path.join(d, cmd0));
+    for (const c of candidates) {
+      try {
+        const st = fs.statSync(c);
+        if (st.isFile()) { out = `${st.size}:${Math.round(st.mtimeMs)}`; break; }
+      } catch (_) {}
+    }
+    _serverStat.set(cmd0, out);
+    return out;
+  }
+
+  function _loadCache(cwd) {
+    if (_cache && _cachePath === path.join(cwd, '.context', 'lsp-cache.json')) return _cache;
+    _cachePath = path.join(cwd, '.context', 'lsp-cache.json');
+    try {
+      const parsed = JSON.parse(fs.readFileSync(_cachePath, 'utf8'));
+      _cache = (parsed && parsed.schema === 1) ? parsed : { schema: 1, servers: {}, entries: {} };
+    } catch (_) {
+      _cache = { schema: 1, servers: {}, entries: {} };
+    }
+    return _cache;
+  }
+
+  function _saveCache() {
+    if (!_cache || !_cachePath) return;
+    try {
+      fs.mkdirSync(path.dirname(_cachePath), { recursive: true });
+      const tmp = _cachePath + '.tmp';
+      fs.writeFileSync(tmp, JSON.stringify(_cache));
+      fs.renameSync(tmp, _cachePath);
+    } catch (_) {}
+  }
+
+  function _compact(s) {
+    return String(s || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+  }
+
+  /** Flatten hierarchical symbols into the two-level signature vocabulary. */
+  function _render(symbols) {
+    const sigs = [];
+    const walk = (nodes) => {
+      for (const s of nodes || []) {
+        const startLn = s.range.start.line + 1;
+        const endLn = s.range.end.line + 1;
+        if (CONTAINER_KINDS.has(s.kind)) {
+          sigs.push(`${KIND_WORDS[s.kind]} ${s.name}${anchor(startLn, endLn)}`);
+          const members = [];
+          const nested = [];
+          for (const c of s.children || []) {
+            if (CONTAINER_KINDS.has(c.kind)) { nested.push(c); continue; }
+            if (!LEAF_KINDS.has(c.kind)) continue;
+            const detail = _compact(c.detail);
+            members.push({
+              text: `${c.name}${detail ? ': ' + detail : ''}`,
+              s: c.range.start.line + 1,
+              e: c.range.end.line + 1,
+            });
+          }
+          for (const mem of capMembersWithNotice(members, MEMBER_LIMIT)) {
+            sigs.push(mem.s ? `  ${mem.text}${anchor(mem.s, mem.e)}` : `  ${mem.text}`);
+          }
+          walk(nested);
+        } else if (LEAF_KINDS.has(s.kind)) {
+          const detail = _compact(s.detail);
+          sigs.push(`${s.name}${detail ? ': ' + detail : ''}${anchor(startLn, endLn)}`);
+        }
+      }
+    };
+    walk(symbols);
+    return sigs;
+  }
+
+  /**
+   * Extract signatures for a file via its registered language server.
+   * Returns null on any failure so the caller falls back to the regex tier.
+   * @param {string} filePath - absolute path
+   * @param {string} src - file content
+   * @param {object} [serverOverrides] - `exactness.lspServers` (ext → cmd array)
+   * @param {string} [cwd] - project root; enables the cross-run cache
+   * @returns {{ sigs: string[], label: string|null }|null}
+   */
+  function extractViaLsp(filePath, src, serverOverrides, cwd) {
+    if (!src || typeof src !== 'string') return null;
+    const ext = path.extname(filePath).toLowerCase();
+    const cmd = (serverOverrides && serverOverrides[ext]) || DEFAULT_SERVERS[ext];
+    if (!Array.isArray(cmd) || cmd.length === 0) return null;
+    const cmdKey = cmd.join(' ');
+    if (_deadServers.has(cmdKey)) return null;
+
+    const binStat = _resolveBinaryStat(cmd[0]);
+    const cache = cwd ? _loadCache(cwd) : null;
+    const key = binStat
+      ? `${crypto.createHash('sha1').update(src).digest('hex')}|${cmdKey}|${binStat}`
+      : null;
+    if (cache && key && Array.isArray(cache.entries[key])) {
+      return { sigs: cache.entries[key], label: cache.servers[cmdKey] || null };
+    }
+
+    const languageId = LANGUAGE_IDS[ext] || 'plaintext';
+    const out = documentSymbols(cmd, filePath, src, languageId);
+    if (!out || out.missing || !out.symbols) {
+      if (out && out.missing) _deadServers.add(cmdKey);
+      return null;
+    }
+
+    const sigs = capWithNotice(_render(out.symbols), PER_FILE_LIMIT, 'signatures');
+    if (sigs.length === 0) return null;
+
+    const label = `${out.serverName || path.basename(cmd[0])}@${out.serverVersion || 'unknown'}`;
+    if (cache && key) {
+      cache.entries[key] = sigs;
+      cache.servers[cmdKey] = label;
+      _saveCache();
+    }
+    return { sigs, label };
+  }
+
+  /** Register a label once the caller has ACCEPTED the LSP result — a result
+   * rejected by the quality guard must not put its server in the header. */
+  function acceptLabel(label) {
+    if (label) _labels.add(label);
+  }
+
+  /** Toolchain labels for servers whose results were actually used this run. */
+  function toolchainLabels() {
+    return [..._labels].sort();
+  }
+
+  module.exports = { extractViaLsp, acceptLabel, toolchainLabels, DEFAULT_SERVERS };
   
 };
 
@@ -14260,6 +14460,112 @@ __factories["./src/learning/weights"] = function(module, exports) {
     exportWeights,
     importWeights,
   };
+  
+};
+
+// ── ./src/lsp/client ──
+__factories["./src/lsp/client"] = function(module, exports) {
+  
+  const { spawnSync } = require('child_process');
+  const path = require('path');
+
+  // Zero-dep synchronous LSP client (#612, tier T3 of #542). SigMap already
+  // speaks JSON-RPC-over-stdio as an MCP *server*; this is the same wire
+  // discipline run as a *client*, against a language server the machine
+  // already has (clangd ships with Xcode CLT; gopls/rust-analyzer where
+  // installed). Nothing is bundled and nothing is required to exist.
+  //
+  // The session is PIPELINED: every frame — initialize, initialized, didOpen,
+  // documentSymbol, shutdown, exit — is written up front as one stdin buffer
+  // via spawnSync (args array, never a shell), and the responses are parsed
+  // from the captured stdout. Measured against clangd: a full round-trip in
+  // ~290ms with exact multiline ranges. Servers process framed messages in a
+  // read loop, so pipelining holds; any server that objects simply produces
+  // no matching response and the caller falls back to the regex tier.
+
+  const SESSION_TIMEOUT_MS = 10000;
+  const MAX_BUFFER = 64 * 1024 * 1024;
+
+  function frame(obj) {
+    const s = JSON.stringify(obj);
+    return `Content-Length: ${Buffer.byteLength(s)}\r\n\r\n${s}`;
+  }
+
+  /** Parse Content-Length-framed JSON-RPC messages from a captured stream. */
+  function parseFrames(raw) {
+    const msgs = [];
+    let buf = raw || '';
+    for (;;) {
+      const m = buf.match(/^Content-Length: (\d+)\r\n(?:[^\r\n]+\r\n)*\r\n/);
+      if (!m) break;
+      const len = parseInt(m[1], 10);
+      const body = buf.slice(m[0].length, m[0].length + len);
+      if (Buffer.byteLength(body) < len) break;
+      try { msgs.push(JSON.parse(body)); } catch (_) {}
+      buf = buf.slice(m[0].length + len);
+    }
+    return msgs;
+  }
+
+  /**
+   * One-shot documentSymbol session against a language server.
+   * @param {string[]} cmd - command + args (spawned directly, never a shell)
+   * @param {string} filePath - absolute path of the file
+   * @param {string} src - file content (sent via didOpen; the file need not be saved)
+   * @param {string} languageId - LSP language id ('cpp', 'go', 'rust', ...)
+   * @returns {{ symbols: object[], serverVersion: string }|null} null on ANY failure
+   */
+  function documentSymbols(cmd, filePath, src, languageId) {
+    if (!Array.isArray(cmd) || cmd.length === 0) return null;
+    const abs = path.resolve(filePath);
+    const uri = 'file://' + abs;
+    const input =
+      frame({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {
+        processId: null,
+        rootUri: 'file://' + path.dirname(abs),
+        capabilities: { textDocument: { documentSymbol: { hierarchicalDocumentSymbolSupport: true } } },
+      } }) +
+      frame({ jsonrpc: '2.0', method: 'initialized', params: {} }) +
+      frame({ jsonrpc: '2.0', method: 'textDocument/didOpen', params: {
+        textDocument: { uri, languageId, version: 1, text: src },
+      } }) +
+      frame({ jsonrpc: '2.0', id: 2, method: 'textDocument/documentSymbol', params: { textDocument: { uri } } }) +
+      frame({ jsonrpc: '2.0', id: 3, method: 'shutdown' }) +
+      frame({ jsonrpc: '2.0', method: 'exit' });
+
+    let r;
+    try {
+      r = spawnSync(cmd[0], cmd.slice(1), {
+        input,
+        encoding: 'utf8',
+        timeout: SESSION_TIMEOUT_MS,
+        maxBuffer: MAX_BUFFER,
+      });
+    } catch (_) {
+      return { missing: true };
+    }
+    // A missing binary is permanent for the run; anything else — crash,
+    // timeout, empty output — is a per-file failure and must not poison the
+    // server for later files (a transient null once cost 12 of 19 files).
+    if (r && r.error && r.error.code === 'ENOENT') return { missing: true };
+    if (!r || r.error || !r.stdout) return null;
+
+    const msgs = parseFrames(r.stdout);
+    const init = msgs.find((x) => x.id === 1 && x.result);
+    const sym = msgs.find((x) => x.id === 2);
+    if (!sym || !Array.isArray(sym.result)) return null;
+    const info = (init && init.result && init.result.serverInfo) || {};
+    // Server version strings vary ('Apple clangd version 17.0.0 ...',
+    // 'gopls v0.16.1') — pull the first dotted number rather than a word.
+    const vm = typeof info.version === 'string' ? info.version.match(/\d+\.[\w.\-]+/) : null;
+    return {
+      symbols: sym.result,
+      serverName: typeof info.name === 'string' ? info.name : '',
+      serverVersion: vm ? vm[0] : '',
+    };
+  }
+
+  module.exports = { documentSymbols, parseFrames, frame, SESSION_TIMEOUT_MS };
   
 };
 
@@ -22918,7 +23224,19 @@ function getExtractor(name) {
 // byte-stability holds per toolchain version, #609).
 let _nativeTsVersion = null;
 
-function detectAndExtract(filePath, content, maxSigsPerFile, exactness) {
+// All host-toolchain labels for this run (native TS + any LSP servers that
+// actually served), rendered into the generated header's meta line.
+function _toolchainLabel() {
+  const parts = [];
+  if (_nativeTsVersion) parts.push('typescript@' + _nativeTsVersion);
+  try {
+    const lspx = requireSourceOrBundled('./src/extractors/lsp_symbols');
+    parts.push(...lspx.toolchainLabels());
+  } catch (_) {}
+  return parts.length ? parts.join(', ') : undefined;
+}
+
+function detectAndExtract(filePath, content, maxSigsPerFile, exactness, cwd) {
   const base = path.basename(filePath);
   const ext = path.extname(base).toLowerCase();
   let extractorName = EXT_MAP[ext] || null;
@@ -22939,6 +23257,30 @@ function detectAndExtract(filePath, content, maxSigsPerFile, exactness) {
         if (Array.isArray(sigs) && sigs.length > 0) {
           _nativeTsVersion = resolved.version;
           return sigs.slice(0, maxSigsPerFile);
+        }
+      }
+    } catch (_) {}
+  }
+
+  // T3 spike (#612, opt-in): LSP documentSymbol via a server the machine
+  // already has (clangd/gopls/rust-analyzer + config overrides). Cached per
+  // content hash + server binary; any failure falls through to regex.
+  if (exactness && exactness.lsp) {
+    try {
+      const lspx = requireSourceOrBundled('./src/extractors/lsp_symbols');
+      const out = lspx.extractViaLsp(filePath, content, exactness.lspServers, cwd);
+      if (out && Array.isArray(out.sigs) && out.sigs.length > 0) {
+        // Quality guard (#612 finding): a server parsing a file standalone can
+        // be macro-blind — clangd saw 7 of fmt/format.h's hundreds of symbols
+        // because FMT_BEGIN_NAMESPACE never expanded — so the LSP result is
+        // accepted only when it does not LOSE surface vs the regex tier.
+        // Ties go to LSP: exact anchors. Measured: libuv (C) 943 vs 867 for
+        // regex; fmt 45 vs 698, correctly refused per file by this guard.
+        const extractor = getExtractor(extractorName);
+        const regexSigs = extractor ? (extractor.extract(content) || []) : [];
+        if (out.sigs.length >= regexSigs.length) {
+          lspx.acceptLabel(out.label);
+          return out.sigs.slice(0, maxSigsPerFile);
         }
       }
     } catch (_) {}
@@ -23316,7 +23658,7 @@ function buildDiffSectionFromBase(cwd, baseRef, currentEntries, config) {
       baseSrc = '';
     }
 
-    const baseSigs = baseSrc ? detectAndExtract(entry.filePath, baseSrc, config.maxSigsPerFile, config.exactness) : [];
+    const baseSigs = baseSrc ? detectAndExtract(entry.filePath, baseSrc, config.maxSigsPerFile, config.exactness, cwd) : [];
     const d = diffSignatures(baseSigs, entry.sigs || []);
 
     const markers = [];
@@ -23663,7 +24005,7 @@ function writeOutputs(content, targets, cwd, config) {
           const defaultPath = path.join(cwd, '.github', 'copilot-instructions.md');
           if (outPath !== defaultPath) {
             // custom path: format and write directly (no append logic)
-            const formatted = adapterMod.format(adapterContent, { version: VERSION, toolchain: _nativeTsVersion ? 'typescript@' + _nativeTsVersion : undefined });
+            const formatted = adapterMod.format(adapterContent, { version: VERSION, toolchain: _toolchainLabel() });
             ensureDir(outPath);
             fs.writeFileSync(outPath, formatted, 'utf8');
             console.warn(`[sigmap] wrote ${path.relative(cwd, outPath)}`);
@@ -23671,11 +24013,11 @@ function writeOutputs(content, targets, cwd, config) {
           }
         }
         if (typeof adapterMod.write === 'function') {
-          adapterMod.write(adapterContent, cwd, { version: VERSION, toolchain: _nativeTsVersion ? 'typescript@' + _nativeTsVersion : undefined });
+          adapterMod.write(adapterContent, cwd, { version: VERSION, toolchain: _toolchainLabel() });
           const outPath = adapterMod.outputPath(cwd);
           console.warn(`[sigmap] wrote ${path.relative(cwd, outPath)} (appended signatures)`);
         } else {
-          const formatted = adapterMod.format(adapterContent, { version: VERSION, toolchain: _nativeTsVersion ? 'typescript@' + _nativeTsVersion : undefined });
+          const formatted = adapterMod.format(adapterContent, { version: VERSION, toolchain: _toolchainLabel() });
           const outPath = adapterMod.outputPath(cwd);
           ensureDir(outPath);
           fs.writeFileSync(outPath, formatted, 'utf8');
@@ -24078,7 +24420,7 @@ function runDiff(cwd, config, stagedOnly, baseRef) {
       continue;
     }
 
-    let sigs = detectAndExtract(filePath, content, config.maxSigsPerFile, config.exactness);
+    let sigs = detectAndExtract(filePath, content, config.maxSigsPerFile, config.exactness, cwd);
     if (sigs.length === 0) continue;
 
     inputTokenTotal += estimateTokens(content);
@@ -24213,13 +24555,13 @@ function runGenerate(cwd, config, reportMode, reportJson = false) {
       if (cached && cached.mtime === mtime) {
         sigs = cached.sigs;
       } else {
-        sigs = detectAndExtract(filePath, content, config.maxSigsPerFile, config.exactness);
+        sigs = detectAndExtract(filePath, content, config.maxSigsPerFile, config.exactness, cwd);
         if (sigs.length > 0) {
           cache.set(filePath, { mtime, sigs });
         }
       }
     } else {
-      sigs = detectAndExtract(filePath, content, config.maxSigsPerFile, config.exactness);
+      sigs = detectAndExtract(filePath, content, config.maxSigsPerFile, config.exactness, cwd);
     }
     if (sigs.length === 0) continue;
 
@@ -26132,7 +26474,7 @@ function main() {
       for (const fp of syncFiles) {
         let content = '';
         try { content = fs.readFileSync(fp, 'utf8'); } catch (_) { continue; }
-        const sigs = detectAndExtract(fp, content, config.maxSigsPerFile || 25, config.exactness);
+        const sigs = detectAndExtract(fp, content, config.maxSigsPerFile || 25, config.exactness, cwd);
         if (sigs.length === 0) continue;
         syncEntries.push({ filePath: fp, sigs, language: null });
       }
