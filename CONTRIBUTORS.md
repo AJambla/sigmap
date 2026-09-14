@@ -35,6 +35,9 @@ To ensure proper attribution:
 
 We welcome contributions! See [Contributing](./docs/CONTRIBUTING.md) for guidelines.
 
+### Recent Contributors (v8.42.0)
+- **@manojmallick** — feat(map): knowledge map increment 2 — env-var/migration/script nodes with per-file reads-env edges from structured producer collectors, the `{ env }` query on query_knowledge_map, SCHEMA_VERSION 2, and the NUL-delimiter escape fix that makes the store source git-diffable text (#629, PR #630)
+
 ### Recent Contributors (v8.41.0)
 - **@manojmallick** — feat(map): unified knowledge map, increment 1 of #543 — typed nodes/edges over the existing signature, graph, library, and route sources with canonical NUL-delimited serialization and an mtime-keyed cache, plus the `query_knowledge_map` MCP tool (22nd) answering upgrade-impact / neighbors / summary (#626, PR #627)
 
