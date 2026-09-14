@@ -10,6 +10,16 @@ Format: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [8.42.0] — 2026-09-14
+
+### Added
+- **Knowledge map increment 2: env-var, migration, and script nodes + reads-env edges** (#629, PR #630) — the three node kinds from the #543 epic's proposed shape that increment 1 left out. The producers (`env-schema`, `migrations`, `build-ci`) now expose structured collectors alongside their unchanged markdown rendering, following the `collectRoutes` precedent — `collectEnvReads` gains the per-file attribution the old Set-based scan discarded. The store adds `env:<NAME>` nodes (with a committed-`.env.example` flag — example-declared-but-unread variables still get nodes, a dead-config signal), `migration:<rel>` nodes (parsed version/name), `script:<runner>:<name>` nodes (npm scripts, CI workflows, Makefile targets), and `reads-env` edges file → variable; `SCHEMA_VERSION` bumps to 2 so v1 caches rebuild. `query_knowledge_map` gains `{ env: "DATABASE_URL" }` — which files read a variable and whether a committed example declares it
+
+### Fixed
+- **The knowledge-map source was binary to git** (#629, PR #630) — the store's edge delimiter was a raw NUL byte embedded in the source, so git rendered every diff of `knowledge-map.js` as `Bin` (that is why PR #627's diff was unreviewable). The delimiter is now the escaped form (backslash-u0000 in source) — identical runtime behavior, reviewable text diffs, and a regression test pins the file stays NUL-free
+
+---
+
 ## [8.41.0] — 2026-09-14
 
 ### Added

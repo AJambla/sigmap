@@ -1,13 +1,13 @@
 ---
 title: Roadmap
-description: SigMap version history and roadmap. From v0.0 to v8.41.0, with recent releases completing the grounded-codegen plan — a realistic §9 ablation (real-symbol corpus, exact-signature grounding, --verbose), a Gemini (AI Studio) provider for the §9 ablation, the init Creation-workflow CLAUDE.md block, scaffold persistence, the LLM A/B hallucination ablation harness, the sigmap create orchestrator and its four guard stages (scaffold, verify-plan, verify-ai-output, review-pr), the conventions command with its full flag set (--conflicts, --inject, --report, --ci, --fix, --update), the grounding benchmark, read-time self-heal, live-index MCP write hooks, the get_callee_signatures MCP tool (exact callee signatures), realistic per-query savings, release-pipeline robustness (bundle integrity + version.json gates, standalone-bundle smoke test), the sigmap gain token-savings dashboard, supply-chain hardening (zero system-shell access), Squeeze input minimization with symbol enrichment, source-of-truth llms.txt, the verify-ai-output Hallucination Guard, and Memory tools (note, status, read_memory MCP tool).
+description: SigMap version history and roadmap. From v0.0 to v8.42.0, with recent releases completing the grounded-codegen plan — a realistic §9 ablation (real-symbol corpus, exact-signature grounding, --verbose), a Gemini (AI Studio) provider for the §9 ablation, the init Creation-workflow CLAUDE.md block, scaffold persistence, the LLM A/B hallucination ablation harness, the sigmap create orchestrator and its four guard stages (scaffold, verify-plan, verify-ai-output, review-pr), the conventions command with its full flag set (--conflicts, --inject, --report, --ci, --fix, --update), the grounding benchmark, read-time self-heal, live-index MCP write hooks, the get_callee_signatures MCP tool (exact callee signatures), realistic per-query savings, release-pipeline robustness (bundle integrity + version.json gates, standalone-bundle smoke test), the sigmap gain token-savings dashboard, supply-chain hardening (zero system-shell access), Squeeze input minimization with symbol enrichment, source-of-truth llms.txt, the verify-ai-output Hallucination Guard, and Memory tools (note, status, read_memory MCP tool).
 head:
   - - meta
     - property: og:title
       content: "SigMap Roadmap — version history and upcoming features"
   - - meta
     - property: og:description
-      content: "181 versions shipped. See what changed in each release and what is coming next."
+      content: "182 versions shipped. See what changed in each release and what is coming next."
   - - meta
     - property: og:url
       content: "https://sigmap.io/guide/roadmap"
@@ -20,7 +20,7 @@ head:
 ---
 # Roadmap
 
-One hundred eighty-one versions shipped. MIT open source from day one.
+One hundred eighty-two versions shipped. MIT open source from day one.
 
 **Stats:** 96.6% overall token reduction · 78.6% retrieval hit@5 (1.73× measured lift vs single-shot grep) · 98.0% test-discovery F1 · installed-library grounding (JS/TS + Python) · method-level call-graph (JS/TS, Python, Java, Go, Rust, Kotlin, Scala) · 22 MCP tools · 35 languages · 17-language source resolver · 0 npm deps
 
@@ -835,6 +835,18 @@ Two milestones in one release. **`verify-ai-output` Reliable MVP** (#232) grows 
 **Tags:** `KNOWN_LIMITATIONS.md` · `extraction honesty` · `tier label` · `drift guard` · `G1` · `#520` · `PR #521`
 
 **Impact:** the credibility gap a skeptical reviewer finds first is closed in writing; 6 new guard checks (133 files); zero runtime changes.
+
+---
+
+### v8.42.0 — the map learns the environment ✓ (2026-09-14)
+
+**Minor release — knowledge map increment 2 of #543.** The store gains the three node kinds increment 1 left out: **`env:<NAME>`** (with a committed-`.env.example` flag — a variable declared in the example but read nowhere still gets a node, which is exactly the dead-config signal), **`migration:<rel>`** (parsed version and name across Rails/Flyway/Prisma/timestamped conventions), and **`script:<runner>:<name>`** (npm scripts, CI workflows, Makefile targets). The new **`reads-env`** edge carries per-file attribution — `query_knowledge_map({ env: "DATABASE_URL" })` answers "which files read this variable, and is it declared?" — a question that previously took a repo-wide grep plus a manual `.env.example` cross-check.
+
+The producers were the point: `env-schema`, `migrations`, and `build-ci` rendered markdown tables and threw the structure away — the env scan collapsed per-file hits into one Set. Each now exposes a structured collector (the `collectRoutes` precedent) with the rendering derived from it, byte-identical. And a fix with a story: the store's edge delimiter was a **raw NUL byte in the source**, which made git treat `knowledge-map.js` as binary — increment 1's own PR diff was unreviewable because of it. Now the escaped form, with a regression test pinning the file stays text.
+
+**Tags:** `env:<NAME>` · `reads-env` · `collectEnvReads` · `SCHEMA_VERSION 2` · `NUL escape` · `#543 increment 2` · `#629` · `PR #630`
+
+**Impact:** on sigmap itself: 13 env-var, 13 migration, 52 script nodes and 24 reads-env edges appear; v1 caches rebuild automatically; the store source is git-diffable text from now on. 25 fixture + 158 integration tests passing (knowledge-map suite 7 → 14).
 
 ---
 

@@ -68,11 +68,20 @@ function makeTargets(cwd, rows) {
   }
 }
 
-function analyze(files, cwd) {
+/**
+ * Structured build/CI target rows (#629): npm scripts, workflow files, and
+ * Makefile targets, each `{ kind: 'script'|'ci'|'make', name, detail }`.
+ */
+function collectTargets(cwd) {
   const rows = [];
   npmScripts(cwd, rows);
   ciWorkflows(cwd, rows);
   makeTargets(cwd, rows);
+  return rows;
+}
+
+function analyze(files, cwd) {
+  const rows = collectTargets(cwd);
   if (rows.length === 0) return '';
 
   const lines = [
@@ -88,4 +97,4 @@ function analyze(files, cwd) {
   return lines.join('\n');
 }
 
-module.exports = { analyze };
+module.exports = { analyze, collectTargets };
