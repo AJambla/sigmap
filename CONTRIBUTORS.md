@@ -35,6 +35,9 @@ To ensure proper attribution:
 
 We welcome contributions! See [Contributing](./docs/CONTRIBUTING.md) for guidelines.
 
+### Recent Contributors (v8.49.0)
+- **@manojmallick** — feat(judge): J4 confidence + explainability — per-claim grounding routes (`context`/`repo`/ungrounded) with EP-style coverage, and a deterministic auditable `confidence: { level, basis }` on every verdict; human output gains Confidence + Claims lines, JSON additions fully additive (#653, PR #654)
+
 ### Recent Contributors (v8.48.0)
 - **@manojmallick** — feat(retrieval): B2 repo-mined query expansion — per-repo co-occurrence synonyms with precision filters and an mtime-keyed cache, opt-in via `retrieval.minedExpansions`; measure gate extended to all 23 corpora (299 tasks), verdict recorded: cross-repo positive, hard split negative, default off (#649, PR #650 + #651)
 
