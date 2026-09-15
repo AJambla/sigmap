@@ -419,7 +419,8 @@ function extractFileDeps(filePath, content, fileSet, cwd, ctx) {
  * @param {{ rPackage?: string, rLocalDefs?: Map<string,string> }} [ctx]
  *        Optional cross-file context for namespace-aware resolution. Built
  *        automatically by `buildFromCwd` when DESCRIPTION + NAMESPACE exist.
- * @returns {{ forward: Map<string,string[]>, reverse: Map<string,string[]> }}
+ * @returns {{ forward: Map<string,string[]>, reverse: Map<string,string[]>,
+ *             realPaths: Map<string,string> }}
  */
 function build(files, cwd, ctx) {
   const fileSet = new Set(files.map((f) => path.resolve(f)));
@@ -432,10 +433,16 @@ function build(files, cwd, ctx) {
   const forward = new Map();
   const reverse = new Map();
 
+  // Node keys are lowercased for case-insensitive matching, which loses the
+  // real spelling every display surface needs. Keep the original-case path
+  // alongside so renderers can recover it (see src/graph/path-key displayPath).
+  const realPaths = new Map();
+
   // Initialise every known file in both maps (ensures isolated files appear)
   // Store using normalized paths for Windows compatibility
   for (const f of fileSet) {
     const normF = normalizePath(f);
+    if (!realPaths.has(normF)) realPaths.set(normF, f);
     if (!forward.has(normF)) forward.set(normF, []);
     if (!reverse.has(normF)) reverse.set(normF, []);
   }
@@ -459,7 +466,7 @@ function build(files, cwd, ctx) {
     }
   }
 
-  return { forward, reverse };
+  return { forward, reverse, realPaths };
 }
 
 // Directory names assumed when neither the caller nor the project config says
@@ -502,7 +509,8 @@ function _configuredSrcDirs(cwd) {
  * @param {string[]} [opts.srcDirs]
  * @param {string[]} [opts.exclude]
  * @param {number}   [opts.maxDepth] - walk depth from each srcDir root
- * @returns {{ forward: Map<string,string[]>, reverse: Map<string,string[]> }}
+ * @returns {{ forward: Map<string,string[]>, reverse: Map<string,string[]>,
+ *             realPaths: Map<string,string> }}
  */
 function buildFromCwd(cwd, opts) {
   // R-package layouts use `R/` and `inst/`; Shiny apps put helpers in `R/`.

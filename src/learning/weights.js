@@ -7,6 +7,9 @@ const DECAY = 0.95;
 const MAX_MULT = 3.0;
 const MIN_MULT = 0.30;
 const BASELINE = 1.0;
+// A multiplier this close to neutral changes no ranking; dropping it keeps
+// .context/weights.json from accumulating decayed-out noise forever.
+const NEUTRAL_EPSILON = 0.01;
 
 function weightsPath(cwd) {
   return path.join(cwd, '.context', 'weights.json');
@@ -38,7 +41,7 @@ function sanitizeWeights(cwd, weights) {
     const normalized = normalizeFile(cwd, filePath);
     if (!normalized) continue;
     const mult = clampMultiplier(Number(raw));
-    if (Math.abs(mult - BASELINE) < 1e-9) continue;
+    if (Math.abs(mult - BASELINE) < NEUTRAL_EPSILON) continue;
     out[normalized] = mult;
   }
 
@@ -83,8 +86,12 @@ function updateWeights(cwd, opts = {}) {
 
   const weights = loadWeights(cwd);
 
+  // Decay toward the NEUTRAL baseline, not toward zero. `w * DECAY` converges
+  // on 0 (floor-clamped at MIN_MULT), so every unrelated `learn` call deepened
+  // penalties forever and dragged boosts down through 1.0 into penalty
+  // territory — the opposite of what `weights` documents.
   for (const key of Object.keys(weights)) {
-    weights[key] = clampMultiplier(weights[key] * DECAY);
+    weights[key] = clampMultiplier(BASELINE + (weights[key] - BASELINE) * DECAY);
   }
 
   const good = [];
@@ -154,6 +161,7 @@ function importWeights(cwd, importPath, replace) {
 module.exports = {
   BASELINE,
   DECAY,
+  NEUTRAL_EPSILON,
   MAX_MULT,
   MIN_MULT,
   weightsPath,

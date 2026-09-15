@@ -11,6 +11,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { displayPath } = require('../graph/path-key');
 
 const HUB_LIMIT = 8;
 const ENTRY_LIMIT = 8;
@@ -18,9 +19,10 @@ const MODULE_LIMIT = 20;
 const KEY_FILE_LIMIT = 3;
 
 // Graph keys come from src/graph/builder's normalizePath (normalized +
-// lowercased), so relativize against the same normalization of cwd.
-function _rel(cwd, f) {
-  return path.relative(path.normalize(cwd).toLowerCase(), f).replace(/\\/g, '/');
+// lowercased). `realPaths` (carried on the graph) restores the original case;
+// without it we still relativize case-insensitively rather than climbing out.
+function _rel(cwd, f, realPaths) {
+  return displayPath(f, cwd, realPaths);
 }
 
 function _pct(fraction) {
@@ -75,15 +77,16 @@ function _flow(cwd) {
     if (!graph || !graph.forward || graph.forward.size === 0) return null;
 
     const importersOf = (f) => (graph.reverse.get(f) || []).length;
+    const realPaths = graph.realPaths;
     const hubs = [...graph.reverse.entries()]
-      .map(([f, importers]) => ({ file: _rel(cwd, f), importers: importers.length }))
+      .map(([f, importers]) => ({ file: _rel(cwd, f, realPaths), importers: importers.length }))
       .filter((h) => h.importers > 0)
       .sort((a, b) => b.importers - a.importers || a.file.localeCompare(b.file))
       .slice(0, HUB_LIMIT);
 
     const entryPoints = [...graph.forward.entries()]
       .filter(([f, deps]) => deps.length > 0 && importersOf(f) === 0)
-      .map(([f, deps]) => ({ file: _rel(cwd, f), imports: deps.length }))
+      .map(([f, deps]) => ({ file: _rel(cwd, f, realPaths), imports: deps.length }))
       .sort((a, b) => b.imports - a.imports || a.file.localeCompare(b.file))
       .slice(0, ENTRY_LIMIT);
 

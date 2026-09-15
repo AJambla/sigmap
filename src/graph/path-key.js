@@ -23,4 +23,34 @@ function graphKey(p) {
   return path.normalize(String(p)).toLowerCase();
 }
 
-module.exports = { graphKey };
+/**
+ * Render a graph node key as a repo-relative path in its ORIGINAL case.
+ *
+ * Keys are lowercased for identity (see above), but `path.relative(cwd, key)`
+ * then finds no common prefix on any checkout whose path contains an uppercase
+ * letter (every macOS `/Users/...`) and climbs to the filesystem root. Graphs
+ * carry a `realPaths` map (key -> original-case absolute path) so display can
+ * recover the real spelling; the case-insensitive prefix strip below is the
+ * fallback for keys that predate the map or came from another graph.
+ *
+ * @param {string} key              graph node key (or any absolute path)
+ * @param {string} cwd              project root
+ * @param {Map<string,string>} [realPaths]
+ * @returns {string} repo-relative, forward-slashed, original case where known
+ */
+function displayPath(key, cwd, realPaths) {
+  const real = (realPaths && realPaths.get(key)) || key;
+  const rel = path.relative(cwd, real);
+  if (rel && !rel.startsWith('..') && !path.isAbsolute(rel)) {
+    return rel.replace(/\\/g, '/');
+  }
+  // Fallback: strip the cwd prefix case-insensitively rather than climbing out.
+  const norm = path.normalize(real);
+  const normCwd = path.normalize(cwd);
+  if (norm.toLowerCase().startsWith(normCwd.toLowerCase())) {
+    return norm.slice(normCwd.length).replace(/^[\\/]+/, '').replace(/\\/g, '/');
+  }
+  return rel.replace(/\\/g, '/');
+}
+
+module.exports = { graphKey, displayPath };
