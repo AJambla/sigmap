@@ -35,6 +35,9 @@ To ensure proper attribution:
 
 We welcome contributions! See [Contributing](./docs/CONTRIBUTING.md) for guidelines.
 
+### Recent Contributors (v8.48.0)
+- **@manojmallick** — feat(retrieval): B2 repo-mined query expansion — per-repo co-occurrence synonyms with precision filters and an mtime-keyed cache, opt-in via `retrieval.minedExpansions`; measure gate extended to all 23 corpora (299 tasks), verdict recorded: cross-repo positive, hard split negative, default off (#649, PR #650 + #651)
+
 ### Recent Contributors (v8.47.0)
 - **@manojmallick** — feat(java): G4 increment 3 — Java extractor migrated to the balanced-scanner core (string-safe comments, masked brace counting, annotation-arg params, nested generic bounds) with the modern-Java surface: generic type names, records, sealed types, implicit-public interface methods; fixture parity byte-exact, retrieval gate PASS (#646, PR #647)
 

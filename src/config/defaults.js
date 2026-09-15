@@ -173,6 +173,9 @@ const DEFAULTS = {
     centralityBlend: false,
     // Append route pseudo-signatures to the rankable index (opt-in, measure-gated)
     surfaceEnrichment: false,
+    // Repo-mined query expansion: per-repo co-occurrence synonyms cached in
+    // .context/mined-expansions.json (B2, opt-in, measure-gated)
+    minedExpansions: false,
   },
 
   // Host-toolchain exactness tiers (#542 T2, opt-in, silent regex fallback).

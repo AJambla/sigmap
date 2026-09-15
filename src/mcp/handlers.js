@@ -424,6 +424,7 @@ function queryContext(args, cwd) {
     // Opt-in call-graph neighbor boost + surface enrichment + centrality blend — non-fatal
     let callGraph = null;
     let centrality = null;
+    let expansions = null;
     try {
       const { loadConfig } = require('../config/loader');
       const retrieval = loadConfig(cwd).retrieval;
@@ -436,8 +437,11 @@ function queryContext(args, cwd) {
       if (retrieval && retrieval.centralityBlend && graph) {
         centrality = require('../graph/centrality').computeCentrality(graph);
       }
+      if (retrieval && retrieval.minedExpansions) {
+        expansions = require('../retrieval/mined-expansions').loadOrMine(cwd).expansions;
+      }
     } catch (_) {}
-    const results = rank(args.query, index, { topK, cwd, graph, callGraph, centrality });
+    const results = rank(args.query, index, { topK, cwd, graph, callGraph, centrality, expansions });
     return formatRankTable(results, args.query);
   } catch (err) {
     return `_query_context failed: ${err.message}_`;
