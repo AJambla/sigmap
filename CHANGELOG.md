@@ -10,6 +10,13 @@ Format: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [8.48.0] — 2026-09-15
+
+### Added
+- **Repo-mined query expansion behind a measure gate (B2)** (#649, PR #650 + #651) — the static `EXPANSION_GROUPS` synonym table is a global prior; the new `src/retrieval/mined-expansions.js` mines a per-repo one: tokens co-occurring within the same file's path + signature vocabulary become weighted expansion candidates ("auth" ↔ "session" learned from *this* repo). Precision filters — document-frequency floor and ceiling, minimum co-occurrence, top-4 neighbors by conditional probability, static-pair exclusion — with deterministic sorted JSON cached at `.context/mined-expansions.json` (mtime-keyed). `expandQuery` merges mined synonyms below the curated weight (original > static ≥ mined, never overriding); wired opt-in as **`retrieval.minedExpansions`** through `ask`/`--query`/`query_context`. The measure gate (`npm run benchmark:mined-expansions`, report committed) covered **all 23 corpora (299 tasks)** after PR #651 fixed the corpus mapping that silently skipped the self-repo splits: cross-repo hit@5 **89.5% → 90.5%** (fastify +1) and JVM +1 (akka) — the first retrieval feature in the series to measure above zero — but the leak-free **hard split regressed 67/90 → 66/90** and overall MRR fell 0.562 → 0.559, the exact hit@5-only trap documented in `bm25.js`. **Default stays off**; the wins live on sparse-context repos and the standing benchmark is the gate for revisiting. Deterministic, diffable, zero deps — SigMap's answer to embeddings
+
+---
+
 ## [8.47.0] — 2026-09-15
 
 ### Added
