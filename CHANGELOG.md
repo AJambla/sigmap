@@ -8,8 +8,15 @@ Format: [Semantic Versioning](https://semver.org/)
 
 ## [Unreleased]
 
+---
+
+## [8.49.1] — 2026-09-15
+
 ### Fixed
-- **`sigmap redact` masks unquoted secrets (M7)** (#668, PR #671) — the Generic Secret pattern required a quoted value, so the common `.env`/YAML shape `password=SuperSecret123!` passed through unmasked while `password="SuperSecret123!"` was caught. The value alternation now also accepts an unquoted token up to whitespace/EOL (`password=…`, `api_key: …`), keeping the 8-character floor and the key list unchanged; quoted behaviour is byte-identical, and short (`password=x`), empty (`password=`) and benign lines are still ignored
+- **Signature scanning no longer redacts type annotations** (#680, PR #681) — **regression fix for v8.49.0.** The Generic Secret pattern widened in PR #671 (below) is shared with the signature scanner, where `secretScan` is **on by default** and `scan()` replaces the *entire* signature line. In code an unquoted value token is a type annotation, not a secret, so `function hash(password: PasswordHasher)`, `interface Creds { api_key: ApiKeyProvider }` and `const secret: SecretManagerClient = …` were silently replaced with `[REDACTED — Generic Secret detected in …]` in generated `CLAUDE.md`/`AGENTS.md` — auth-related declarations disappearing from context with no warning. The two consumers are now split instead of either being weakened by a heuristic: the unquoted variant is marked `textOnly` and skipped by the scanner, while `sigmap redact` keeps it in full. Signature scanning is byte-identical to pre-#671; the `redact` fix below is unaffected and all of its tests pass unmodified. **Anyone on v8.49.0 with secret-adjacent type names should upgrade**
+
+### Added
+- **`sigmap redact` masks unquoted secrets (M7)** (#668, PR #671) — thanks @tunglambk — the Generic Secret pattern required a quoted value, so the common `.env`/YAML shape `password=SuperSecret123!` passed through unmasked while `password="SuperSecret123!"` was caught. The value alternation now also accepts an unquoted token up to whitespace/EOL (`password=…`, `api_key: …`), keeping the 8-character floor and the key list unchanged; quoted behaviour is byte-identical, and short (`password=x`), empty (`password=`) and benign lines are still ignored. _(Merged shortly before the v8.49.0 release cut, so the code shipped in v8.49.0; recorded here with its scanner-side correction above.)_
 
 ---
 

@@ -904,7 +904,7 @@ Config: `sessionBudgetTokens` (budget threshold) and `contextTtlDays` (marks con
 
 ## redact
 
-Mask secrets in **arbitrary text** — a log, a diff, an AI answer draft — before sharing it, using the same 10-pattern bank that already redacts signatures at generation time, `get_lines` output, and evidence packs. Unlike the generation-time scanner (which replaces whole signature lines), `redact` masks only the matched substring, so surrounding text stays readable. Redacted text goes to **stdout** (pipe-clean); the summary goes to stderr.
+Mask secrets in **arbitrary text** — a log, a diff, an AI answer draft — before sharing it, using the same pattern bank that already redacts signatures at generation time, `get_lines` output, and evidence packs. Unlike the generation-time scanner (which replaces whole signature lines), `redact` masks only the matched substring, so surrounding text stays readable. Since **v8.49.1** `redact` additionally masks **unquoted** secret values (`password=…`, `api_key: …` — the common `.env`/YAML/CLI shape); that variant is text-only by design, because in code an unquoted value token is a type annotation (`password: PasswordHasher`) rather than a secret, so the signature scanner deliberately skips it. Redacted text goes to **stdout** (pipe-clean); the summary goes to stderr.
 
 ```bash
 sigmap redact server.log              # redact a file
@@ -1427,7 +1427,7 @@ sigmap bench --submit --json
 ────────────────────────────────────────────────────────
  SigMap Community Benchmark Submission
 ────────────────────────────────────────────────────────
- SigMap version : 8.49.0
+ SigMap version : 8.49.1
  Benchmark ID   : sigmap-v8.49-main
  Submitted      : 2026-09-13
 ────────────────────────────────────────────────────────
