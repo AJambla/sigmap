@@ -1,6 +1,6 @@
 {
-  "version": "8.48.0",
-  "timestamp": "2026-09-15T05:36:23.331Z",
+  "version": "8.49.0",
+  "timestamp": "2026-09-15T06:46:46.420Z",
   "assumptions": {
     "callsPerDay": 10,
     "models": [

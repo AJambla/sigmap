@@ -78,12 +78,12 @@ features:
 
 <div style="max-width:840px;margin:0 auto;padding:18px 24px 0;text-align:center">
 <div style="display:inline-flex;flex-wrap:wrap;gap:.5rem;justify-content:center;background:var(--vp-c-brand-soft,#ede9fe);border:1px solid rgba(124,106,247,.25);border-radius:999px;padding:.55rem .9rem;font-size:.9rem;color:var(--vp-c-text-1)">
-  <span><strong>Release:</strong> v8.48.0</span>
+  <span><strong>Release:</strong> v8.49.0</span>
   <span>·</span>
   <span><strong>New — Elixir and Astro join, and a lying map dies:</strong> Elixir lands with @spec return hints and alias/import edges that genuinely resolve; Astro frontmatter runs through the real TypeScript extractor. And the CLI's drifted copy of the resolution map is deleted — Lua and GDScript had been silently falling to the generic fallback while their extractors passed every direct test. 35 languages, zero dependencies, offline, deterministic.</span>
 </div>
 <div style="margin-top:.4rem;display:inline-flex;flex-wrap:wrap;gap:.5rem;justify-content:center;background:var(--vp-c-default-soft,#f3f4f6);border:1px solid rgba(0,0,0,.08);border-radius:999px;padding:.55rem .9rem;font-size:.9rem;color:var(--vp-c-text-2)">
-  <span><strong>Benchmark:</strong> sigmap-v8.48-main</span>
+  <span><strong>Benchmark:</strong> sigmap-v8.49-main</span>
   <span>·</span>
   <span>78.6% hit@5 · 96.6% token reduction · 2026-09-15</span>
 </div>
@@ -176,7 +176,7 @@ See the full [end-to-end walkthrough](/guide/walkthrough) to watch this in actio
 | Overall token reduction | — | **96.6%** |
 | GPT-4o overflow repos | 16/21 | **0/21** |
 
-Latest saved benchmark run: **2026-09-15 (v8.48.0)**.
+Latest saved benchmark run: **2026-09-15 (v8.49.0)**.
 
 </div>
 

@@ -8,6 +8,16 @@ Format: [Semantic Versioning](https://semver.org/)
 
 ## [Unreleased]
 
+### Fixed
+- **`sigmap redact` masks unquoted secrets (M7)** (#668, PR #671) — the Generic Secret pattern required a quoted value, so the common `.env`/YAML shape `password=SuperSecret123!` passed through unmasked while `password="SuperSecret123!"` was caught. The value alternation now also accepts an unquoted token up to whitespace/EOL (`password=…`, `api_key: …`), keeping the 8-character floor and the key list unchanged; quoted behaviour is byte-identical, and short (`password=x`), empty (`password=`) and benign lines are still ignored
+
+---
+
+## [8.49.0] — 2026-09-15
+
+### Added
+- **Judge confidence + checked-claims explainability (J4)** (#653, PR #654) — the judge returned a verdict and reasons but not *how sure it is* or *what it actually checked*: grounded claims were only counted, so a verdict resting on word overlap alone looked identical to one backed by structural verification of every claim. `claimGrounding` now emits an additive `checked` array — one record per claim with its grounding route (`"context"`: the context quotes it; `"repo"`: the structural pass cleared it; `null`: ungrounded) — plus an Evidence-Pack-style `coverage` ratio, and `judge()` derives a deterministic **`confidence: { level, basis }`**: `high` when the structural pass ran, every claim grounded, and the score clears the threshold by ≥ 0.15; `medium` for lexical-only checks or thin margins (ungrounded symbol findings are medium-certainty by the verify taxonomy); `low` when no concrete claims exist and the verdict rests on word overlap alone. The `basis` names the factors, so the level is auditable, not oracular. Human output gains `Confidence` and `Claims` lines; all JSON additions are additive and existing consumers are untouched
+
 ---
 
 ## [8.48.0] — 2026-09-15

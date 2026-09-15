@@ -14896,7 +14896,7 @@ __factories["./src/judge/judge-engine"] = function(module, exports) {
    * @returns {{ total: number, grounded: number, ungrounded: Array<{kind:string, value:string}>, structural: boolean }}
    */
   function claimGrounding(response, context, opts = {}) {
-    if (!response || !context) return { total: 0, grounded: 0, ungrounded: [], structural: false };
+    if (!response || !context) return { total: 0, grounded: 0, ungrounded: [], structural: false, checked: [], coverage: 0 };
     const ctxLower = context.toLowerCase();
 
     const raw = [];
@@ -14938,6 +14938,7 @@ __factories["./src/judge/judge-engine"] = function(module, exports) {
     };
 
     const ungrounded = [];
+    const checked = [];
     let grounded = 0;
     for (const c of claims) {
       // A file claim is grounded if its basename appears in context (the answer
@@ -14946,12 +14947,25 @@ __factories["./src/judge/judge-engine"] = function(module, exports) {
       const needle = c.value.toLowerCase();
       const base = c.kind === 'file' ? (c.value.split('/').pop() || c.value).toLowerCase() : needle;
       const lexical = ctxLower.includes(base) || ctxLower.includes(needle);
-      const structural = flagged !== null && structuralRan(c) && !flagged.has(`${c.kind}::${c.value}`);
-      if (lexical || structural) grounded++;
+      const structuralHit = flagged !== null && structuralRan(c) && !flagged.has(`${c.kind}::${c.value}`);
+      // Explainability (J4, #653): every claim reports its grounding route —
+      // "context" (the context quotes it), "repo" (the structural pass cleared
+      // it), or null (nothing grounds it). Context is reported first when both
+      // apply, since it needs no repo at all.
+      const via = lexical ? 'context' : (structuralHit ? 'repo' : null);
+      checked.push({ kind: c.kind, value: c.value, grounded: via !== null, via });
+      if (via !== null) grounded++;
       else ungrounded.push({ kind: c.kind, value: c.value });
     }
 
-    return { total: claims.length, grounded, ungrounded, structural: flagged !== null };
+    return {
+      total: claims.length,
+      grounded,
+      ungrounded,
+      structural: flagged !== null,
+      checked,
+      coverage: claims.length ? Math.round((grounded / claims.length) * 1000) / 1000 : 0,
+    };
   }
 
   const GENERIC_MARKERS = [
@@ -15016,7 +15030,27 @@ __factories["./src/judge/judge-engine"] = function(module, exports) {
     }
 
     const verdict = score >= threshold && reasons.length === 0 ? 'pass' : 'fail';
-    const result = { score, verdict, reasons, claims };
+
+    // Confidence in the verdict (J4, #653) — a deterministic level with an
+    // auditable basis, aligned with the Evidence Pack's confidence vocabulary:
+    //   high   — the structural pass ran, every claim grounded, and the score
+    //            clears the threshold by ≥ 0.15
+    //   medium — claims were checked (lexically or with ungrounded findings —
+    //            symbol detection is medium-certainty by the verify taxonomy),
+    //            or the margin alone is comfortable
+    //   low    — no concrete claims and a thin margin: the verdict rests on
+    //            word overlap alone
+    const margin = Math.round((score - threshold) * 1000) / 1000;
+    const basis = [`${claims.total} claim(s) checked`];
+    if (claims.structural) basis.push('structural pass ran');
+    basis.push(`score margin ${margin}`);
+    let level;
+    if (claims.structural && claims.total > 0 && claims.ungrounded.length === 0 && margin >= 0.15) level = 'high';
+    else if (claims.total > 0 || margin >= 0.15) level = 'medium';
+    else level = 'low';
+    const confidence = { level, basis };
+
+    const result = { score, verdict, reasons, claims, confidence };
 
     if (opts.learn) {
       const learning = {
@@ -17937,7 +17971,7 @@ __factories["./src/mcp/server"] = function(module, exports) {
 
   const SERVER_INFO = {
     name: 'sigmap',
-    version: '8.48.0',
+    version: '8.49.0',
     description: 'SigMap MCP server — code signatures on demand',
   };
 
@@ -21284,7 +21318,9 @@ __factories["./src/security/patterns"] = function(module, exports) {
     },
     {
       name: 'Generic Secret',
-      regex: /(secret|password|passwd|api_key|apikey|auth_token|access_token)\s*[:=]\s*['"][^'"]{8,}['"]/i,
+      // Quoted values as before, or an unquoted token up to whitespace/EOL
+      // (`password=…`, `api_key: …`); the 8-char floor limits false positives.
+      regex: /(secret|password|passwd|api_key|apikey|auth_token|access_token)\s*[:=]\s*(?:['"][^'"]{8,}['"]|[^\s'"]{8,})/i,
     },
   ];
 
@@ -24630,7 +24666,7 @@ function __tryGit(args, opts = {}) {
   catch (_) { return ''; }
 }
 
-const VERSION = '8.48.0';
+const VERSION = '8.49.0';
 const MARKER = '\n\n## Auto-generated signatures\n<!-- Updated by gen-context.js -->\n';
 
 function requireSourceOrBundled(key) {
@@ -28012,6 +28048,10 @@ function main() {
         ` sigmap judge`,
         ` Score     : ${result.score}`,
         ` Verdict   : ${result.verdict}`,
+        result.confidence ? ` Confidence: ${result.confidence.level} (${result.confidence.basis.join(' · ')})` : null,
+        result.claims && result.claims.total > 0
+          ? ` Claims    : ${result.claims.grounded}/${result.claims.total} grounded (${result.claims.checked.filter((c) => c.via === 'context').length} context, ${result.claims.checked.filter((c) => c.via === 'repo').length} repo)`
+          : null,
         result.reasons.length ? ` Reasons   :\n   ${result.reasons.join('\n   ')}` : ` Reasons   : none`,
         result.learning
           ? ` Learning  : ${result.learning.applied ? result.learning.action : 'skipped'}${result.learning.files.length ? ` (${result.learning.files.join(', ')})` : ''}${result.learning.reason ? ` — ${result.learning.reason}` : ''}`
