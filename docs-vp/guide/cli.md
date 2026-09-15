@@ -379,14 +379,18 @@ sigmap judge --response response.txt --context .context/query-context.md --learn
  sigmap judge
  Score     : 0.72
  Verdict   : pass
+ Confidence: high (2 claim(s) checked · structural pass ran · score margin 0.47)
+ Claims    : 2/2 grounded (1 context, 1 repo)
  Reasons   : none
 ────────────────────────────────────────────
 ```
 
-JSON output (`--json`) carries `score`, `reasons`, the claim report, and a `verdict` field that drives the exit code:
+Since **v8.49.0 (J4)** the judge explains itself: a deterministic `confidence` level (`high` — structural pass ran, every claim grounded, comfortable score margin; `medium` — claims checked lexically only or a thin margin; `low` — no concrete claims, the verdict rests on word overlap alone) with an auditable `basis`, and a per-claim `checked` report stating each claim's grounding route (`"context"` — the context quotes it; `"repo"` — the structural pass cleared it; `null` — ungrounded). JSON output (`--json`) carries `score`, `reasons`, the claim report, `confidence`, and a `verdict` field that drives the exit code:
 
 ```json
-{ "score": 0.72, "reasons": [], "claims": { "total": 2, "grounded": 2, "ungrounded": [], "structural": true } }
+{ "score": 0.72, "reasons": [], "confidence": { "level": "high", "basis": ["2 claim(s) checked", "structural pass ran", "score margin 0.47"] },
+  "claims": { "total": 2, "grounded": 2, "ungrounded": [], "structural": true, "coverage": 1,
+              "checked": [{ "kind": "symbol", "value": "rank", "grounded": true, "via": "context" }] } }
 ```
 
 With `--learn`, judge becomes an opt-in feedback loop. It reads file headings from the context file (`### path` in generated context or `## path` in `.context/query-context.md`) and applies a small learned boost or penalty when groundedness is confidently high or low. Since **v8.45.0 (J2)** the verdict threshold and the learn band are configurable per repo via the [`judge` config section](/guide/config#judge) (`threshold`, `learnBoostAbove`, `learnPenalizeBelow`) — defaults are derived from a measured mixture corpus, and `--threshold` still overrides the config.

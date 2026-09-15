@@ -393,6 +393,53 @@ test('sigmap judge: repo-true symbol claim passes end-to-end (#640)', () => {
   assert.strictEqual(r.status, 0, `expected exit 0, got ${r.status}`);
 });
 
+// ── J4: confidence + checked-claims explainability (#653) ────────────────────
+
+// 23. every claim reports its grounding route
+test('claimGrounding: checked records carry the grounding route (#653)', () => {
+  const repoRoute = claimGrounding('Call `padded()` to pad.', unrelatedCtx, { cwd: dirS });
+  assert.deepStrictEqual(repoRoute.checked, [{ kind: 'symbol', value: 'padded', grounded: true, via: 'repo' }]);
+  assert.strictEqual(repoRoute.coverage, 1);
+  const ctxRoute = claimGrounding('Call `rank()` here.', 'function rank sorts results');
+  assert.deepStrictEqual(ctxRoute.checked, [{ kind: 'symbol', value: 'rank', grounded: true, via: 'context' }]);
+  const none = claimGrounding('Call `fabricatedQuantumFn()` now.', unrelatedCtx, { cwd: dirS });
+  assert.deepStrictEqual(none.checked[0].via, null);
+  assert.strictEqual(none.coverage, 0);
+});
+
+// 24. confidence levels are pinned
+test('judge: confidence high / medium / low derive as documented (#653)', () => {
+  const response = 'The padding helper calls `padded()` internally.';
+  const ctx = 'the padding helper lives in src and pads strings internally';
+  const high = judge(response, ctx, { cwd: dirS });
+  assert.strictEqual(high.confidence.level, 'high', JSON.stringify(high.confidence));
+  assert.ok(high.confidence.basis.some((b) => b.includes('structural pass ran')), JSON.stringify(high.confidence.basis));
+  const medium = judge(response, ctx, {});
+  assert.strictEqual(medium.confidence.level, 'medium', `no structural pass must cap at medium: ${JSON.stringify(medium.confidence)}`);
+  const low = judge('alpha beta gamma delta', 'epsilon zeta eta theta', {});
+  assert.strictEqual(low.confidence.level, 'low', `word-overlap-only verdict must be low: ${JSON.stringify(low.confidence)}`);
+});
+
+// 25. CLI carries the new fields; existing keys unchanged
+test('sigmap judge: human output shows Confidence + Claims; --json is additive (#653)', () => {
+  const resp3 = path.join(dirS, 'r2.txt');
+  const ctx3 = path.join(dirS, 'c2.txt');
+  fs.writeFileSync(resp3, 'The padding helper calls `padded()` internally.');
+  fs.writeFileSync(ctx3, 'the padding helper lives in src and pads strings internally');
+  const human = spawnSync(process.execPath, [SCRIPT, 'judge', '--response', resp3, '--context', ctx3], {
+    encoding: 'utf8', cwd: dirS, timeout: 120000,
+  });
+  assert.ok(human.stdout.includes('Confidence: high'), human.stdout);
+  assert.ok(human.stdout.includes('Claims    : 1/1 grounded'), human.stdout);
+  const json = spawnSync(process.execPath, [SCRIPT, 'judge', '--response', resp3, '--context', ctx3, '--json'], {
+    encoding: 'utf8', cwd: dirS, timeout: 120000,
+  });
+  const parsed = JSON.parse(json.stdout.trim());
+  for (const k of ['score', 'reasons', 'claims', 'confidence']) assert.ok(k in parsed, `missing ${k}`);
+  assert.strictEqual(parsed.confidence.level, 'high');
+  assert.ok(Array.isArray(parsed.claims.checked) && parsed.claims.checked[0].via === 'repo', JSON.stringify(parsed.claims));
+});
+
 // Cleanup
 try {
   fs.rmSync(tmpDir, { recursive: true });
