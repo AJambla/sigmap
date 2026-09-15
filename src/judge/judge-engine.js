@@ -55,7 +55,7 @@ function groundedness(response, context) {
  * @returns {{ total: number, grounded: number, ungrounded: Array<{kind:string, value:string}>, structural: boolean }}
  */
 function claimGrounding(response, context, opts = {}) {
-  if (!response || !context) return { total: 0, grounded: 0, ungrounded: [], structural: false };
+  if (!response || !context) return { total: 0, grounded: 0, ungrounded: [], structural: false, checked: [], coverage: 0 };
   const ctxLower = context.toLowerCase();
 
   const raw = [];
@@ -97,6 +97,7 @@ function claimGrounding(response, context, opts = {}) {
   };
 
   const ungrounded = [];
+  const checked = [];
   let grounded = 0;
   for (const c of claims) {
     // A file claim is grounded if its basename appears in context (the answer
@@ -105,12 +106,25 @@ function claimGrounding(response, context, opts = {}) {
     const needle = c.value.toLowerCase();
     const base = c.kind === 'file' ? (c.value.split('/').pop() || c.value).toLowerCase() : needle;
     const lexical = ctxLower.includes(base) || ctxLower.includes(needle);
-    const structural = flagged !== null && structuralRan(c) && !flagged.has(`${c.kind}::${c.value}`);
-    if (lexical || structural) grounded++;
+    const structuralHit = flagged !== null && structuralRan(c) && !flagged.has(`${c.kind}::${c.value}`);
+    // Explainability (J4, #653): every claim reports its grounding route —
+    // "context" (the context quotes it), "repo" (the structural pass cleared
+    // it), or null (nothing grounds it). Context is reported first when both
+    // apply, since it needs no repo at all.
+    const via = lexical ? 'context' : (structuralHit ? 'repo' : null);
+    checked.push({ kind: c.kind, value: c.value, grounded: via !== null, via });
+    if (via !== null) grounded++;
     else ungrounded.push({ kind: c.kind, value: c.value });
   }
 
-  return { total: claims.length, grounded, ungrounded, structural: flagged !== null };
+  return {
+    total: claims.length,
+    grounded,
+    ungrounded,
+    structural: flagged !== null,
+    checked,
+    coverage: claims.length ? Math.round((grounded / claims.length) * 1000) / 1000 : 0,
+  };
 }
 
 const GENERIC_MARKERS = [
@@ -175,7 +189,27 @@ function judge(response, context, opts = {}) {
   }
 
   const verdict = score >= threshold && reasons.length === 0 ? 'pass' : 'fail';
-  const result = { score, verdict, reasons, claims };
+
+  // Confidence in the verdict (J4, #653) — a deterministic level with an
+  // auditable basis, aligned with the Evidence Pack's confidence vocabulary:
+  //   high   — the structural pass ran, every claim grounded, and the score
+  //            clears the threshold by ≥ 0.15
+  //   medium — claims were checked (lexically or with ungrounded findings —
+  //            symbol detection is medium-certainty by the verify taxonomy),
+  //            or the margin alone is comfortable
+  //   low    — no concrete claims and a thin margin: the verdict rests on
+  //            word overlap alone
+  const margin = Math.round((score - threshold) * 1000) / 1000;
+  const basis = [`${claims.total} claim(s) checked`];
+  if (claims.structural) basis.push('structural pass ran');
+  basis.push(`score margin ${margin}`);
+  let level;
+  if (claims.structural && claims.total > 0 && claims.ungrounded.length === 0 && margin >= 0.15) level = 'high';
+  else if (claims.total > 0 || margin >= 0.15) level = 'medium';
+  else level = 'low';
+  const confidence = { level, basis };
+
+  const result = { score, verdict, reasons, claims, confidence };
 
   if (opts.learn) {
     const learning = {
