@@ -44,9 +44,18 @@ const PATTERNS = [
   },
   {
     name: 'Generic Secret',
-    // Quoted values as before, or an unquoted token up to whitespace/EOL
-    // (`password=…`, `api_key: …`); the 8-char floor limits false positives.
-    regex: /(secret|password|passwd|api_key|apikey|auth_token|access_token)\s*[:=]\s*(?:['"][^'"]{8,}['"]|[^\s'"]{8,})/i,
+    regex: /(secret|password|passwd|api_key|apikey|auth_token|access_token)\s*[:=]\s*['"][^'"]{8,}['"]/i,
+  },
+  {
+    name: 'Generic Secret',
+    // Unquoted values — `.env` / YAML / CLI shapes (`password=…`, `api_key: …`)
+    // that the quoted pattern above misses (#668). Marked textOnly because an
+    // unquoted value token is indistinguishable from a type annotation
+    // (`password: PasswordHasher`), and the signature scanner would replace
+    // the whole declaration; `sigmap redact` runs over real config/log text
+    // where the aggressive match is exactly right (#680).
+    textOnly: true,
+    regex: /(secret|password|passwd|api_key|apikey|auth_token|access_token)\s*[:=]\s*[^\s'"]{8,}/i,
   },
 ];
 

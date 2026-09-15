@@ -15,6 +15,7 @@ SigMap is built by a great community of contributors. Thank you to everyone who 
 - [Denis Solonenko](https://github.com/dsolonenko) — GDScript extractor (#146)
 - [Matt Van Horn](https://github.com/mvanhorn) — Testing, reliability improvements
 - [kumamaki](https://github.com/kumamaki) — Bug fixes, improvements
+- [Tung Lam](https://github.com/tunglambk) — Secret redaction: unquoted `.env`/YAML values (#668)
 
 ## Supporters
 
@@ -34,6 +35,10 @@ To ensure proper attribution:
 ## How to Contribute
 
 We welcome contributions! See [Contributing](./docs/CONTRIBUTING.md) for guidelines.
+
+### Recent Contributors (v8.49.1)
+- **[@tunglambk](https://github.com/tunglambk)** (Tung Lam) — fix(security): `sigmap redact` now masks unquoted `.env`/YAML secret values (`password=…`, `api_key: …`), not just quoted ones — first external contribution (#668, PR #671)
+- **@manojmallick** — fix(security): regression fix for v8.49.0 — the widened Generic Secret pattern is `textOnly` and skipped by the signature scanner, so type annotations (`password: PasswordHasher`) are no longer redacted out of generated context; `sigmap redact` keeps the full fix above (#680, PR #681)
 
 ### Recent Contributors (v8.49.0)
 - **@manojmallick** — feat(judge): J4 confidence + explainability — per-claim grounding routes (`context`/`repo`/ungrounded) with EP-style coverage, and a deterministic auditable `confidence: { level, basis }` on every verdict; human output gains Confidence + Claims lines, JSON additions fully additive (#653, PR #654)

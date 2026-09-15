@@ -1,13 +1,13 @@
 ---
 title: Roadmap
-description: SigMap version history and roadmap. From v0.0 to v8.49.0, with recent releases completing the grounded-codegen plan — a realistic §9 ablation (real-symbol corpus, exact-signature grounding, --verbose), a Gemini (AI Studio) provider for the §9 ablation, the init Creation-workflow CLAUDE.md block, scaffold persistence, the LLM A/B hallucination ablation harness, the sigmap create orchestrator and its four guard stages (scaffold, verify-plan, verify-ai-output, review-pr), the conventions command with its full flag set (--conflicts, --inject, --report, --ci, --fix, --update), the grounding benchmark, read-time self-heal, live-index MCP write hooks, the get_callee_signatures MCP tool (exact callee signatures), realistic per-query savings, release-pipeline robustness (bundle integrity + version.json gates, standalone-bundle smoke test), the sigmap gain token-savings dashboard, supply-chain hardening (zero system-shell access), Squeeze input minimization with symbol enrichment, source-of-truth llms.txt, the verify-ai-output Hallucination Guard, and Memory tools (note, status, read_memory MCP tool).
+description: SigMap version history and roadmap. From v0.0 to v8.49.1, with recent releases completing the grounded-codegen plan — a realistic §9 ablation (real-symbol corpus, exact-signature grounding, --verbose), a Gemini (AI Studio) provider for the §9 ablation, the init Creation-workflow CLAUDE.md block, scaffold persistence, the LLM A/B hallucination ablation harness, the sigmap create orchestrator and its four guard stages (scaffold, verify-plan, verify-ai-output, review-pr), the conventions command with its full flag set (--conflicts, --inject, --report, --ci, --fix, --update), the grounding benchmark, read-time self-heal, live-index MCP write hooks, the get_callee_signatures MCP tool (exact callee signatures), realistic per-query savings, release-pipeline robustness (bundle integrity + version.json gates, standalone-bundle smoke test), the sigmap gain token-savings dashboard, supply-chain hardening (zero system-shell access), Squeeze input minimization with symbol enrichment, source-of-truth llms.txt, the verify-ai-output Hallucination Guard, and Memory tools (note, status, read_memory MCP tool).
 head:
   - - meta
     - property: og:title
       content: "SigMap Roadmap — version history and upcoming features"
   - - meta
     - property: og:description
-      content: "189 versions shipped. See what changed in each release and what is coming next."
+      content: "190 versions shipped. See what changed in each release and what is coming next."
   - - meta
     - property: og:url
       content: "https://sigmap.io/guide/roadmap"
@@ -835,6 +835,18 @@ Two milestones in one release. **`verify-ai-output` Reliable MVP** (#232) grows 
 **Tags:** `KNOWN_LIMITATIONS.md` · `extraction honesty` · `tier label` · `drift guard` · `G1` · `#520` · `PR #521`
 
 **Impact:** the credibility gap a skeptical reviewer finds first is closed in writing; 6 new guard checks (133 files); zero runtime changes.
+
+---
+
+### v8.49.1 — the redactor learns its place ✓ (2026-09-15)
+
+**Patch release — a regression fix for v8.49.0, and the project's first external code contribution.** [@tunglambk](https://github.com/tunglambk) fixed a real gap in `sigmap redact` (#668): the Generic Secret pattern only matched *quoted* values, so the most common `.env` shape — `password=SuperSecret123!` — passed through unmasked. Their fix widened the value alternation to accept an unquoted token, and it merged minutes before the v8.49.0 release cut, so it shipped in that release.
+
+The widened pattern is also shared with the **signature scanner**, where `secretScan` is on by default and `scan()` replaces the *whole* declaration — and in code, an unquoted value token is a type annotation. `function hash(password: PasswordHasher)` matched, so auth-adjacent signatures were silently vanishing from generated context in v8.49.0. Rather than weakening either consumer with a heuristic, the two are now split: the unquoted variant is marked `textOnly` and skipped by the scanner, while `redact` keeps it in full. Signature scanning returns to byte-identical pre-#671 behavior and every one of the contributor's tests passes unmodified — the fix and its blast radius, both intact.
+
+**Tags:** `textOnly` · `Generic Secret` · `secretScan` · `regression fix` · `first external contribution` · `#668` · `#680` · `PR #671` · `PR #681`
+
+**Impact:** v8.49.0's silent context corruption is closed; `redact` keeps the broader coverage; 2 new scanner regression tests. Anyone on v8.49.0 with secret-adjacent type names should upgrade.
 
 ---
 

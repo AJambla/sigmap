@@ -17971,7 +17971,7 @@ __factories["./src/mcp/server"] = function(module, exports) {
 
   const SERVER_INFO = {
     name: 'sigmap',
-    version: '8.49.0',
+    version: '8.49.1',
     description: 'SigMap MCP server — code signatures on demand',
   };
 
@@ -21318,9 +21318,18 @@ __factories["./src/security/patterns"] = function(module, exports) {
     },
     {
       name: 'Generic Secret',
-      // Quoted values as before, or an unquoted token up to whitespace/EOL
-      // (`password=…`, `api_key: …`); the 8-char floor limits false positives.
-      regex: /(secret|password|passwd|api_key|apikey|auth_token|access_token)\s*[:=]\s*(?:['"][^'"]{8,}['"]|[^\s'"]{8,})/i,
+      regex: /(secret|password|passwd|api_key|apikey|auth_token|access_token)\s*[:=]\s*['"][^'"]{8,}['"]/i,
+    },
+    {
+      name: 'Generic Secret',
+      // Unquoted values — `.env` / YAML / CLI shapes (`password=…`, `api_key: …`)
+      // that the quoted pattern above misses (#668). Marked textOnly because an
+      // unquoted value token is indistinguishable from a type annotation
+      // (`password: PasswordHasher`), and the signature scanner would replace
+      // the whole declaration; `sigmap redact` runs over real config/log text
+      // where the aggressive match is exactly right (#680).
+      textOnly: true,
+      regex: /(secret|password|passwd|api_key|apikey|auth_token|access_token)\s*[:=]\s*[^\s'"]{8,}/i,
     },
   ];
 
@@ -21410,6 +21419,10 @@ __factories["./src/security/scanner"] = function(module, exports) {
       const safe = signatures.map((sig) => {
         if (typeof sig !== 'string') return sig;
         for (const pattern of PATTERNS) {
+          // textOnly patterns are tuned for free-form config/log text (sigmap
+          // redact). Signatures are code: an unquoted value token there is a
+          // type annotation, not a secret (#680).
+          if (pattern.textOnly) continue;
           if (pattern.regex.test(sig)) {
             redacted = true;
             return `[REDACTED — ${pattern.name} detected in ${filePath}]`;
@@ -24666,7 +24679,7 @@ function __tryGit(args, opts = {}) {
   catch (_) { return ''; }
 }
 
-const VERSION = '8.49.0';
+const VERSION = '8.49.1';
 const MARKER = '\n\n## Auto-generated signatures\n<!-- Updated by gen-context.js -->\n';
 
 function requireSourceOrBundled(key) {

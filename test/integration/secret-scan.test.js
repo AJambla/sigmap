@@ -124,6 +124,28 @@ test('Only first matching pattern redacts (one message per sig)', () => {
   assert.strictEqual(count, 1);
 });
 
+// --- #680: textOnly patterns never run against signatures ---
+// The unquoted Generic Secret value (#668, for `sigmap redact`) is
+// indistinguishable from a type annotation in code, and scan() replaces the
+// WHOLE declaration — so these must survive signature scanning untouched.
+test('type annotations with secret-ish names are never redacted', () => {
+  const sigs = [
+    'function hash(password: PasswordHasher)  :12-14',
+    'interface Creds { api_key: ApiKeyProvider }  :3-5',
+    'const secret: SecretManagerClient = new X()  :1-1',
+    'def rotate(access_token: TokenRotationService)  :20-24',
+  ];
+  const { safe, redacted } = scan(sigs, 'auth.ts');
+  assert.strictEqual(redacted, false, `type annotations must not redact: ${JSON.stringify(safe)}`);
+  assert.deepStrictEqual(safe, sigs);
+});
+
+test('quoted secrets in signatures are still redacted', () => {
+  const { safe, redacted } = scan(['const password = "SuperSecret123!"  :4-4'], 'conf.ts');
+  assert.strictEqual(redacted, true);
+  assert.ok(safe[0].includes('[REDACTED'), safe[0]);
+});
+
 console.log('');
 console.log(`secret-scan: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);
