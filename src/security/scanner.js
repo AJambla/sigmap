@@ -19,6 +19,10 @@ function scan(signatures, filePath) {
     const safe = signatures.map((sig) => {
       if (typeof sig !== 'string') return sig;
       for (const pattern of PATTERNS) {
+        // textOnly patterns are tuned for free-form config/log text (sigmap
+        // redact). Signatures are code: an unquoted value token there is a
+        // type annotation, not a secret (#680).
+        if (pattern.textOnly) continue;
         if (pattern.regex.test(sig)) {
           redacted = true;
           return `[REDACTED — ${pattern.name} detected in ${filePath}]`;
