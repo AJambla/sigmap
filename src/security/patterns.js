@@ -44,7 +44,9 @@ const PATTERNS = [
   },
   {
     name: 'Generic Secret',
-    regex: /(secret|password|passwd|api_key|apikey|auth_token|access_token)\s*[:=]\s*['"][^'"]{8,}['"]/i,
+    // Quoted values as before, or an unquoted token up to whitespace/EOL
+    // (`password=…`, `api_key: …`); the 8-char floor limits false positives.
+    regex: /(secret|password|passwd|api_key|apikey|auth_token|access_token)\s*[:=]\s*(?:['"][^'"]{8,}['"]|[^\s'"]{8,})/i,
   },
 ];
 
