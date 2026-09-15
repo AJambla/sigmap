@@ -10,6 +10,8 @@
  *  4.  clean text passes through byte-identical with redacted: false
  *  5.  CLI redact <file>: redacted text on stdout, summary on stderr
  *  6.  CLI stdin + --json returns the result object
+ *  7.  unquoted .env/YAML assignments are masked; short, empty and benign
+ *      lines are left untouched (#668)
  */
 
 const assert = require('assert');
@@ -89,6 +91,45 @@ test('clean text passes through byte-identical', () => {
   assert.deepStrictEqual(r.findings, []);
 });
 
+// Regression #668: the Generic Secret pattern required a quoted value, so the
+// common `.env` / YAML shape `password=value` passed through unmasked.
+test('masks unquoted .env assignment (password=value)', () => {
+  const r = redactText('password=SuperSecret123!');
+  assert.strictEqual(r.text, '[REDACTED:Generic Secret]');
+  assert.strictEqual(r.redacted, true);
+});
+
+test('masks unquoted assignment with an upper-case key (API_KEY=value)', () => {
+  const r = redactText('API_KEY=abcd1234efgh');
+  assert.strictEqual(r.text, '[REDACTED:Generic Secret]');
+});
+
+test('masks unquoted YAML assignment (password: value)', () => {
+  const r = redactText('password: SuperSecret123!');
+  assert.strictEqual(r.text, '[REDACTED:Generic Secret]');
+});
+
+test('quoted Generic Secret values are still masked', () => {
+  const r = redactText('password="SuperSecret123!"');
+  assert.strictEqual(r.text, '[REDACTED:Generic Secret]');
+});
+
+test('short, empty and non-secret lines stay untouched', () => {
+  const untouched = [
+    'password=x',
+    'password=',
+    'password=""',
+    'password_hint=abcdefgh',
+    'the password reset flow is documented',
+    'export function hashPassword(password)',
+  ];
+  for (const line of untouched) {
+    const r = redactText(line);
+    assert.strictEqual(r.text, line, `expected untouched: ${line}`);
+    assert.strictEqual(r.redacted, false, `expected no redaction: ${line}`);
+  }
+});
+
 test('CLI redact <file>: stdout redacted, stderr summary', () => {
   const tmp = path.join(os.tmpdir(), `sigmap-redact-${process.pid}.txt`);
   fs.writeFileSync(tmp, 'x AKIA1234567890ABCDEF y\n');
@@ -110,6 +151,14 @@ test('CLI stdin + --json returns the result object', () => {
   assert.strictEqual(j.redacted, true);
   assert.deepStrictEqual(j.counts, { 'GitHub Token': 1 });
   assert.ok(j.text.includes('[REDACTED:GitHub Token]'));
+});
+
+test('CLI stdin masks an unquoted assignment', () => {
+  const r = spawnSync(process.execPath, [SCRIPT, 'redact'],
+    { encoding: 'utf8', input: 'password=SuperSecret123!\n' });
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.strictEqual(r.stdout, '[REDACTED:Generic Secret]\n');
+  assert.ok(r.stderr.includes('masked 1 secret'), r.stderr);
 });
 
 // ---------------------------------------------------------------------------

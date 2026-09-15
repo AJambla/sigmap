@@ -8,6 +8,9 @@ Format: [Semantic Versioning](https://semver.org/)
 
 ## [Unreleased]
 
+### Fixed
+- **`sigmap redact` masks unquoted secrets (M7)** (#668, PR #671) — the Generic Secret pattern required a quoted value, so the common `.env`/YAML shape `password=SuperSecret123!` passed through unmasked while `password="SuperSecret123!"` was caught. The value alternation now also accepts an unquoted token up to whitespace/EOL (`password=…`, `api_key: …`), keeping the 8-character floor and the key list unchanged; quoted behaviour is byte-identical, and short (`password=x`), empty (`password=`) and benign lines are still ignored
+
 ---
 
 ## [8.49.0] — 2026-09-15
