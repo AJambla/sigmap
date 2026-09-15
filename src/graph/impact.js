@@ -11,6 +11,7 @@
 
 const path = require('path');
 const { buildFromCwd } = require('./builder');
+const { displayPath } = require('./path-key');
 
 // Normalize paths for cross-platform consistency (same as in builder.js)
 function normalizePath(p) {
@@ -116,7 +117,8 @@ function isRouteFile(f) { return ROUTE_PATTERNS.some((re) => re.test(f.replace(/
 function getImpact(changedFile, graph, opts) {
   const { depth = 0, cwd = process.cwd() } = opts || {};
 
-  const absChanged = normalizePath(path.resolve(cwd, changedFile));
+  const absChangedReal = path.resolve(cwd, changedFile);
+  const absChanged = normalizePath(absChangedReal);
 
   // Bail gracefully if file not in graph
   if (!graph || !graph.reverse) {
@@ -129,7 +131,13 @@ function getImpact(changedFile, graph, opts) {
   const tests  = allImpacted.filter(isTestFile);
   const routes = allImpacted.filter(isRouteFile);
 
-  const toRel = (f) => path.relative(cwd, f).replace(/\\/g, '/');
+  // BFS results are lowercased graph keys; render them through the graph's
+  // original-case map so `/Users/...` checkouts do not climb out of cwd.
+  // The changed file is caller-supplied, so its real spelling is known even
+  // when it is absent from the graph (unindexed / no importers).
+  const realPaths = new Map(graph.realPaths || []);
+  if (!realPaths.has(absChanged)) realPaths.set(absChanged, absChangedReal);
+  const toRel = (f) => displayPath(f, cwd, realPaths);
 
   return {
     changed:     toRel(absChanged),

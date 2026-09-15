@@ -62,7 +62,7 @@ sigmap --watch                           Generate + watch for file changes
 sigmap --setup                           Generate + install git hook + watch
 sigmap daemon start|stop|status          Run --watch as a detached background daemon
 sigmap --mcp                             Start MCP server on stdio
-sigmap --report                          Token reduction stats to stdout
+sigmap --report                          Token reduction stats to stdout (exits 1 if over budget)
 sigmap --report --json                   Token report as JSON (for CI; exits 1 if over budget)
 sigmap --report --history                Print usage log summary from .context/usage.ndjson
 sigmap --report --history --chart        Include inline SVG charts + Unicode sparklines

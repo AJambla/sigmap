@@ -1,6 +1,5 @@
 'use strict';
 
-const path = require('path');
 const fs = require('fs');
 const { buildFromCwd } = require('../graph/builder');
 const { getImpact } = require('../graph/impact');
@@ -33,16 +32,10 @@ function createPlan(goal, cwd, config = {}) {
   if (highConf.length > 0) {
     try {
       const graph = buildFromCwd(cwd);
-      // getImpact normalizes graph paths to lowercase, so on a case-varying
-      // filesystem (e.g. macOS `/Users`) its returned paths climb out of cwd.
-      // Re-anchor every impacted path to a clean, case-insensitive repo-relative
-      // form so dedup against the entry set works and output is readable.
-      const clean = (f) => {
-        const abs = path.resolve(cwd, f);
-        return abs.toLowerCase().startsWith(cwd.toLowerCase())
-          ? abs.slice(cwd.length).replace(/^[/\\]/, '')
-          : path.relative(cwd, abs);
-      };
+      // getImpact already returns repo-relative, original-case paths (it renders
+      // lowercased graph keys through the graph's realPaths map). Only the
+      // separator needs normalising so dedup against the entry set matches.
+      const clean = (f) => String(f).replace(/\\/g, '/');
       const entrySet = new Set(highConf.map(r => r.file));
       const direct = new Set();
       const transitive = new Set();
