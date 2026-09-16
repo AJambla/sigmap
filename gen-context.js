@@ -13198,7 +13198,8 @@ __factories["./src/graph/builder"] = function(module, exports) {
    * @param {{ rPackage?: string, rLocalDefs?: Map<string,string> }} [ctx]
    *        Optional cross-file context for namespace-aware resolution. Built
    *        automatically by `buildFromCwd` when DESCRIPTION + NAMESPACE exist.
-   * @returns {{ forward: Map<string,string[]>, reverse: Map<string,string[]> }}
+   * @returns {{ forward: Map<string,string[]>, reverse: Map<string,string[]>,
+   *             realPaths: Map<string,string> }}
    */
   function build(files, cwd, ctx) {
     const fileSet = new Set(files.map((f) => path.resolve(f)));
@@ -13211,10 +13212,16 @@ __factories["./src/graph/builder"] = function(module, exports) {
     const forward = new Map();
     const reverse = new Map();
 
+    // Node keys are lowercased for case-insensitive matching, which loses the
+    // real spelling every display surface needs. Keep the original-case path
+    // alongside so renderers can recover it (see src/graph/path-key displayPath).
+    const realPaths = new Map();
+
     // Initialise every known file in both maps (ensures isolated files appear)
     // Store using normalized paths for Windows compatibility
     for (const f of fileSet) {
       const normF = normalizePath(f);
+      if (!realPaths.has(normF)) realPaths.set(normF, f);
       if (!forward.has(normF)) forward.set(normF, []);
       if (!reverse.has(normF)) reverse.set(normF, []);
     }
@@ -13238,7 +13245,7 @@ __factories["./src/graph/builder"] = function(module, exports) {
       }
     }
 
-    return { forward, reverse };
+    return { forward, reverse, realPaths };
   }
 
   // Directory names assumed when neither the caller nor the project config says
@@ -13281,7 +13288,8 @@ __factories["./src/graph/builder"] = function(module, exports) {
    * @param {string[]} [opts.srcDirs]
    * @param {string[]} [opts.exclude]
    * @param {number}   [opts.maxDepth] - walk depth from each srcDir root
-   * @returns {{ forward: Map<string,string[]>, reverse: Map<string,string[]> }}
+   * @returns {{ forward: Map<string,string[]>, reverse: Map<string,string[]>,
+   *             realPaths: Map<string,string> }}
    */
   function buildFromCwd(cwd, opts) {
     // R-package layouts use `R/` and `inst/`; Shiny apps put helpers in `R/`.
@@ -14284,6 +14292,7 @@ __factories["./src/graph/impact"] = function(module, exports) {
 
   const path = require('path');
   const { buildFromCwd } = __require('./src/graph/builder');
+  const { displayPath } = __require('./src/graph/path-key');
 
   // Normalize paths for cross-platform consistency (same as in builder.js)
   function normalizePath(p) {
@@ -14389,7 +14398,8 @@ __factories["./src/graph/impact"] = function(module, exports) {
   function getImpact(changedFile, graph, opts) {
     const { depth = 0, cwd = process.cwd() } = opts || {};
 
-    const absChanged = normalizePath(path.resolve(cwd, changedFile));
+    const absChangedReal = path.resolve(cwd, changedFile);
+    const absChanged = normalizePath(absChangedReal);
 
     // Bail gracefully if file not in graph
     if (!graph || !graph.reverse) {
@@ -14402,7 +14412,13 @@ __factories["./src/graph/impact"] = function(module, exports) {
     const tests  = allImpacted.filter(isTestFile);
     const routes = allImpacted.filter(isRouteFile);
 
-    const toRel = (f) => path.relative(cwd, f).replace(/\\/g, '/');
+    // BFS results are lowercased graph keys; render them through the graph's
+    // original-case map so `/Users/...` checkouts do not climb out of cwd.
+    // The changed file is caller-supplied, so its real spelling is known even
+    // when it is absent from the graph (unindexed / no importers).
+    const realPaths = new Map(graph.realPaths || []);
+    if (!realPaths.has(absChanged)) realPaths.set(absChanged, absChangedReal);
+    const toRel = (f) => displayPath(f, cwd, realPaths);
 
     return {
       changed:     toRel(absChanged),
@@ -14540,7 +14556,37 @@ __factories["./src/graph/path-key"] = function(module, exports) {
     return path.normalize(String(p)).toLowerCase();
   }
 
-  module.exports = { graphKey };
+  /**
+   * Render a graph node key as a repo-relative path in its ORIGINAL case.
+   *
+   * Keys are lowercased for identity (see above), but `path.relative(cwd, key)`
+   * then finds no common prefix on any checkout whose path contains an uppercase
+   * letter (every macOS `/Users/...`) and climbs to the filesystem root. Graphs
+   * carry a `realPaths` map (key -> original-case absolute path) so display can
+   * recover the real spelling; the case-insensitive prefix strip below is the
+   * fallback for keys that predate the map or came from another graph.
+   *
+   * @param {string} key              graph node key (or any absolute path)
+   * @param {string} cwd              project root
+   * @param {Map<string,string>} [realPaths]
+   * @returns {string} repo-relative, forward-slashed, original case where known
+   */
+  function displayPath(key, cwd, realPaths) {
+    const real = (realPaths && realPaths.get(key)) || key;
+    const rel = path.relative(cwd, real);
+    if (rel && !rel.startsWith('..') && !path.isAbsolute(rel)) {
+      return rel.replace(/\\/g, '/');
+    }
+    // Fallback: strip the cwd prefix case-insensitively rather than climbing out.
+    const norm = path.normalize(real);
+    const normCwd = path.normalize(cwd);
+    if (norm.toLowerCase().startsWith(normCwd.toLowerCase())) {
+      return norm.slice(normCwd.length).replace(/^[\\/]+/, '').replace(/\\/g, '/');
+    }
+    return rel.replace(/\\/g, '/');
+  }
+
+  module.exports = { graphKey, displayPath };
   
 };
 
@@ -15108,6 +15154,9 @@ __factories["./src/learning/weights"] = function(module, exports) {
   const MAX_MULT = 3.0;
   const MIN_MULT = 0.30;
   const BASELINE = 1.0;
+  // A multiplier this close to neutral changes no ranking; dropping it keeps
+  // .context/weights.json from accumulating decayed-out noise forever.
+  const NEUTRAL_EPSILON = 0.01;
 
   function weightsPath(cwd) {
     return path.join(cwd, '.context', 'weights.json');
@@ -15139,7 +15188,7 @@ __factories["./src/learning/weights"] = function(module, exports) {
       const normalized = normalizeFile(cwd, filePath);
       if (!normalized) continue;
       const mult = clampMultiplier(Number(raw));
-      if (Math.abs(mult - BASELINE) < 1e-9) continue;
+      if (Math.abs(mult - BASELINE) < NEUTRAL_EPSILON) continue;
       out[normalized] = mult;
     }
 
@@ -15184,8 +15233,12 @@ __factories["./src/learning/weights"] = function(module, exports) {
 
     const weights = loadWeights(cwd);
 
+    // Decay toward the NEUTRAL baseline, not toward zero. `w * DECAY` converges
+    // on 0 (floor-clamped at MIN_MULT), so every unrelated `learn` call deepened
+    // penalties forever and dragged boosts down through 1.0 into penalty
+    // territory — the opposite of what `weights` documents.
     for (const key of Object.keys(weights)) {
-      weights[key] = clampMultiplier(weights[key] * DECAY);
+      weights[key] = clampMultiplier(BASELINE + (weights[key] - BASELINE) * DECAY);
     }
 
     const good = [];
@@ -15255,6 +15308,7 @@ __factories["./src/learning/weights"] = function(module, exports) {
   module.exports = {
     BASELINE,
     DECAY,
+    NEUTRAL_EPSILON,
     MAX_MULT,
     MIN_MULT,
     weightsPath,
@@ -17971,7 +18025,7 @@ __factories["./src/mcp/server"] = function(module, exports) {
 
   const SERVER_INFO = {
     name: 'sigmap',
-    version: '8.49.1',
+    version: '8.49.2',
     description: 'SigMap MCP server — code signatures on demand',
   };
 
@@ -18679,7 +18733,6 @@ __factories["./src/nudge"] = function(module, exports) {
 // ── ./src/plan/planner ──
 __factories["./src/plan/planner"] = function(module, exports) {
   
-  const path = require('path');
   const fs = require('fs');
   const { buildFromCwd } = __require('./src/graph/builder');
   const { getImpact } = __require('./src/graph/impact');
@@ -18712,16 +18765,10 @@ __factories["./src/plan/planner"] = function(module, exports) {
     if (highConf.length > 0) {
       try {
         const graph = buildFromCwd(cwd);
-        // getImpact normalizes graph paths to lowercase, so on a case-varying
-        // filesystem (e.g. macOS `/Users`) its returned paths climb out of cwd.
-        // Re-anchor every impacted path to a clean, case-insensitive repo-relative
-        // form so dedup against the entry set works and output is readable.
-        const clean = (f) => {
-          const abs = path.resolve(cwd, f);
-          return abs.toLowerCase().startsWith(cwd.toLowerCase())
-            ? abs.slice(cwd.length).replace(/^[/\\]/, '')
-            : path.relative(cwd, abs);
-        };
+        // getImpact already returns repo-relative, original-case paths (it renders
+        // lowercased graph keys through the graph's realPaths map). Only the
+        // separator needs normalising so dedup against the entry set matches.
+        const clean = (f) => String(f).replace(/\\/g, '/');
         const entrySet = new Set(highConf.map(r => r.file));
         const direct = new Set();
         const transitive = new Set();
@@ -24331,6 +24378,7 @@ __factories["./src/wiki/generate"] = function(module, exports) {
 
   const fs = require('fs');
   const path = require('path');
+  const { displayPath } = __require('./src/graph/path-key');
 
   const HUB_LIMIT = 8;
   const ENTRY_LIMIT = 8;
@@ -24338,9 +24386,10 @@ __factories["./src/wiki/generate"] = function(module, exports) {
   const KEY_FILE_LIMIT = 3;
 
   // Graph keys come from src/graph/builder's normalizePath (normalized +
-  // lowercased), so relativize against the same normalization of cwd.
-  function _rel(cwd, f) {
-    return path.relative(path.normalize(cwd).toLowerCase(), f).replace(/\\/g, '/');
+  // lowercased). `realPaths` (carried on the graph) restores the original case;
+  // without it we still relativize case-insensitively rather than climbing out.
+  function _rel(cwd, f, realPaths) {
+    return displayPath(f, cwd, realPaths);
   }
 
   function _pct(fraction) {
@@ -24395,15 +24444,16 @@ __factories["./src/wiki/generate"] = function(module, exports) {
       if (!graph || !graph.forward || graph.forward.size === 0) return null;
 
       const importersOf = (f) => (graph.reverse.get(f) || []).length;
+      const realPaths = graph.realPaths;
       const hubs = [...graph.reverse.entries()]
-        .map(([f, importers]) => ({ file: _rel(cwd, f), importers: importers.length }))
+        .map(([f, importers]) => ({ file: _rel(cwd, f, realPaths), importers: importers.length }))
         .filter((h) => h.importers > 0)
         .sort((a, b) => b.importers - a.importers || a.file.localeCompare(b.file))
         .slice(0, HUB_LIMIT);
 
       const entryPoints = [...graph.forward.entries()]
         .filter(([f, deps]) => deps.length > 0 && importersOf(f) === 0)
-        .map(([f, deps]) => ({ file: _rel(cwd, f), imports: deps.length }))
+        .map(([f, deps]) => ({ file: _rel(cwd, f, realPaths), imports: deps.length }))
         .sort((a, b) => b.imports - a.imports || a.file.localeCompare(b.file))
         .slice(0, ENTRY_LIMIT);
 
@@ -24679,7 +24729,7 @@ function __tryGit(args, opts = {}) {
   catch (_) { return ''; }
 }
 
-const VERSION = '8.49.1';
+const VERSION = '8.49.2';
 const MARKER = '\n\n## Auto-generated signatures\n<!-- Updated by gen-context.js -->\n';
 
 function requireSourceOrBundled(key) {
@@ -25757,6 +25807,17 @@ function _coverageBar(pct, width) {
   return '\u2588'.repeat(filled) + '\u2591'.repeat(width - filled);
 }
 
+/**
+ * Exit preserving any `process.exitCode` a command already set.
+ *
+ * A bare `process.exit(0)` in the dispatch tail silently overrides
+ * `process.exitCode`, which is how the documented `--report` over-budget
+ * gate came to never fire. Report paths must exit through this.
+ */
+function exitWithCode() {
+  process.exit(process.exitCode || 0);
+}
+
 function printReport(inputTokens, finalTokens, fileCount, droppedCount, asJson, budgetLimit, coverageResult, isAutoBudget, configuredMaxTokens) {
   const reduction = inputTokens > 0 ? (100 - (finalTokens / inputTokens) * 100).toFixed(1) : 0;
   const overBudget = finalTokens > (budgetLimit || 6000);
@@ -25789,8 +25850,6 @@ function printReport(inputTokens, finalTokens, fileCount, droppedCount, asJson, 
       };
     }
     process.stdout.write(JSON.stringify(payload) + '\n');
-    // Exit 1 in CI if over budget — lets pipelines fail fast
-    if (overBudget) process.exitCode = 1;
   } else {
     const budgetLabel = isAutoBudget
       ? `${budgetLimit || 6000} (auto-scaled)`
@@ -25836,6 +25895,12 @@ function printReport(inputTokens, finalTokens, fileCount, droppedCount, asJson, 
     }
     if (overBudget) console.warn(`[sigmap] WARNING: output (${finalTokens} tokens) exceeds budget (${budgetLimit || 6000})`);
   }
+
+  // Exit 1 in CI if over budget — lets pipelines fail fast. Same semantics in
+  // both renderings: JSON and text `--report` are one behaviour, not two.
+  // `process.exitCode` only takes effect if the dispatch tail exits through
+  // `exitWithCode()` rather than a bare `process.exit(0)`.
+  if (overBudget) process.exitCode = 1;
 }
 
 // ---------------------------------------------------------------------------
@@ -26743,6 +26808,76 @@ function detectInvokedAs() {
   return 'node gen-context.js';
 }
 
+/**
+ * Every bare-word subcommand the dispatch chain below actually handles.
+ *
+ * Without this, an unrecognized first argument fell through all 37 `args[0] ===`
+ * branches onto the DEFAULT GENERATE path and silently rewrote AGENTS.md,
+ * CLAUDE.md, .github/copilot-instructions.md and .github/gemini-context.md with
+ * exit 0 — a typo became an unintended write. Keep this in sync with the
+ * dispatch chain; `sigmap --help` renders from the same vocabulary.
+ */
+const KNOWN_COMMANDS = new Set([
+  'ask', 'budget', 'compare', 'conventions', 'create', 'daemon', 'doctor',
+  'evidence', 'explain', 'gain', 'history', 'judge', 'learn', 'lines', 'mcp',
+  'memory', 'note', 'plan', 'redact', 'review-pr', 'roots', 'run', 'scaffold',
+  'share', 'skills', 'squeeze', 'status', 'suggest-profile', 'sync', 'tune',
+  'validate', 'verify', 'verify-ai-output', 'verify-plan', 'weights', 'wiki',
+]);
+
+/** Commands that only dispatch when a required flag is present. */
+const FLAG_GATED_COMMANDS = new Map([
+  ['bench', '--submit'],
+]);
+
+/** Levenshtein distance, capped — used only to suggest a near-miss command. */
+function _editDistance(a, b) {
+  if (a === b) return 0;
+  if (Math.abs(a.length - b.length) > 2) return 99;
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const row = [i];
+    for (let j = 1; j <= b.length; j++) {
+      row[j] = a[i - 1] === b[j - 1]
+        ? prev[j - 1]
+        : 1 + Math.min(prev[j - 1], prev[j], row[j - 1]);
+    }
+    prev = row;
+  }
+  return prev[b.length];
+}
+
+/** Nearest known command within edit distance 2, or null. */
+function nearestCommand(word) {
+  let best = null;
+  let bestDist = 3;
+  for (const known of [...KNOWN_COMMANDS, ...FLAG_GATED_COMMANDS.keys()]) {
+    const d = _editDistance(word, known);
+    if (d < bestDist) { bestDist = d; best = known; }
+  }
+  return best;
+}
+
+/**
+ * Reject an unrecognized bare-word subcommand before anything is generated.
+ * Returns an error message, or null when `args` should proceed to dispatch.
+ */
+function unknownCommandError(args, cmd) {
+  const word = args[0];
+  if (!word || word.startsWith('-')) return null;      // flags + bare invocation
+  if (KNOWN_COMMANDS.has(word)) return null;
+
+  const requiredFlag = FLAG_GATED_COMMANDS.get(word);
+  if (requiredFlag) {
+    if (args.includes(requiredFlag)) return null;
+    return `[sigmap] '${word}' requires ${requiredFlag} — run ${cmd} --help`;
+  }
+
+  const suggestion = nearestCommand(word);
+  const hint = suggestion ? `  Did you mean '${suggestion}'?` : '';
+  return `[sigmap] unknown command '${word}' — run ${cmd} --help${hint}`;
+}
+
 function printHelp(cmd) {
   cmd = cmd || 'node gen-context.js';
   const header = cmd === 'node gen-context.js'
@@ -26764,7 +26899,7 @@ Usage:
   ${cmd} --setup                           Generate + install git hook + watch
   ${cmd} daemon start|stop|status          Run --watch as a detached background daemon
   ${cmd} --mcp                             Start MCP server on stdio
-  ${cmd} --report                          Token reduction stats to stdout
+  ${cmd} --report                          Token reduction stats to stdout (exits 1 if over budget)
   ${cmd} --report --json                   Token report as JSON (for CI; exits 1 if over budget)
   ${cmd} --report --history                Print usage log summary from .context/usage.ndjson
   ${cmd} --report --history --chart        Include inline SVG charts + Unicode sparklines
@@ -26795,6 +26930,10 @@ Usage:
   ${cmd} --query "<text>"                  Rank files by relevance to a query
   ${cmd} --query "<text>" --json           Ranked results as JSON
   ${cmd} --query "<text>" --top <n>        Limit results to top N files (default 10)
+  ${cmd} ask "<query>"                     Ranked answer with signatures for a question (--json, --top <n>, --mode)
+  ${cmd} plan "<goal>"                     Files to inspect, likely-to-change set, and impact radius (--json)
+  ${cmd} explain <file>                    Why a file is in or out of the generated context (--json)
+  ${cmd} run                               Alias for a bare generate (${cmd} run --report, etc.)
   ${cmd} learn --good <files...>           Boost files in .context/weights.json
   ${cmd} learn --bad <files...>            Penalize files in .context/weights.json
   ${cmd} learn --reset                     Delete learned file weights
@@ -26810,6 +26949,8 @@ Usage:
   ${cmd} verify <answer.md> --json         Grounding report as JSON (exits 1 if issues)
   ${cmd} verify <answer.md> --report       Write a standalone HTML report (red/amber/green)
   ${cmd} verify-ai-output <answer.md>      Full command name for ${cmd} verify
+  ${cmd} validate                          Check config + index coverage; --query "<text>" also probes retrieval (--json)
+  ${cmd} judge --response <f> --context <f>   Score an AI answer's groundedness (--json, --threshold <n>, --learn)
   ${cmd} conventions                       Extract repo file-naming/export/test conventions (--conflicts, --inject, --report, --fix)
   ${cmd} scaffold "<name>"                 Propose a convention-matched file/dir scaffold (--ext, --threshold, --force, --json)
   ${cmd} verify-plan <plan.md|->           Check a plan vs the live index — files/symbols exist, blast radius, scope (--json)
@@ -26838,6 +26979,13 @@ Usage:
   ${cmd} lines <file> :<line> --context <n>  Window around one signature anchor (default ±10)
   ${cmd} note "<text>"                     Append a note to the cross-session decision log
   ${cmd} note                              List recent notes (also: note --list <N>)
+  ${cmd} history                           Recent usage-log entries with a sparkline (--last <n>, --json)
+  ${cmd} compare                           SigMap vs baseline benchmark; outside the source checkout shows local history (--run, --json)
+  ${cmd} share                             Shareable one-liner with your live numbers (copied to clipboard)
+  ${cmd} bench --submit                    Format local benchmark history as a shareable community block
+  ${cmd} roots                             Detect source roots for this repo (--fix, --json)
+  ${cmd} sync                              Write every adapter output + llms.txt and print a compact diff
+  ${cmd} suggest-profile                   Infer the task profile from staged changes (--short)
   ${cmd} status                            Show repo state — branch, dirty files, index freshness, notes
   ${cmd} doctor                            Diagnose config, index, freshness, coverage, MCP wiring — with fixes (--json; exits 1 on hard failure)
   ${cmd} mcp list                          List MCP clients and their config paths (--json)
@@ -27133,6 +27281,13 @@ function main() {
   if (args.includes('--version') || args.includes('-v')) {
     console.log(VERSION);
     process.exit(0);
+  }
+
+  // Reject typo'd subcommands BEFORE any generate path can write files.
+  const cmdError = unknownCommandError(args, detectInvokedAs());
+  if (cmdError) {
+    console.error(cmdError);
+    process.exit(1);
   }
 
   // MCP server — start before loading config (reads files on demand)
@@ -27602,6 +27757,82 @@ function main() {
 
   // v4.2: `sigmap compare` — human-readable benchmark CLI
   if (args[0] === 'compare') {
+    const bar = '─'.repeat(44);
+
+    // The 21-repo comparison benchmark lives in the SOURCE checkout: the runner
+    // script and the task corpus are both absent from the published package, so
+    // outside a checkout the old unconditional spawn burned ~30-60s and then
+    // died on `Could not parse benchmark output`. Probe for both before
+    // spawning anything, and fall back to the user's own recorded history.
+    const benchScript = path.join(__dirname, 'scripts', 'run-retrieval-benchmark.mjs');
+    const benchCorpus = path.join(__dirname, 'benchmarks', 'tasks');
+    const hasCorpus = fs.existsSync(benchScript) && fs.existsSync(benchCorpus);
+    const forceRun = args.includes('--run');
+
+    if (forceRun && !hasCorpus) {
+      console.error('[sigmap] compare --run needs the sigmap source checkout with its benchmark corpus.');
+      console.error(`  missing: ${!fs.existsSync(benchScript) ? 'scripts/run-retrieval-benchmark.mjs' : 'benchmarks/tasks/'}`);
+      console.error('  Run plain `sigmap compare` to see your local benchmark history instead.');
+      process.exit(1);
+    }
+
+    if (!hasCorpus) {
+      // Fallback: the user's own before/after numbers, from the same store
+      // `share` reads. Reads only from cwd; writes nothing.
+      const histPath = path.join(cwd, '.context', 'benchmark-history.ndjson');
+      let entries = [];
+      if (fs.existsSync(histPath)) {
+        try {
+          entries = fs.readFileSync(histPath, 'utf8').trim().split('\n')
+            .map((l) => { try { return JSON.parse(l); } catch (_) { return null; } })
+            .filter(Boolean);
+        } catch (_) {}
+      }
+
+      const seriesOf = (type, field) => {
+        const vals = entries.filter((e) => e.type === type && typeof e[field] === 'number');
+        if (vals.length === 0) return null;
+        return { first: vals[0][field], latest: vals[vals.length - 1][field], runs: vals.length };
+      };
+      const retrieval = seriesOf('retrieval', 'hitAt5');
+      const tokens    = seriesOf('token-reduction', 'reduction');
+
+      if (!retrieval && !tokens) {
+        if (args.includes('--json')) {
+          process.stdout.write(JSON.stringify({ mode: 'history', available: false, runs: 0 }) + '\n');
+        } else {
+          console.log('[sigmap] compare: no local benchmark history yet.');
+          console.log('  The 21-repo comparison needs the sigmap source checkout with its benchmark corpus.');
+          console.log('  Record your own numbers first: run `sigmap --benchmark` in this repo.');
+        }
+        process.exit(0);
+      }
+
+      if (args.includes('--json')) {
+        process.stdout.write(JSON.stringify({
+          mode: 'history',
+          available: true,
+          runs: Math.max(retrieval ? retrieval.runs : 0, tokens ? tokens.runs : 0),
+          hitAt5: retrieval,
+          tokenReduction: tokens,
+        }, null, 2) + '\n');
+      } else {
+        const delta = (s, unit) => {
+          const d = s.latest - s.first;
+          const sign = d > 0 ? '+' : '';
+          return s.runs > 1 ? `  (first ${s.first}${unit} → ${sign}${parseFloat(d.toFixed(3))}${unit})` : '';
+        };
+        const lines = [bar, ' SigMap — local benchmark history', bar];
+        if (retrieval) lines.push(` hit@5          ${(retrieval.latest * 100).toFixed(1)}%${delta({ ...retrieval, first: parseFloat((retrieval.first * 100).toFixed(1)), latest: parseFloat((retrieval.latest * 100).toFixed(1)) }, '%')}`);
+        if (tokens)    lines.push(` token savings  ${tokens.latest}%${delta(tokens, '%')}`);
+        lines.push(bar);
+        lines.push(' Live 21-repo comparison needs the sigmap source checkout;');
+        lines.push(' run `sigmap compare --run` there for SigMap vs baseline.');
+        console.log(lines.join('\n'));
+      }
+      process.exit(0);
+    }
+
     const { execFileSync } = require('child_process');
     console.log('[sigmap] Running comparison benchmark (this may take ~30s)...\n');
 
@@ -27610,7 +27841,7 @@ function main() {
       // Shell-free: run the node binary directly with the script path as an argv.
       raw = execFileSync(
         process.execPath,
-        [path.join(__dirname, 'scripts', 'run-retrieval-benchmark.mjs'), '--compare'],
+        [benchScript, '--compare'],
         { cwd, timeout: 90_000, encoding: 'utf8' }
       );
     } catch (e) { raw = (e && e.stdout) ? e.stdout : ''; }
@@ -27629,7 +27860,6 @@ function main() {
     } else {
       const pct  = (v) => `${(v * 100).toFixed(1)}%`;
       const lift = (a, b) => (b > 0 ? (a / b).toFixed(1) : '∞');
-      const bar  = '─'.repeat(44);
       console.log([
         bar,
         ' SigMap vs Baseline',
@@ -27930,13 +28160,35 @@ function main() {
     if ((config.maxTokens || 0) > 50000)
       warnings.push(`maxTokens ${config.maxTokens} is very high — may exceed LLM context windows`);
 
-    // Coverage check: files actually in context vs total source files
+    // Coverage check: files actually in context vs total source files.
+    // These are two different populations — the persisted index can hold files
+    // the current config no longer scopes (deletions, srcDir changes, a
+    // different strategy), so a raw `index.size / fileList.length` ratio ran
+    // past 100% (218% in this repo) and stopped meaning anything. Coverage is
+    // the INTERSECTION over the in-scope list, which is <= 100% by
+    // construction; the two residuals are reported separately because they say
+    // different things: `notIndexed` is missing context, `staleEntries` is a
+    // stale index.
     const { buildSigIndex: valBuildSigIndex } = requireSourceOrBundled('./src/retrieval/ranker');
     const valSigIndex  = valBuildSigIndex(cwd);
-    const valTotal     = buildFileList(cwd, config).length;
-    const coveragePct  = valTotal > 0 ? Math.round((valSigIndex.size / valTotal) * 100) : 0;
+    const valFiles     = buildFileList(cwd, config);
+    const valTotal     = valFiles.length;
+
+    const valRel       = (f) => path.relative(cwd, path.resolve(cwd, f)).replace(/\\/g, '/');
+    const valInScope   = new Set(valFiles.map(valRel));
+    const valIndexed   = new Set([...valSigIndex.keys()].map(valRel));
+
+    let valCovered = 0;
+    for (const f of valInScope) if (valIndexed.has(f)) valCovered++;
+    let valStale = 0;
+    for (const f of valIndexed) if (!valInScope.has(f)) valStale++;
+
+    const coveragePct  = valTotal > 0 ? Math.round((valCovered / valTotal) * 100) : 0;
+    const valNotIndexed = valTotal - valCovered;
     if (coveragePct < 70)
       warnings.push(`coverage ${coveragePct}% is below recommended 70% — increase maxTokens or expand srcDirs`);
+    if (valStale > 0)
+      warnings.push(`stale index entries: ${valStale} indexed file(s) are no longer in scope — re-run sigmap to refresh the index`);
 
     // Optional query check. Two complementary signals:
     //  (a) cased-symbol coverage — if the query literally names a camelCase /
@@ -27995,13 +28247,26 @@ function main() {
     }
 
     if (args.includes('--json')) {
-      const payload = { valid: issues.length === 0, issues, warnings, coverage: coveragePct };
+      const payload = {
+        valid: issues.length === 0,
+        issues,
+        warnings,
+        coverage: coveragePct,
+        indexedInScope: valCovered,
+        notIndexed: valNotIndexed,
+        staleEntries: valStale,
+        totalFiles: valTotal,
+      };
       if (queryReport) payload.query = queryReport;
       process.stdout.write(JSON.stringify(payload) + '\n');
     } else {
       for (const w of warnings) console.warn(`[sigmap] ⚠  ${w}`);
       if (issues.length === 0) {
-        console.log(`[sigmap] ✓ config valid  coverage: ${coveragePct}%`);
+        const residual = [
+          valNotIndexed > 0 ? `${valNotIndexed} not indexed` : null,
+          valStale > 0 ? `${valStale} stale` : null,
+        ].filter(Boolean).join(', ');
+        console.log(`[sigmap] ✓ config valid  coverage: ${coveragePct}% (${valCovered}/${valTotal} files)${residual ? `  — ${residual}` : ''}`);
       } else {
         for (const iss of issues) console.error(`[sigmap] ✗ ${iss}`);
         process.exit(1);
@@ -29925,10 +30190,10 @@ function main() {
       } catch (err) {
         console.warn(`[sigmap] tracking: ${err.message}`);
       }
-      process.exit(0);
+      exitWithCode();
     }
     runGenerate(cwd, config, true, args.includes('--json'));
-    process.exit(0);
+    exitWithCode();
   }
 
   if (args.includes('--monorepo') || config.monorepo) {

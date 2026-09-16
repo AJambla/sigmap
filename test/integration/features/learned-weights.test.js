@@ -101,8 +101,10 @@ test('weights: applies decay before mutation', () => {
   saveWeights(dir, { 'src/auth.js': 2.0 });
   updateWeights(dir, { goodFiles: ['src/auth.js'], goodAmount: 0.15 });
 
+  // Decay pulls toward the neutral 1.0, not toward 0 (#657): 1 + (2.0-1)*0.95
+  // = 1.95, then +0.15. The old `2.0 * 0.95` gave 2.05 and drifted to zero.
   const loaded = loadWeights(dir);
-  assert.strictEqual(loaded['src/auth.js'], 2.05);
+  assert.strictEqual(loaded['src/auth.js'], 2.10);
 
   fs.rmSync(dir, { recursive: true });
 });

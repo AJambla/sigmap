@@ -1,6 +1,6 @@
 ---
 title: Roadmap
-description: SigMap version history and roadmap. From v0.0 to v8.49.1, with recent releases completing the grounded-codegen plan — a realistic §9 ablation (real-symbol corpus, exact-signature grounding, --verbose), a Gemini (AI Studio) provider for the §9 ablation, the init Creation-workflow CLAUDE.md block, scaffold persistence, the LLM A/B hallucination ablation harness, the sigmap create orchestrator and its four guard stages (scaffold, verify-plan, verify-ai-output, review-pr), the conventions command with its full flag set (--conflicts, --inject, --report, --ci, --fix, --update), the grounding benchmark, read-time self-heal, live-index MCP write hooks, the get_callee_signatures MCP tool (exact callee signatures), realistic per-query savings, release-pipeline robustness (bundle integrity + version.json gates, standalone-bundle smoke test), the sigmap gain token-savings dashboard, supply-chain hardening (zero system-shell access), Squeeze input minimization with symbol enrichment, source-of-truth llms.txt, the verify-ai-output Hallucination Guard, and Memory tools (note, status, read_memory MCP tool).
+description: SigMap version history and roadmap. From v0.0 to v8.49.2, with recent releases completing the grounded-codegen plan — a realistic §9 ablation (real-symbol corpus, exact-signature grounding, --verbose), a Gemini (AI Studio) provider for the §9 ablation, the init Creation-workflow CLAUDE.md block, scaffold persistence, the LLM A/B hallucination ablation harness, the sigmap create orchestrator and its four guard stages (scaffold, verify-plan, verify-ai-output, review-pr), the conventions command with its full flag set (--conflicts, --inject, --report, --ci, --fix, --update), the grounding benchmark, read-time self-heal, live-index MCP write hooks, the get_callee_signatures MCP tool (exact callee signatures), realistic per-query savings, release-pipeline robustness (bundle integrity + version.json gates, standalone-bundle smoke test), the sigmap gain token-savings dashboard, supply-chain hardening (zero system-shell access), Squeeze input minimization with symbol enrichment, source-of-truth llms.txt, the verify-ai-output Hallucination Guard, and Memory tools (note, status, read_memory MCP tool).
 head:
   - - meta
     - property: og:title
@@ -835,6 +835,20 @@ Two milestones in one release. **`verify-ai-output` Reliable MVP** (#232) grows 
 **Tags:** `KNOWN_LIMITATIONS.md` · `extraction honesty` · `tier label` · `drift guard` · `G1` · `#520` · `PR #521`
 
 **Impact:** the credibility gap a skeptical reviewer finds first is closed in writing; 6 new guard checks (133 files); zero runtime changes.
+
+---
+
+### v8.49.2 — the CLI stops lying ✓ (2026-09-16)
+
+**Patch release — seven fixes from the 2026-09-15 full-CLI audit, every one a case of silently wrong behavior.** The unifying theme is that each command exited 0 while doing the wrong thing, which is the failure class this project exists to prevent.
+
+The worst was #655: an unrecognized subcommand fell through all 37 dispatch branches onto the **default generate path** and rewrote `AGENTS.md`, `CLAUDE.md` and the copilot/gemini context files — so `sigmap bench`, or a typo, was an unintended write. A `KNOWN_COMMANDS` vocabulary now rejects it before any dispatch, with a levenshtein-2 suggestion. Alongside it: `--report --json` promised "exits 1 if over budget" but a bare `process.exit(0)` in the dispatch tail clobbered `process.exitCode`, so every CI job trusting that gate was silently green (#656); `learn` decay multiplied weights toward 0 rather than the documented neutral 1.0, so penalties deepened forever (#657); and lowercased dependency-graph keys made `--impact` and `plan` print paths that climbed out of the repo on every macOS checkout (#658).
+
+The second wave fixed `compare`, which spawned the install-anchored 21-repo benchmark unconditionally and died after ~30–60s from any installed copy, since the runner and corpus are not published (#659); `validate`, which reported **218%** coverage by dividing two different populations (#660); and `--help`, which omitted twelve shipped commands (#661). The durable part of that last one is not the twelve lines but the guard: a test that derives the command vocabulary from the **dispatch chain itself** and fails when help, the C1 guard, or `cli.md` falls behind it — which caught three further commands missing from the docs on its first run.
+
+**Tags:** `KNOWN_COMMANDS` · `exitWithCode` · `displayPath` · `realPaths` · `intersection coverage` · `drift gate` · `#655`–`#661` · `PR #710` · `PR #711`
+
+**Impact:** seven silent-wrongness defects closed; `compare` outside the source checkout goes from ~30–60s + crash to ~140ms + real local numbers; coverage bounded at 100% by construction with stale-index entries surfaced separately; 24 new regression tests (12 of which fail on the previous release) plus two permanent drift gates.
 
 ---
 

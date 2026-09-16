@@ -36,6 +36,15 @@ To ensure proper attribution:
 
 We welcome contributions! See [Contributing](./docs/CONTRIBUTING.md) for guidelines.
 
+### Recent Contributors (v8.49.2)
+- **@manojmallick** — fix(cli): an unrecognized subcommand fell through the dispatch chain onto the default generate path and silently rewrote `AGENTS.md`/`CLAUDE.md`/copilot/gemini context files with exit 0; a `KNOWN_COMMANDS` guard now rejects it before any dispatch, with a levenshtein-2 suggestion (#655, PR #710)
+- **@manojmallick** — fix(cli): `--report --json` documented "exits 1 if over budget" but the dispatch tail's `process.exit(0)` clobbered `process.exitCode`, so every CI job trusting that contract was silently green; the gate now covers text and JSON alike via `exitWithCode()` (#656, PR #710)
+- **@manojmallick** — fix(learn): weight decay multiplied toward 0 instead of the documented neutral 1.0, so penalties deepened forever and boosts crossed into penalty territory; decay now converges on `BASELINE` from both directions and prunes near-neutral entries (#657, PR #710)
+- **@manojmallick** — fix(graph): lowercased graph keys made `--impact` and `plan` render paths that climbed out of cwd on every macOS checkout; graphs now carry `realPaths` and every display surface renders through one `displayPath()` helper (#658, PR #710)
+- **@manojmallick** — fix(cli): `compare` spawned the install-anchored 21-repo benchmark unconditionally and crashed outside the source checkout after ~30–60s; it now probes for the corpus and falls back to local benchmark history, with `--run` to demand the live comparison (#659, PR #711)
+- **@manojmallick** — fix(cli): `validate` reported 218% coverage by dividing two different populations; coverage is now an intersection bounded at 100%, with `notIndexed` and `staleEntries` surfaced separately (#660, PR #711)
+- **@manojmallick** — fix(docs): twelve dispatched commands were missing from `--help` and four `cli.md` claims had drifted; added all twelve plus a drift gate that derives the vocabulary from the dispatch chain itself, which immediately caught `explain`/`run`/`sync` missing from `cli.md` (#661, PR #711)
+
 ### Recent Contributors (v8.49.1)
 - **[@tunglambk](https://github.com/tunglambk)** (Tung Lam) — fix(security): `sigmap redact` now masks unquoted `.env`/YAML secret values (`password=…`, `api_key: …`), not just quoted ones — first external contribution (#668, PR #671)
 - **@manojmallick** — fix(security): regression fix for v8.49.0 — the widened Generic Secret pattern is `textOnly` and skipped by the signature scanner, so type annotations (`password: PasswordHasher`) are no longer redacted out of generated context; `sigmap redact` keeps the full fix above (#680, PR #681)
