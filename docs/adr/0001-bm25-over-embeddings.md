@@ -7,7 +7,7 @@
 - Embedding models introduce non‑determinism, large model files, and external API costs.
 
 **Decision:**
-- Use a TF‑IDF based BM25 ranking algorithm for query‑file relevance.
+- Use an identifier‑aware BM25 ranking algorithm as the base relevance signal, modulated by keyword/symbol/path weights, dependency‑graph and centrality boosts, and learned file weights — see `src/retrieval/ranker.js` and `src/retrieval/bm25.js`.
 - This approach guarantees byte‑stable results, zero external dependencies, and fast execution.
 
 **Consequences:**
@@ -16,4 +16,5 @@
 
 **References:**
 - `src/retrieval/bm25.js`
-- Benchmark results in `docs/benchmarks.md`
+- Benchmark results in `docs-vp/guide/benchmark.md` and `benchmarks/latest.json`
+- MASTER_PLAN §7.3 arithmetic: one embedding dependency adds ~200 MB, ~50 transitive deps, and collapses both the determinism and zero-dependency scores — the core reason BM25 was chosen and embeddings permanently rejected.
