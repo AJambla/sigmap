@@ -1142,11 +1142,21 @@ sigmap validate --query "loginUser validateToken"
 ```
 
 ```
-[sigmap] ✓ config valid  coverage: 97%
+[sigmap] ⚠  stale index entries: 210 indexed file(s) are no longer in scope — re-run sigmap to refresh the index
+[sigmap] ✓ config valid  coverage: 98% (170/174 files)  — 4 not indexed, 210 stale
 [sigmap] ✓ query "login rate limit" → src/rate/limiter.js (score 8.42, confidence high)
 ```
 
-JSON output includes `valid`, `issues`, `warnings`, `coverage`, and — when `--query` is given — a `query` report (`{ text, topFile, topScore, confidence }`). Exits `1` when hard issues are found.
+**Coverage is an intersection (v8.49.2).** It is `|indexed ∩ in-scope| / |in-scope|`, so it is bounded at 100% by construction. Earlier releases divided the persisted index size by the current file list — two different populations, since the index can still hold files the config no longer scopes (deletions, `srcDirs` changes, a strategy switch) — which produced impossible figures such as 218%.
+
+The two residuals are reported separately because they mean different things:
+
+| Field | Meaning | What to do |
+|--------|---------|------------|
+| `notIndexed` | In scope, missing from the index | Raise `maxTokens` or widen `srcDirs` — this is missing context |
+| `staleEntries` | Indexed, no longer in scope | Re-run `sigmap` to refresh — this is a stale index, not a coverage problem |
+
+JSON output includes `valid`, `issues`, `warnings`, `coverage`, `indexedInScope`, `notIndexed`, `staleEntries`, `totalFiles`, and — when `--query` is given — a `query` report (`{ text, topFile, topScore, confidence }`). Exits `1` when hard issues are found.
 
 ---
 
