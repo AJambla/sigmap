@@ -24942,14 +24942,28 @@ __factories["./src/tracking/pricing"] = function(module, exports) {
 
   /**
    * Resolve a price (USD per token) for a model name.
+   *
+   * Unknown keys fall back to DEFAULT_MODEL rather than crashing the dashboard,
+   * but the fallback is reported (#665): `requested` carries the original
+   * (trimmed) input and `fallback` is true only when a non-empty, explicitly
+   * requested key was unknown. A bare `resolvePrice()`/`resolvePrice('')` is the
+   * documented default path, not a fallback.
    * @param {string} [model]
-   * @returns {{ model: string, perMtok: number, perToken: number }}
+   * @returns {{ model: string, perMtok: number, perToken: number, requested: string|null, fallback: boolean }}
    */
   function resolvePrice(model) {
-    const key = (model || DEFAULT_MODEL).toLowerCase();
-    const perMtok = PRICES[key] != null ? PRICES[key] : PRICES[DEFAULT_MODEL];
-    const resolved = PRICES[key] != null ? key : DEFAULT_MODEL;
-    return { model: resolved, perMtok, perToken: perMtok / 1_000_000 };
+    const requested = String(model == null ? '' : model).trim();
+    const key = (requested || DEFAULT_MODEL).toLowerCase();
+    const known = PRICES[key] != null;
+    const perMtok = known ? PRICES[key] : PRICES[DEFAULT_MODEL];
+    const resolved = known ? key : DEFAULT_MODEL;
+    return {
+      model: resolved,
+      perMtok,
+      perToken: perMtok / 1_000_000,
+      requested: requested || null,
+      fallback: !known && requested !== '',
+    };
   }
 
   /** @returns {string[]} known model keys */
@@ -30040,6 +30054,19 @@ function main() {
       process.exit(0);
     }
     try {
+      const { PRICES, DEFAULT_MODEL, resolvePrice } = requireSourceOrBundled('./src/tracking/pricing');
+      if (args.includes('--models')) {
+        const lines = Object.entries(PRICES)
+          .map(([k, v]) => `  ${k.padEnd(18)} $${v}/MTok${k === DEFAULT_MODEL ? '  (default)' : ''}`);
+        process.stdout.write(`Known pricing models (sigmap gain --model <name>):\n${lines.join('\n')}\n`);
+        process.exit(0);
+      }
+      if (args.indexOf('--model') >= 0) {
+        const p = resolvePrice(valOf('--model', ''));
+        if (p.fallback) {
+          console.error(`[sigmap] unknown model '${p.requested}' — priced as ${p.model} ($${p.perMtok}/MTok); see: sigmap gain --models`);
+        }
+      }
       const { readGainLog } = requireSourceOrBundled('./src/tracking/logger');
       const { aggregate } = requireSourceOrBundled('./src/tracking/aggregate');
       const { renderSummary, renderBreakdown } = requireSourceOrBundled('./src/format/gain-terminal');

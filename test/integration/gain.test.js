@@ -9,13 +9,14 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { execFileSync } = require('child_process');
+const { execFileSync, spawnSync } = require('child_process');
 const { aggregate, bucketBy, parseSince, normalize } = require('../../src/tracking/aggregate');
 const { resolvePrice } = require('../../src/tracking/pricing');
 const { recordUsage, readGainLog, isTrackingEnabled } = require('../../src/tracking/logger');
 const gt = require('../../src/format/gain-terminal');
 
 const GEN_CONTEXT = path.resolve(__dirname, '../../gen-context.js');
+const ROOT = path.resolve(__dirname, '..', '..');
 
 let pass = 0, fail = 0;
 function test(name, fn) {
@@ -114,9 +115,24 @@ test('aggregate: --since filters records', () => {
 });
 
 // ── pricing ──────────────────────────────────────────────────────────────
-test('resolvePrice: unknown model falls back to default', () => {
-  assert.strictEqual(resolvePrice('not-a-model').model, 'claude-sonnet');
-  assert.strictEqual(resolvePrice('gpt-4o').perMtok, 2.5);
+test('resolvePrice: unknown model falls back to default, flagged', () => {
+  const fb = resolvePrice('not-a-model');
+  assert.strictEqual(fb.model, 'claude-sonnet');
+  assert.strictEqual(fb.perMtok, 3);
+  assert.strictEqual(fb.fallback, true);
+  assert.strictEqual(fb.requested, 'not-a-model');
+  const ok = resolvePrice('gpt-4o');
+  assert.strictEqual(ok.perMtok, 2.5);
+  assert.strictEqual(ok.fallback, false);
+  assert.strictEqual(ok.requested, 'gpt-4o');
+  // default path (no explicit model) is not a fallback
+  assert.strictEqual(resolvePrice().fallback, false);
+  assert.strictEqual(resolvePrice('').fallback, false);
+});
+
+test('resolvePrice: casing/whitespace are normalised, not flagged', () => {
+  assert.strictEqual(resolvePrice(' GPT-4O ').model, 'gpt-4o');
+  assert.strictEqual(resolvePrice(' GPT-4O ').fallback, false);
 });
 
 // ── formatters ─────────────────────────────────────────────────────────────
@@ -180,6 +196,29 @@ test('CLI: --no-track suppresses gain capture', () => {
     assert.ok(!fs.existsSync(path.join(dir, '.context', 'gain.ndjson')), 'no gain log when --no-track');
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── #665: unknown --model must be visible, not silent ─────────────────────
+test('CLI: gain --model <typo> prints a stderr notice, keeps exit 0', () => {
+  const r = spawnSync(process.execPath, [GEN_CONTEXT, 'gain', '--model', 'gpt4o'], { cwd: ROOT, encoding: 'utf8' });
+  assert.strictEqual(r.status, 0);
+  assert.match(r.stderr, /unknown model 'gpt4o' — priced as claude-sonnet \(\$3\/MTok\); see: sigmap gain --models/);
+  // fallback pricing still applied — header shows the default model
+  assert.match(r.stdout, /claude-sonnet input @ \$3\/M/);
+});
+
+test('CLI: gain --model <valid> prints no notice', () => {
+  const r = spawnSync(process.execPath, [GEN_CONTEXT, 'gain', '--model', 'gpt-4o'], { cwd: ROOT, encoding: 'utf8' });
+  assert.strictEqual(r.status, 0);
+  assert.ok(!/unknown model/.test(r.stderr), `unexpected notice: ${r.stderr}`);
+});
+
+test('CLI: gain --models lists known pricing models', () => {
+  const r = spawnSync(process.execPath, [GEN_CONTEXT, 'gain', '--models'], { cwd: ROOT, encoding: 'utf8' });
+  assert.strictEqual(r.status, 0);
+  for (const m of ['claude-sonnet', 'gpt-4o', 'gemini-1.5-flash']) {
+    assert.ok(r.stdout.includes(m), `missing ${m} in --models output`);
   }
 });
 
