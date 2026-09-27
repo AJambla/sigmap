@@ -10,3 +10,12 @@ class Svc {
     sep
   }
 }
+
+// #738: a body-less case class must not swallow the next class's body.
+case class Dto(id: String)
+
+class Consumer(dto: Dto) {
+  def consume(n: Int): String = {
+    dto.id
+  }
+}

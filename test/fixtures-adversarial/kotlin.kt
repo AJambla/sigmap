@@ -19,3 +19,12 @@ class Svc {
         return a + b
     }
 }
+
+// #738: a body-less declaration must not swallow the next class's body.
+data class Dto(val id: String, val name: String)
+
+class Consumer(private val dto: Dto) {
+    fun consume(n: Int): String {
+        return dto.id
+    }
+}
