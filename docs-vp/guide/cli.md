@@ -7,7 +7,7 @@ head:
       content: "SigMap CLI Reference — every command and flag with examples"
   - - meta
     - property: og:description
-      content: "All 83 SigMap commands and flags documented with examples. ask, evidence, deps, sbom, gain, budget, redact, squeeze, conventions, scaffold, plan, bench, judge, verify, verify-ai-output, verify-plan, review-pr, create, note, status, doctor, validate, roots, daemon, history, --ci, --cost, --coverage, --watch, --diff, --callers, --callees, --mcp, --report, --health, weights --export/--import and more."
+      content: "All 84 SigMap commands and flags documented with examples. ask, evidence, deps, sbom, gain, budget, redact, squeeze, conventions, scaffold, plan, bench, judge, verify, verify-ai-output, verify-plan, review-pr, create, note, status, doctor, validate, roots, daemon, history, --ci, --cost, --coverage, --watch, --diff, --callers, --callees, --mcp, --report, --health, weights --export/--import and more."
   - - meta
     - property: og:url
       content: "https://sigmap.io/guide/cli"
@@ -19,7 +19,7 @@ head:
       content: "SigMap CLI Reference — every command and flag with examples"
   - - meta
     - name: twitter:description
-      content: "All 83 SigMap commands and flags documented with examples. ask, evidence, deps, sbom, gain, budget, redact, squeeze, conventions, scaffold, plan, bench, judge, verify, verify-ai-output, verify-plan, review-pr, create, note, status, doctor, validate, daemon, history, --ci, --cost, --coverage, --watch, --diff, --callers, --callees, --mcp, --report, --health, weights --export/--import and more."
+      content: "All 84 SigMap commands and flags documented with examples. ask, evidence, deps, sbom, gain, budget, redact, squeeze, conventions, scaffold, plan, bench, judge, verify, verify-ai-output, verify-plan, review-pr, create, note, status, doctor, validate, daemon, history, --ci, --cost, --coverage, --watch, --diff, --callers, --callees, --mcp, --report, --health, weights --export/--import and more."
   - - meta
     - name: twitter:image:alt
       content: "SigMap CLI Reference"
@@ -134,7 +134,8 @@ If you are new to the product, start with the workflow pages first:
 | `gain --all` | Add daily / weekly / monthly trend tables |
 | `gain --json` | Aggregate savings as JSON |
 | `gain --since <7d\|ISO>` | Window filter (`7d`, `30d`, `12h`, or ISO date) |
-| `gain --top <n> \| --model <name>` | Limit rows / set the $ pricing model |
+| `gain --top <n> \| --model <name>` | Limit rows / set the $ pricing model (an unknown name is priced as the default and **says so** on stderr) |
+| `gain --models` | List the known pricing model keys and their per-MTok rates |
 | `gain --reset` | Clear the local savings log (`.context/gain.ndjson`) |
 | `--no-track` | Disable gain savings capture for a run |
 | `--init` | Scaffold `gen-context.config.json` and `.contextignore`; inject a "Creation workflow" block into `CLAUDE.md` |
@@ -2055,6 +2056,35 @@ sigmap --track
 Token-savings dashboard. Shows how much SigMap has saved you — total tokens saved, % efficiency, estimated dollars, average latency, and a per-operation breakdown — built from a local, privacy-safe usage log.
 
 Savings are captured automatically: every `ask` and `generate` run appends a counts-only record to `.context/gain.ndjson` (no file paths, source, or query text). Capture is **default-on**; opt out per run with `--no-track`, globally with `SIGMAP_NO_TRACK=1`, or in config with `gainTracking: false`. This is separate from the legacy `--track` health log.
+
+The `$` column is priced per model. `--model` selects the rate; since **v8.51.5** an unknown key is still priced as the default rather than crashing the dashboard, but the substitution is **disclosed** rather than silent — a typo used to read as a valid quote:
+
+```bash
+sigmap gain --model gpt4o
+```
+
+```
+[sigmap] unknown model 'gpt4o' — priced as claude-sonnet ($3/MTok); see: sigmap gain --models
+```
+
+`gain --models` lists what it will accept:
+
+```bash
+sigmap gain --models
+```
+
+```
+Known pricing models (sigmap gain --model <name>):
+  claude-sonnet      $3/MTok  (default)
+  claude-opus        $5/MTok
+  claude-haiku       $1/MTok
+  gpt-4o             $2.5/MTok
+  gpt-4o-mini        $0.15/MTok
+  gemini-1.5-pro     $1.25/MTok
+  gemini-1.5-flash   $0.075/MTok
+```
+
+The exit code and the dashboard itself are unchanged — the fallback is disclosed, not removed, because a figure someone is already quoting should not silently change shape.
 
 ```bash
 sigmap gain

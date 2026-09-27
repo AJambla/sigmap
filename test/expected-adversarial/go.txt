@@ -1,0 +1,2 @@
+func ClosureParam(a int, b func(int) int) → int  :4-6
+func DeepGenerics(m map[string][]int) → int  :8-10

@@ -78,9 +78,9 @@ features:
 
 <div style="max-width:840px;margin:0 auto;padding:18px 24px 0;text-align:center">
 <div style="display:inline-flex;flex-wrap:wrap;gap:.5rem;justify-content:center;background:var(--vp-c-brand-soft,#ede9fe);border:1px solid rgba(124,106,247,.25);border-radius:999px;padding:.55rem .9rem;font-size:.9rem;color:var(--vp-c-text-1)">
-  <span><strong>Release:</strong> v8.51.4</span>
+  <span><strong>Release:</strong> v8.51.5</span>
   <span>·</span>
-  <span><strong>New — the language that counted as zero:</strong> the quality benchmark matched each context line against a keyword allowlist (<code>function </code>, <code>class </code>, <code>def </code>, …), so every language whose signature starts with the <em>identifier</em> read as zero. R is shaped <code>name &lt;- function(args)</code>, so ggplot2 reported <strong>1 grounded symbol against 964 real ones</strong> and this site published <strong>0% grounding for R</strong> — a language with its own benchmark doc and a test inside <code>npm test</code>. Counting is now structural, over the fenced blocks the context already delimits, so a new extractor cannot go silently blind. R grounding reads 51% / 41% / 71%; the aggregate moves 9,544 → <strong>15,674</strong> grounded. An impossible <strong>114%</strong> is clamped and flagged as a failed estimate instead of printed, a zero-with-content row now fails the suite, and six stale figures on the quality page — including a "16,500+" no saved run ever supported — are re-sourced from the report. 36 languages, zero dependencies, offline, deterministic.</span>
+  <span><strong>New — the suite that graded a bug as correct:</strong> the extractor tests reported <strong>36 fixtures, 36 pass</strong> while ten languages corrupt, truncate or drop declarations — happy-path fixtures cannot detect corruption. Building an adversarial corpus to prove that turned up something sharper: the committed Ruby expectation asserted <em>both</em> a phantom indented "class member" <em>and</em> the real top-level <code>def</code> for one declaration. A member scan written as <code>/^\s+def/gm</code> spanned the blank line after <code>end</code>, because <code>\s</code> matches newlines — so every top-level Ruby def after a blank line was emitted twice, and the test suite ratified it. Now fixed, with a defect ledger that fails in <strong>both</strong> directions: drift fails, and <em>fixing</em> a language fails too, forcing the entry out. Also closed: a docs page stating <strong>31</strong> languages in its search-result meta and <strong>36</strong> in its body, and a README promising a line anchor for every symbol when five languages emit none. Thanks <strong>@AJambla</strong> for the <code>gain --model</code> fallback disclosure. 36 languages, zero dependencies, offline, deterministic.</span>
 </div>
 <div style="margin-top:.4rem;display:inline-flex;flex-wrap:wrap;gap:.5rem;justify-content:center;background:var(--vp-c-default-soft,#f3f4f6);border:1px solid rgba(0,0,0,.08);border-radius:999px;padding:.55rem .9rem;font-size:.9rem;color:var(--vp-c-text-2)">
   <span><strong>Benchmark:</strong> sigmap-v8.51-main</span>
@@ -177,7 +177,7 @@ See the full [end-to-end walkthrough](/guide/walkthrough) to watch this in actio
 | Overall token reduction | — | **96.1%** |
 | GPT-4o overflow repos | 16/21 | **0/21** |
 
-Latest saved benchmark run: **2026-09-25 (v8.51.4)**.
+Latest saved benchmark run: **2026-09-25 (v8.51.5)**.
 
 </div>
 

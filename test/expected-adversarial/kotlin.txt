@@ -1,0 +1,5 @@
+class Svc  :2-14
+  fun nestedDefault(a, 2)  :3-3
+  fun closureParam(cb)  :6-6
+  fun deepGenerics(m, List<Pair<Int, String>>>) → Int  :9-9
+  fun stringDelims(sep)  :12-12
