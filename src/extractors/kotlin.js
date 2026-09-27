@@ -110,7 +110,10 @@ function extract(src) {
     const bodyStart = bodyOpen + 1;
     const block = extractBlock(stripped, masked, bodyStart);
     sigs.push(withAnchor(`${m[1]} ${m[2]}`, lineAt(stripped, declIdx), lineAt(stripped, bodyStart + block.length)));
-    for (const meth of extractMembers(block, masked.slice(bodyStart, bodyStart + block.length))) {
+    // Members of a NESTED type belong to that type, not to this one.
+    const scoped = blankNestedTypeBodies(block, masked.slice(bodyStart, bodyStart + block.length),
+      /^[ \t]+(?:(?:public|internal|private|protected)\s+)?(?:(?:data|sealed|abstract|open|enum|annotation|value|inner|companion)\s+)*(?:class|object|interface)\s+\w+/gm);
+    for (const meth of extractMembers(scoped.block, scoped.masked)) {
       sigs.push(withAnchor(`  ${meth.text}`, lineAt(stripped, bodyStart + (meth.declIdx || 0)), lineAt(stripped, bodyStart + (meth.endIdx || 0))));
     }
   }
@@ -188,6 +191,54 @@ function scanFunctions(stripped, masked, headRe) {
 
 // Depth-counted on the MASKED surface (a brace inside a string can no longer
 // open or close a block); content sliced from the stripped surface.
+/**
+ * Blank the bodies of NESTED type declarations inside a block, so their members
+ * are not also attributed to the enclosing type.
+ *
+ * Before the scanner migration a nested `trait`/`interface` was never found at
+ * all, so this could not arise. Finding them correctly exposed it: a method in
+ * `object O { trait T { def inner… } }` was emitted once under O and once under
+ * T. Blanking is length- and newline-preserving, so member offsets and line
+ * anchors computed on the result still align with the original block.
+ * @param {string} block        stripped block text
+ * @param {string} maskedBlock  masked block text (same length)
+ * @param {RegExp} typeRe       nested-type header matcher (global, multiline)
+ * @returns {{ block: string, masked: string }}
+ */
+function blankNestedTypeBodies(block, maskedBlock, typeRe) {
+  const b = block.split('');
+  const mb = maskedBlock.split('');
+  const blank = (from, to) => {
+    for (let k = from; k < to && k < b.length; k++) {
+      if (b[k] !== '\n') b[k] = ' ';
+      if (mb[k] !== '\n') mb[k] = ' ';
+    }
+  };
+  for (const m of block.matchAll(typeRe)) {
+    // Walk the nested header to its body brace, jumping balanced groups.
+    let i = m.index + m[0].length;
+    const stop = Math.min(maskedBlock.length, i + RET_SCAN_CHARS);
+    let open = -1;
+    while (i < stop) {
+      const ch = maskedBlock[i];
+      if (ch === '{') { open = i; break; }
+      if (ch === '(') { const c = readBalanced(maskedBlock, i); if (c < 0) break; i = c + 1; continue; }
+      if (ch === '[') { const c = readBalanced(maskedBlock, i, '[', ']'); if (c < 0) break; i = c + 1; continue; }
+      if (ch === '\n') {
+        const nl = maskedBlock.indexOf('\n', i + 1);
+        if (!maskedBlock.slice(i + 1, nl < 0 ? stop : nl).trim()) break;
+        i++; continue;
+      }
+      if (ch === '=' || ch === ';') break;
+      i++;
+    }
+    if (open < 0) continue;
+    const close = readBalanced(maskedBlock, open, '{', '}');
+    blank(open, close < 0 ? maskedBlock.length : close + 1);
+  }
+  return { block: b.join(''), masked: mb.join('') };
+}
+
 function extractBlock(stripped, masked, startIndex) {
   let depth = 1, i = startIndex;
   const end = Math.min(masked.length, startIndex + MAX_CLASS_BODY_CHARS);

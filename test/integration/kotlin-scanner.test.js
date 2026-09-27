@@ -92,6 +92,17 @@ test('members are never attributed to a declaration with no body', () => {
 
 // ── 3. No duplication, and the committed fixture is right ──────────────────
 
+test('a nested type\'s members are attributed to it, not the enclosing type', () => {
+  // Finding nested types correctly (the migration) exposed a double-emission:
+  // `inner` was reported under BOTH O and T. It belongs only to T.
+  const out = extract('class O {\n    fun before(a: Int): Int { return a }\n\n    interface T {\n        fun inner(b: Int): Int\n    }\n\n    fun after(c: Int): Int { return c }\n}\n');
+  const exact = out.filter((s, i) => out.indexOf(s) !== i);
+  assert.strictEqual(exact.length, 0, `duplicate signatures: ${JSON.stringify(exact)}`);
+  assert.deepStrictEqual(names(out),
+    ['class O', '  fun before(a) → Int', '  fun after(c) → Int', 'interface T', '  fun inner(b) → Int'],
+    'outer members on BOTH sides of the nested type must survive');
+});
+
 test('class members are not also emitted as top-level functions', () => {
   const out = extract('class C {\n    fun m(a: Int): Int {\n        return a\n    }\n}\n');
   const ms = out.filter((s) => s.includes('fun m('));
