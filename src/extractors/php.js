@@ -2,6 +2,7 @@
 
 const { lineAt, withAnchor } = require('./line-anchor');
 const { capWithNotice, capMembersWithNotice } = require('../util/truncate');
+const { stripComments, maskCode, readBalanced } = require('./scan');
 
 // Ceilings sit above the default `maxSigsPerFile` so the configured budget
 // governs output rather than a literal buried here, and omissions are disclosed
@@ -14,6 +15,9 @@ const MAX_CLASS_BODY_CHARS = 200000;
 const MEMBER_LIMIT = 120;
 const PER_FILE_LIMIT = 200;
 
+// Chars scanned past the params before giving up on a return type.
+const RET_SCAN_CHARS = 400;
+
 /**
  * Extract signatures from PHP source code.
  * Signatures carry `:start-end` line anchors (Surgical Context); the comment
@@ -25,10 +29,12 @@ function extract(src) {
   if (!src || typeof src !== 'string') return [];
   const sigs = [];
 
-  const stripped = src
-    .replace(/\/\/.*$/gm, '')
-    .replace(/#.*$/gm, '')
-    .replace(/\/\*[\s\S]*?\*\//g, (s) => s.replace(/[^\n]/g, ' '));
+  // stripComments is length- AND newline-preserving; the previous regex strip
+  // DELETED comment text, so offsets no longer aligned with the masked surface
+  // the balanced reader walks (#695). The `#` line-comment form PHP also
+  // accepts is blanked separately, preserving length.
+  const stripped = blankHashComments(stripComments(src));
+  const masked = blankHashComments(maskCode(src));
 
   // Anchor range: scan past same-line trivia to a body `{` (range) else single line.
   const rangeFor = (declIdx, afterIdx) => {
@@ -51,21 +57,52 @@ function extract(src) {
     const bodyStart = m.index + m[0].length;
     const block = extractBlock(stripped, bodyStart);
     sigs.push(withAnchor(`${kind} ${m[1]}`, lineAt(stripped, m.index), lineAt(stripped, bodyStart + block.length)));
-    for (const meth of extractMembers(block)) {
+    for (const meth of extractMembers(block, masked.slice(bodyStart, bodyStart + block.length))) {
       // The disclosure marker carries no offsets; anchor it at the class body.
       sigs.push(withAnchor(`  ${meth.text}`, lineAt(stripped, bodyStart + (meth.declIdx || 0)), lineAt(stripped, bodyStart + (meth.endIdx || 0))));
     }
   }
 
   // Top-level functions
-  for (const m of stripped.matchAll(/^function\s+(\w+)\s*\(([^)]*)\)\s*(?::\s*([^\n{]+))?/gm)) {
-    const ret = normalizeType(m[3]);
+  // `(?:<\?php\s+)?` lets a declaration share its line with the opening tag —
+  // `<?php function f($a) {…}` previously yielded NOTHING at all (#696).
+  for (const m of stripped.matchAll(/^(?:<\?php\s+|<\?=\s+)?function\s+(\w+)\s*\(/gm)) {
+    const pr = readParams(stripped, masked, m.index + m[0].length - 1);
+    if (!pr) continue;
+    const rm = /^\s*:\s*([^\n{]+)/.exec(pr.after);
+    const ret = normalizeType(rm ? rm[1] : '');
     const retStr = ret ? ` → ${ret}` : '';
-    const [s, e] = rangeFor(m.index, m.index + m[0].length);
-    sigs.push(withAnchor(`function ${m[1]}(${normalizeParams(m[2])})${retStr}`, s, e));
+    const declIdx = m.index + (m[0].startsWith('<?') ? m[0].length - m[0].replace(/^<\?(?:php|=)\s+/, '').length : 0);
+    const [s, e] = rangeFor(declIdx, pr.end);
+    sigs.push(withAnchor(`function ${m[1]}(${normalizeParams(pr.params)})${retStr}`, s, e));
   }
 
   return capWithNotice(sigs, PER_FILE_LIMIT, 'signatures');
+}
+
+/** Blank `#` line comments, preserving length and newlines. */
+function blankHashComments(src) {
+  return src.replace(/#[^\n]*/g, (m) => ' '.repeat(m.length));
+}
+
+/**
+ * Resolve a declaration's parameter list with a BALANCED read (#695).
+ *
+ * `\(([^)]*)\)` stopped at the first `)`, so `function f($a = g(1, 2), $b)`
+ * truncated to `function f($a = g(1, 2)` and a `)` inside a string default cut
+ * the scan mid-literal.
+ */
+function readParams(stripped, masked, openIdx) {
+  const close = readBalanced(masked, openIdx);
+  if (close < 0) return null;
+  let i = close + 1;
+  const stop = Math.min(masked.length, i + RET_SCAN_CHARS);
+  while (i < stop) {
+    const ch = masked[i];
+    if (ch === '{' || ch === ';' || ch === '\n') break;
+    i++;
+  }
+  return { params: stripped.slice(openIdx + 1, close), after: stripped.slice(close + 1, i), end: i, close };
 }
 
 function extractBlock(src, startIndex) {
@@ -79,18 +116,21 @@ function extractBlock(src, startIndex) {
   return src.slice(startIndex, i - 1);
 }
 
-function extractMembers(block) {
+function extractMembers(block, maskedBlock) {
   const members = [];
-  const methodRe = /^\s+(?:public|protected)\s+(?:static\s+)?function\s+(\w+)\s*\(([^)]*)\)\s*(?::\s*([^\n{]+))?/gm;
+  const methodRe = /^[ \t]+(?:public|protected)\s+(?:static\s+)?function\s+(\w+)\s*\(/gm;
   for (const m of block.matchAll(methodRe)) {
     if (m[1].startsWith('_')) continue;
+    const pr = readParams(block, maskedBlock, m.index + m[0].length - 1);
+    if (!pr) continue;
     const isStatic = m[0].includes('static ') ? 'static ' : '';
-    const ret = normalizeType(m[3]);
+    const rm = /^\s*:\s*([^\n{]+)/.exec(pr.after);
+    const ret = normalizeType(rm ? rm[1] : '');
     const retStr = ret ? ` → ${ret}` : '';
     members.push({
-      text: `${isStatic}function ${m[1]}(${normalizeParams(m[2])})${retStr}`,
+      text: `${isStatic}function ${m[1]}(${normalizeParams(pr.params)})${retStr}`,
       declIdx: m.index + (m[0].length - m[0].trimStart().length),
-      endIdx: m.index + m[0].length,
+      endIdx: pr.close + 1,
     });
   }
   return capMembersWithNotice(members, MEMBER_LIMIT);

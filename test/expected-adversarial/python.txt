@@ -1,4 +1,4 @@
 def nested_default(a, b=...)  :2-3
 def collection_default(a=..., b=...)  :6-7
-def kwonly(a, b=..., **kw)  :10-11
+def kwonly(a, *, b=..., **kw)  :10-11
 def string_delims(sep=...)  :14-15
