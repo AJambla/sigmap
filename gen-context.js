@@ -11088,7 +11088,7 @@ __factories["./src/extractors/ruby"] = function(module, exports) {
     }
 
     // Public methods (not private/protected)
-    for (const m of stripped.matchAll(/^\s+def\s+(?:self\.)?(\w+)(?:\s*\(([^)]*)\))?/gm)) {
+    for (const m of stripped.matchAll(/^[ \t]+def\s+(?:self\.)?(\w+)(?:\s*\(([^)]*)\))?/gm)) {
       if (m[1].startsWith('_')) continue;
       const params = m[2] ? `(${normalizeParams(m[2])})` : '';
       const selfPrefix = m[0].includes('self.') ? 'self.' : '';
