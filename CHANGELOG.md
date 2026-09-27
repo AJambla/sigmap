@@ -8,6 +8,9 @@ Format: [Semantic Versioning](https://semver.org/)
 
 ## [Unreleased]
 
+### Fixed
+- **`gain --model <typo>` silently priced with the default model** (#665) — `resolvePrice()` mapped any unknown model key to `claude-sonnet` and the dashboard printed the resulting dollar figures with no notice, so a typo like `gpt4o` looked like a valid quote. It now returns `requested` + `fallback`, the gain handler emits one stderr line naming the requested model, the model actually used and its rate, and a new `gain --models` lists the known keys and rates. Exit code and dashboard output are unchanged — the fallback is disclosed, not removed.
+
 ---
 
 ## [8.51.4] — 2026-09-26
