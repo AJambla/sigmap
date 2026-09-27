@@ -76,33 +76,8 @@
       ]
     },
     "scala": {
-      "tier": "2 \u2014 anchored regex (NOT migrated)",
-      "defects": [
-        {
-          "case": "nestedDefault",
-          "issue": 695,
-          "kind": "corrupted",
-          "actual": "def nestedDefault(a, 2)  :3-3",
-          "shouldBe": "def nestedDefault(a, b): Int",
-          "note": "First-`)` truncation; phantom `2`; return type lost."
-        },
-        {
-          "case": "stringDelims",
-          "issue": 695,
-          "kind": "corrupted",
-          "actual": "def stringDelims(sep)  :9-9",
-          "shouldBe": "def stringDelims(sep): String",
-          "note": "`)` inside the string default truncates; return type lost."
-        },
-        {
-          "case": "body-less-class-swallows-next",
-          "issue": 738,
-          "kind": "corrupted",
-          "actual": "case class Dto  :15-21",
-          "shouldBe": "case class Dto  :15-15  followed by  class Consumer  :17-21  with `consume` attributed to Consumer",
-          "note": "`(?:[^{]*)\\{` on the class header matches newlines, so a body-less `case class` walks past the blank line into the next declaration and adopts its body: Dto is anchored :15-21 (Consumer's span), carries Consumer's `consume`, and **class Consumer is never reported**. Misattribution rather than truncation \u2014 every symbol named is real, just bolted to the wrong owner. Kotlin had the identical defect and its scanner migration fixed it; Scala awaits its own increment."
-        }
-      ]
+      "tier": "2 \u2014 anchored regex (shared balanced scanner)",
+      "defects": []
     },
     "dart": {
       "tier": "2 \u2014 anchored regex (NOT migrated)",
