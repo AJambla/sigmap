@@ -1,6 +1,6 @@
 ---
 title: Roadmap
-description: SigMap version history and roadmap. From v0.0 to v8.51.4, with recent releases completing the grounded-codegen plan — a realistic §9 ablation (real-symbol corpus, exact-signature grounding, --verbose), a Gemini (AI Studio) provider for the §9 ablation, the init Creation-workflow CLAUDE.md block, scaffold persistence, the LLM A/B hallucination ablation harness, the sigmap create orchestrator and its four guard stages (scaffold, verify-plan, verify-ai-output, review-pr), the conventions command with its full flag set (--conflicts, --inject, --report, --ci, --fix, --update), the grounding benchmark, read-time self-heal, live-index MCP write hooks, the get_callee_signatures MCP tool (exact callee signatures), realistic per-query savings, release-pipeline robustness (bundle integrity + version.json gates, standalone-bundle smoke test), the sigmap gain token-savings dashboard, supply-chain hardening (zero system-shell access), Squeeze input minimization with symbol enrichment, source-of-truth llms.txt, the verify-ai-output Hallucination Guard, and Memory tools (note, status, read_memory MCP tool).
+description: SigMap version history and roadmap. From v0.0 to v8.51.5, with recent releases completing the grounded-codegen plan — a realistic §9 ablation (real-symbol corpus, exact-signature grounding, --verbose), a Gemini (AI Studio) provider for the §9 ablation, the init Creation-workflow CLAUDE.md block, scaffold persistence, the LLM A/B hallucination ablation harness, the sigmap create orchestrator and its four guard stages (scaffold, verify-plan, verify-ai-output, review-pr), the conventions command with its full flag set (--conflicts, --inject, --report, --ci, --fix, --update), the grounding benchmark, read-time self-heal, live-index MCP write hooks, the get_callee_signatures MCP tool (exact callee signatures), realistic per-query savings, release-pipeline robustness (bundle integrity + version.json gates, standalone-bundle smoke test), the sigmap gain token-savings dashboard, supply-chain hardening (zero system-shell access), Squeeze input minimization with symbol enrichment, source-of-truth llms.txt, the verify-ai-output Hallucination Guard, and Memory tools (note, status, read_memory MCP tool).
 head:
   - - meta
     - property: og:title
@@ -835,6 +835,24 @@ Two milestones in one release. **`verify-ai-output` Reliable MVP** (#232) grows 
 **Tags:** `KNOWN_LIMITATIONS.md` · `extraction honesty` · `tier label` · `drift guard` · `G1` · `#520` · `PR #521`
 
 **Impact:** the credibility gap a skeptical reviewer finds first is closed in writing; 6 new guard checks (133 files); zero runtime changes.
+
+---
+
+### v8.51.5 — the suite that graded a bug as correct ✓ (2026-09-27)
+
+**Patch release, and the third consecutive one spent on the measurement layer.** v8.51.3 fixed a benchmark that overwrote the corpus it read; v8.51.4 fixed one that could not see a whole language. This one found the extractor test suite asserting that a bug was correct.
+
+`--diagnose-extractors` reported **36 fixtures, 36 pass, 0 fail**. The corpus was broad — one fixture per language — but happy-path only, so it could not detect corruption, and it is the evidence cited for the tier labels in `KNOWN_LIMITATIONS.md`. Building an adversarial corpus to prove that turned up something sharper: `test/expected/ruby.txt` contained **both** a phantom indented "class member" and the real top-level `def` for the same declaration. `ruby.js` scanned members with `/^\s+def/gm`, and `\s` matches newlines, so `^\s+` spanned the blank line after an `end` and matched a column-0 `def` as if indented; the top-level pass then matched it again. Every top-level Ruby def after a blank line was emitted twice, and the committed expectation ratified it — the same character-class mistake as the `^`-anchored class regex closed in v8.51.1.
+
+`test/fixtures-adversarial/` now exercises 12 languages against the shapes that actually break regex extractors, `test/expected-adversarial/` snapshots what each produces today, and `test/adversarial-defects.json` records which lines are wrong, the correct signature, and the owning issue. The ledger fails in **both** directions: behaviour drifting without a ledger update fails, and *fixing* a language fails too, which forces the entry out. So `defects: []` is a positive claim rather than absent testing. That measurement corrected #695's own table — **Python is fine** via the AST tier, and **Rust and C# carry defects #695 never measured**, with Rust's `->`→`→` substitution firing on the closure arrow so the return type is stated twice in two notations.
+
+The same release closed the last of the published-count drift. `sync-metrics` had only ever written `version.json` and `README.md`, so `languages.md` said **31** in both SEO `content:` meta lines and **36** in its body — and the meta lines are what search results render. Markers cannot fix that half, because an HTML comment inside a YAML string lands verbatim in the rendered tag, so every count is now classified as canonical, exempt (a different metric, reason recorded) or historical, and an unclassified one fails CI. The README's promise of a line anchor for *every* symbol is scoped to the tiers that actually anchor — five languages emit none — and R, Lua, Elixir and Astro finally appear in the tier table, with Astro correctly in Tier 2 rather than Tier 3.
+
+First external contribution to the `gain` surface: **@AJambla** found that `gain --model <typo>` mapped any unknown key to `claude-sonnet` and printed the dollar figures with no notice, so a typo read as a valid quote. The substitution is now disclosed on stderr and `gain --models` lists the known keys and rates, with exit code and dashboard output unchanged — the fallback is disclosed, not removed.
+
+**Tags:** `test/fixtures-adversarial` · `adversarial-defects.json` · `check-doc-counts.mjs` · `gain --models` · `#665` · `#697` · `#698` · `#702` · `#735` · PRs `#733`, `#734`, `#736`
+
+**Impact:** Ruby signature duplication eliminated (every top-level def after a blank line was doubled); ten languages' parser defects enumerated with owning issues instead of counted as passes; published counts gated in both directions; 176 integration tests (up from 175), 32 new assertions of which 15 fail against v8.51.4; one external contributor credited.
 
 ---
 

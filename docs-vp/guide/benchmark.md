@@ -1,13 +1,13 @@
 ---
 title: Benchmark overview
-description: Official v8.51.4 benchmark snapshot. 96.1% average token reduction across 21 repos, 78.6% retrieval hit@5, 43.7% fewer prompts, and R language support verified.
+description: Official v8.51.5 benchmark snapshot. 96.1% average token reduction across 21 repos, 78.6% retrieval hit@5, 43.7% fewer prompts, and R language support verified.
 head:
   - - meta
     - property: og:title
-      content: "SigMap benchmark overview — v8.51.4 snapshot with R language"
+      content: "SigMap benchmark overview — v8.51.5 snapshot with R language"
   - - meta
     - property: og:description
-      content: "Token, retrieval, quality, and task metrics from latest v8.51.4 benchmark run (2026-09-25) with 21 repositories including R language support."
+      content: "Token, retrieval, quality, and task metrics from latest v8.51.5 benchmark run (2026-09-25) with 21 repositories including R language support."
   - - meta
     - property: og:url
       content: "https://sigmap.io/guide/benchmark"
@@ -15,7 +15,7 @@ head:
 
 # Benchmark overview
 
-::: info Official v8.51.4 benchmark snapshot (21 repos, including R language)
+::: info Official v8.51.5 benchmark snapshot (21 repos, including R language)
 **Benchmark ID:** sigmap-v8.51-main &nbsp;·&nbsp; **Date:** 2026-09-25
 
 | Metric | Value |
@@ -39,9 +39,9 @@ This is the landing page for the public benchmark story. It answers four differe
 | SigMap reduces retries and wrong-context answers | [Task benchmark](/guide/task-benchmark) |
 | SigMap keeps large repos inside model limits | [Quality benchmark](/guide/quality-benchmark) |
 
-## Official v8.51.4 snapshot (with R language support)
+## Official v8.51.5 snapshot (with R language support)
 
-Latest saved benchmark run: **2026-09-25 (v8.51.4)**
+Latest saved benchmark run: **2026-09-25 (v8.51.5)**
 
 Task selection, metric definitions, baselines, and the limits of what these tests cover are in [benchmark methodology](/guide/methodology).
 
