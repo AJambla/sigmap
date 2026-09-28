@@ -2,3 +2,8 @@ class Svc  :2-12
   NestedDefault(int a, int b = G(1, 2)) → int  :3-3
   DeepGenerics(Dictionary<string, List<int>> m) → int  :6-6
   ClosureParam(Func<int, int> cb, int n) → int  :9-9
+class Outer  :15-21
+  Before(int a) → int  :16-16
+  After(int c) → int  :20-20
+interface IInner  :17-19
+  Handle(int b) → int  :18-18

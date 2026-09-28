@@ -13,3 +13,12 @@ class Svc {
         return sep
     }
 }
+
+// #741: a nested type's methods belong to it, not to the enclosing type.
+class Outer {
+    func before(a: Int) -> Int { return a }
+    class Inner {
+        func handle(b: Int) -> Int { return b }
+    }
+    func after(c: Int) -> Int { return c }
+}
