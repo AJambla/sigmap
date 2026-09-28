@@ -276,7 +276,11 @@ List every dependency the repo **declares**, across all nine supported ecosystem
 
 Covers `package.json` (all four scopes), `requirements.txt`, `pyproject.toml` (PEP 621 and Poetry), `pom.xml`, `build.gradle(.kts)`, Gradle version catalogs, `go.mod`, `Cargo.toml`, `Gemfile`, `composer.json`, `*.csproj` and `pubspec.yaml`.
 
+Manifests are found **anywhere in the tree**, not just at the repo root (v8.51.7) — a bounded walk, depth 4 and 200 manifests. This is what a multi-module build actually looks like: an aggregator `pom.xml` declaring `<modules>` and no dependencies of its own, with the real ones in `service-api/pom.xml` and `service-core/pom.xml`. Before the walk, such a repo reported `0 deps`. The walk honours the project's `exclude` config and `.contextignore`, so vendored or cloned third-party trees are not reported as yours.
+
 Two details make the output usable rather than decorative. Maven `${property}` placeholders are resolved against the POM's own `<properties>` block, so you get `2.17.1` and not `${jackson.version}`. And when a `package-lock.json` is present the **exact locked version wins over the declared range** — `^5.1.0` is not what the code actually runs against, and a model grounded on the wrong major writes the wrong API.
+
+Maven is read to Maven's own rules: project identity comes from the POM's **own** coordinates rather than its `<parent>` (otherwise every Spring Boot project reports itself as `spring-boot-starter-parent`), `<dependencyManagement>` entries are version constraints and are **not** counted as dependencies, and scopes map faithfully — `provided` stays `provided`, so a compile-time dependency that is never shipped is distinguishable from one that is.
 
 ```bash
 sigmap deps                # human-readable, grouped by ecosystem
@@ -1451,7 +1455,7 @@ sigmap compare --json
 ────────────────────────────────────────────
  hit@5         86.4% vs 40.8% grep   (2.12× lift)
  Avg prompts   1.53 vs 2.84
- Token story   96.1% overall reduction
+ Token story   95.9% overall reduction
 ────────────────────────────────────────────
 ```
 
@@ -1467,7 +1471,7 @@ sigmap share
 
 ```
 Generated with SigMap — the deterministic, verifiable grounding layer for AI code work
-96.1% fewer tokens · 78.6% retrieval hit@5 · 43.4% fewer prompts
+95.9% fewer tokens · 78.6% retrieval hit@5 · 43.4% fewer prompts
 https://sigmap.io
 [sigmap] Copied to clipboard.
 ```
@@ -1566,7 +1570,7 @@ sigmap bench --submit --json
 ────────────────────────────────────────────────────────
  Canonical metrics (official release):
  hit@5          : 78.6%
- token reduction: 96.1%
+ token reduction: 95.9%
 ────────────────────────────────────────────────────────
  Local run metrics: none yet — run node scripts/run-retrieval-benchmark.mjs
 ────────────────────────────────────────────────────────
