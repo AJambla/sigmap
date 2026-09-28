@@ -7025,7 +7025,10 @@ __factories["./src/extractors/csharp"] = function(module, exports) {
       const bodyStart = m.index + m[0].length;
       const block = extractBlock(stripped, bodyStart);
       sigs.push(withAnchor(`${m[1]} ${m[2]}`, lineAt(stripped, declIdx), lineAt(stripped, bodyStart + block.length)));
-      for (const meth of extractMembers(block, masked.slice(bodyStart, bodyStart + block.length))) {
+      // Members of a NESTED type belong to that type, not to this one.
+      const scoped = blankNestedTypeBodies(block, masked.slice(bodyStart, bodyStart + block.length),
+        /^[ \t]+(?:(?:public|internal|protected|private|abstract|sealed|static|partial)\s+)*(?:class|interface|enum|record|struct)\s+\w+/gm);
+      for (const meth of extractMembers(scoped.block, scoped.masked, { implicitPublic: m[1] === 'interface' })) {
         // The disclosure marker carries no offsets; anchor it at the class body.
         sigs.push(withAnchor(`  ${meth.text}`, lineAt(stripped, bodyStart + (meth.declIdx || 0)), lineAt(stripped, bodyStart + (meth.endIdx || 0))));
       }
@@ -7058,6 +7061,37 @@ __factories["./src/extractors/csharp"] = function(module, exports) {
     return { params: stripped.slice(openIdx + 1, close), after: stripped.slice(close + 1, i), end: i, close };
   }
 
+  /**
+   * Blank the bodies of NESTED type declarations so their members are not also
+   * attributed to the enclosing type (#741). Length- and newline-preserving, so
+   * member offsets and line anchors still align with the original block.
+   */
+  function blankNestedTypeBodies(block, maskedBlock, typeRe) {
+    const b = block.split('');
+    const mb = maskedBlock.split('');
+    for (const m of block.matchAll(typeRe)) {
+      let i = m.index + m[0].length;
+      const stop = Math.min(maskedBlock.length, i + RET_SCAN_CHARS);
+      let open = -1;
+      while (i < stop) {
+        const ch = maskedBlock[i];
+        if (ch === '{') { open = i; break; }
+        if (ch === '(') { const c = readBalanced(maskedBlock, i); if (c < 0) break; i = c + 1; continue; }
+        if (ch === '<') { const c = readBalanced(maskedBlock, i, '<', '>'); if (c < 0) { i++; continue; } i = c + 1; continue; }
+        if (ch === ';') break;
+        i++;
+      }
+      if (open < 0) continue;
+      const close = readBalanced(maskedBlock, open, '{', '}');
+      const end = close < 0 ? maskedBlock.length : close + 1;
+      for (let k = open; k < end && k < b.length; k++) {
+        if (b[k] !== '\n') b[k] = ' ';
+        if (mb[k] !== '\n') mb[k] = ' ';
+      }
+    }
+    return { block: b.join(''), masked: mb.join('') };
+  }
+
   function extractBlock(src, startIndex) {
     let depth = 1, i = startIndex;
     const end = Math.min(src.length, startIndex + MAX_CLASS_BODY_CHARS);
@@ -7069,9 +7103,14 @@ __factories["./src/extractors/csharp"] = function(module, exports) {
     return src.slice(startIndex, i - 1);
   }
 
-  function extractMembers(block, maskedBlock) {
+  function extractMembers(block, maskedBlock, opts = {}) {
     const members = [];
-    const methodRe = /^[ \t]+(?:public|internal|protected)\s+(?:static\s+|virtual\s+|override\s+|async\s+)*(?:where\s+\w+\s*:\s*[^\n]+\s+)?([\w<>\[\]?., ]+)\s+(\w+)\s*\(/gm;
+    // Interface members are IMPLICITLY public, so demanding an explicit modifier
+    // matched none of them — `interface T` was reported with no members at all
+    // (#741). Java already draws this distinction via the same option.
+    const methodRe = opts.implicitPublic
+      ? /^[ \t]+(?:(?:public|internal|protected|static|virtual|override|async|new)\s+)*([\w<>\[\]?., ]+?)\s+(\w+)\s*\(/gm
+      : /^[ \t]+(?:public|internal|protected)\s+(?:static\s+|virtual\s+|override\s+|async\s+)*(?:where\s+\w+\s*:\s*[^\n]+\s+)?([\w<>\[\]?., ]+)\s+(\w+)\s*\(/gm;
     for (const m of block.matchAll(methodRe)) {
       const pr = readParams(block, maskedBlock, m.index + m[0].length - 1);
       if (!pr) continue;
@@ -8397,10 +8436,11 @@ __factories["./src/extractors/java"] = function(module, exports) {
 
     // Type declarations: classes, interfaces, enums, records — modifiers in any
     // order, sealed/non-sealed included, generic names allowed.
-    const typeRegex = /^(?:(?:public|protected|abstract|final|sealed|non-sealed|static|strictfp)\s+)*(class|interface|enum|record)\s+(\w+)/gm;
+    const typeRegex = /^[ \t]*(?:(?:public|protected|private|abstract|final|sealed|non-sealed|static|strictfp)\s+)*(class|interface|enum|record)\s+(\w+)/gm;
     for (const m of stripped.matchAll(typeRegex)) {
       const kw = m[1];
       const name = m[2];
+      const declIdx = m.index + (m[0].length - m[0].trimStart().length);
       let i = m.index + m[0].length;
       // Optional type parameters on the name: `<T, ID>`, `<T extends Comparable<T>>`.
       i = ws(i);
@@ -8432,9 +8472,14 @@ __factories["./src/extractors/java"] = function(module, exports) {
       if (bodyOpen < 0) continue;
       const bodyStart = bodyOpen + 1;
       const block = extractBlock(stripped, masked, bodyStart);
-      sigs.push(hinted(withAnchor(`${kw} ${name}${header}`, lineAt(stripped, m.index), lineAt(stripped, bodyStart + block.length)), name));
+      sigs.push(hinted(withAnchor(`${kw} ${name}${header}`, lineAt(stripped, declIdx), lineAt(stripped, bodyStart + block.length)), name));
       const maskedBlock = masked.slice(bodyStart, bodyStart + block.length);
-      for (const meth of extractMembers(block, maskedBlock, { implicitPublic: kw === 'interface' })) {
+      // Members of a NESTED type belong to that type. Reporting nested types at
+      // all (the anchor fix above) is what makes this necessary — without it the
+      // same method is emitted under both owners, as it was in kotlin/scala (#738).
+      const scoped = blankNestedTypeBodies(block, maskedBlock,
+        /^[ \t]+(?:(?:public|protected|private|abstract|final|sealed|non-sealed|static|strictfp)\s+)*(?:class|interface|enum|record)\s+\w+/gm);
+      for (const meth of extractMembers(scoped.block, scoped.masked, { implicitPublic: kw === 'interface' })) {
         // The disclosure marker carries no offsets; anchor it at the class body.
         const declIdx = meth.declIdx || 0;
         const endIdx = meth.endIdx || 0;
@@ -8447,6 +8492,36 @@ __factories["./src/extractors/java"] = function(module, exports) {
 
   // Depth-counted on the MASKED surface (a brace inside a string can no longer
   // open or close a block); content sliced from the stripped surface.
+  /**
+   * Blank the bodies of NESTED type declarations so their members are not also
+   * attributed to the enclosing type (#741). Length- and newline-preserving.
+   */
+  function blankNestedTypeBodies(block, maskedBlock, typeRe) {
+    const b = block.split('');
+    const mb = maskedBlock.split('');
+    for (const m of block.matchAll(typeRe)) {
+      let i = m.index + m[0].length;
+      const stop = Math.min(maskedBlock.length, i + HEAD_SCAN_CHARS);
+      let open = -1;
+      while (i < stop) {
+        const ch = maskedBlock[i];
+        if (ch === '{') { open = i; break; }
+        if (ch === '(') { const c = readBalanced(maskedBlock, i); if (c < 0) break; i = c + 1; continue; }
+        if (ch === '<') { const c = readBalanced(maskedBlock, i, '<', '>'); if (c < 0) { i++; continue; } i = c + 1; continue; }
+        if (ch === ';') break;
+        i++;
+      }
+      if (open < 0) continue;
+      const close = readBalanced(maskedBlock, open, '{', '}');
+      const end = close < 0 ? maskedBlock.length : close + 1;
+      for (let k = open; k < end && k < b.length; k++) {
+        if (b[k] !== '\n') b[k] = ' ';
+        if (mb[k] !== '\n') mb[k] = ' ';
+      }
+    }
+    return { block: b.join(''), masked: mb.join('') };
+  }
+
   function extractBlock(stripped, masked, startIndex) {
     let depth = 1;
     let i = startIndex;
@@ -12655,12 +12730,18 @@ __factories["./src/extractors/swift"] = function(module, exports) {
     };
 
     // Classes, structs, protocols, enums
-    const typeRe = /^(?:public\s+|internal\s+|open\s+)?(?:final\s+)?(class|struct|protocol|enum|actor)\s+(\w+)(?:<[^{]*>)?(?:\s*:\s*[\w, <>.]+)?\s*\{/gm;
+    const typeRe = /^[ \t]*(?:public\s+|internal\s+|open\s+|private\s+|fileprivate\s+)?(?:final\s+)?(class|struct|protocol|enum|actor)\s+(\w+)(?:<[^{]*>)?(?:\s*:\s*[\w, <>.]+)?\s*\{/gm;
     for (const m of stripped.matchAll(typeRe)) {
+      const declIdx = m.index + (m[0].length - m[0].trimStart().length);
       const bodyStart = m.index + m[0].length;
       const block = extractBlock(stripped, bodyStart);
-      sigs.push(withAnchor(`${m[1]} ${m[2]}`, lineAt(stripped, m.index), lineAt(stripped, bodyStart + block.length)));
-      for (const fn of extractMembers(block, masked.slice(bodyStart, bodyStart + block.length))) {
+      sigs.push(withAnchor(`${m[1]} ${m[2]}`, lineAt(stripped, declIdx), lineAt(stripped, bodyStart + block.length)));
+      // Members of a NESTED type belong to that type. Finding nested types at all
+      // (the anchor fix above) is what makes this necessary — without it the same
+      // method is emitted under both owners, as it was in kotlin/scala (#738).
+      const scoped = blankNestedTypeBodies(block, masked.slice(bodyStart, bodyStart + block.length),
+        /^[ \t]+(?:(?:public|internal|open|private|fileprivate|final)\s+)*(?:class|struct|protocol|enum|actor)\s+\w+/gm);
+      for (const fn of extractMembers(scoped.block, scoped.masked)) {
         // The disclosure marker carries no offsets; anchor it at the class body.
         sigs.push(withAnchor(`  ${fn.text}`, lineAt(stripped, bodyStart + (fn.declIdx || 0)), lineAt(stripped, bodyStart + (fn.endIdx || 0))));
       }
@@ -12705,6 +12786,36 @@ __factories["./src/extractors/swift"] = function(module, exports) {
     // next line when the body brace sits there (C# style), which would widen the
     // anchor past the signature itself.
     return { params: stripped.slice(openIdx + 1, close), after: stripped.slice(close + 1, i), end: i, close };
+  }
+
+  /**
+   * Blank the bodies of NESTED type declarations so their members are not also
+   * attributed to the enclosing type (#741). Length- and newline-preserving.
+   */
+  function blankNestedTypeBodies(block, maskedBlock, typeRe) {
+    const b = block.split('');
+    const mb = maskedBlock.split('');
+    for (const m of block.matchAll(typeRe)) {
+      let i = m.index + m[0].length;
+      const stop = Math.min(maskedBlock.length, i + RET_SCAN_CHARS);
+      let open = -1;
+      while (i < stop) {
+        const ch = maskedBlock[i];
+        if (ch === '{') { open = i; break; }
+        if (ch === '(') { const c = readBalanced(maskedBlock, i); if (c < 0) break; i = c + 1; continue; }
+        if (ch === '<') { const c = readBalanced(maskedBlock, i, '<', '>'); if (c < 0) { i++; continue; } i = c + 1; continue; }
+        if (ch === '\n' && !maskedBlock.slice(i + 1, maskedBlock.indexOf('\n', i + 1) + 1 || stop).trim()) break;
+        i++;
+      }
+      if (open < 0) continue;
+      const close = readBalanced(maskedBlock, open, '{', '}');
+      const end = close < 0 ? maskedBlock.length : close + 1;
+      for (let k = open; k < end && k < b.length; k++) {
+        if (b[k] !== '\n') b[k] = ' ';
+        if (mb[k] !== '\n') mb[k] = ' ';
+      }
+    }
+    return { block: b.join(''), masked: mb.join('') };
   }
 
   function extractBlock(src, startIndex) {

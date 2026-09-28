@@ -3,3 +3,8 @@ class Svc  :2-15
   func closureParam(cb, n) → Int  :6-6
   func deepGenerics(m) → Int  :9-9
   func stringDelims(sep) → String  :12-12
+class Outer  :18-24
+  func before(a) → Int  :19-19
+  func after(c) → Int  :23-23
+class Inner  :20-22
+  func handle(b) → Int  :21-21

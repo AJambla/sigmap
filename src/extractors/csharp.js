@@ -42,7 +42,10 @@ function extract(src) {
     const bodyStart = m.index + m[0].length;
     const block = extractBlock(stripped, bodyStart);
     sigs.push(withAnchor(`${m[1]} ${m[2]}`, lineAt(stripped, declIdx), lineAt(stripped, bodyStart + block.length)));
-    for (const meth of extractMembers(block, masked.slice(bodyStart, bodyStart + block.length))) {
+    // Members of a NESTED type belong to that type, not to this one.
+    const scoped = blankNestedTypeBodies(block, masked.slice(bodyStart, bodyStart + block.length),
+      /^[ \t]+(?:(?:public|internal|protected|private|abstract|sealed|static|partial)\s+)*(?:class|interface|enum|record|struct)\s+\w+/gm);
+    for (const meth of extractMembers(scoped.block, scoped.masked, { implicitPublic: m[1] === 'interface' })) {
       // The disclosure marker carries no offsets; anchor it at the class body.
       sigs.push(withAnchor(`  ${meth.text}`, lineAt(stripped, bodyStart + (meth.declIdx || 0)), lineAt(stripped, bodyStart + (meth.endIdx || 0))));
     }
@@ -75,6 +78,37 @@ function readParams(stripped, masked, openIdx) {
   return { params: stripped.slice(openIdx + 1, close), after: stripped.slice(close + 1, i), end: i, close };
 }
 
+/**
+ * Blank the bodies of NESTED type declarations so their members are not also
+ * attributed to the enclosing type (#741). Length- and newline-preserving, so
+ * member offsets and line anchors still align with the original block.
+ */
+function blankNestedTypeBodies(block, maskedBlock, typeRe) {
+  const b = block.split('');
+  const mb = maskedBlock.split('');
+  for (const m of block.matchAll(typeRe)) {
+    let i = m.index + m[0].length;
+    const stop = Math.min(maskedBlock.length, i + RET_SCAN_CHARS);
+    let open = -1;
+    while (i < stop) {
+      const ch = maskedBlock[i];
+      if (ch === '{') { open = i; break; }
+      if (ch === '(') { const c = readBalanced(maskedBlock, i); if (c < 0) break; i = c + 1; continue; }
+      if (ch === '<') { const c = readBalanced(maskedBlock, i, '<', '>'); if (c < 0) { i++; continue; } i = c + 1; continue; }
+      if (ch === ';') break;
+      i++;
+    }
+    if (open < 0) continue;
+    const close = readBalanced(maskedBlock, open, '{', '}');
+    const end = close < 0 ? maskedBlock.length : close + 1;
+    for (let k = open; k < end && k < b.length; k++) {
+      if (b[k] !== '\n') b[k] = ' ';
+      if (mb[k] !== '\n') mb[k] = ' ';
+    }
+  }
+  return { block: b.join(''), masked: mb.join('') };
+}
+
 function extractBlock(src, startIndex) {
   let depth = 1, i = startIndex;
   const end = Math.min(src.length, startIndex + MAX_CLASS_BODY_CHARS);
@@ -86,9 +120,14 @@ function extractBlock(src, startIndex) {
   return src.slice(startIndex, i - 1);
 }
 
-function extractMembers(block, maskedBlock) {
+function extractMembers(block, maskedBlock, opts = {}) {
   const members = [];
-  const methodRe = /^[ \t]+(?:public|internal|protected)\s+(?:static\s+|virtual\s+|override\s+|async\s+)*(?:where\s+\w+\s*:\s*[^\n]+\s+)?([\w<>\[\]?., ]+)\s+(\w+)\s*\(/gm;
+  // Interface members are IMPLICITLY public, so demanding an explicit modifier
+  // matched none of them — `interface T` was reported with no members at all
+  // (#741). Java already draws this distinction via the same option.
+  const methodRe = opts.implicitPublic
+    ? /^[ \t]+(?:(?:public|internal|protected|static|virtual|override|async|new)\s+)*([\w<>\[\]?., ]+?)\s+(\w+)\s*\(/gm
+    : /^[ \t]+(?:public|internal|protected)\s+(?:static\s+|virtual\s+|override\s+|async\s+)*(?:where\s+\w+\s*:\s*[^\n]+\s+)?([\w<>\[\]?., ]+)\s+(\w+)\s*\(/gm;
   for (const m of block.matchAll(methodRe)) {
     const pr = readParams(block, maskedBlock, m.index + m[0].length - 1);
     if (!pr) continue;

@@ -7,3 +7,12 @@ class Svc {
         return cb.apply(n);
     }
 }
+
+// #741: a nested type and its members must be attributed to IT, not the outer.
+class Outer {
+    public int before(int a) { return a; }
+    public interface Inner {
+        int handle(int b);
+    }
+    public int after(int c) { return c; }
+}
