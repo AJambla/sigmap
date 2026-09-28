@@ -59,11 +59,11 @@ That map is exactly what agentic grep is worst at: reproducible, auditable conte
 
 **Proof it pays off** (full benchmark below):
 <!--SM:whyMetrics-->
-- **78.6% hit@5** — right file in top 5 results (retrieval corpus, 18 repos)
+- **75.3% hit@5** — right file in top 5 results (retrieval corpus, 18 repos)
 - **86.4% vs 40.8% single-shot grep baseline** — 2.12× measured lift on the honest corpus (125 tasks / 19 repos)
 - **96.1% token reduction** — average across 21 real repos
-- **61.9% task-success proxy** — modeled from retrieval tiers, not measured LLM sessions
-- **1.6 prompts per task** — down from 2.84 (43.7% fewer retries, modeled)
+- **60.0% task-success proxy** — modeled from retrieval tiers, not measured LLM sessions
+- **1.65 prompts per task** — down from 2.84 (42.1% fewer retries, modeled)
 <!--/SM:whyMetrics-->
 - **<!--SM:languages-->36<!--/SM:languages--> languages supported** — TypeScript, Python, Go, Rust, Java, R, and more
 - **No vendor lock-in** — works with any AI assistant or local LLM
@@ -99,7 +99,7 @@ sigmap verify answer.md --report        # standalone red/amber/green HTML report
 | Without SigMap | With SigMap |
 |---|---|
 | ❌ Non-reproducible agent guesses | ✅ Deterministic map — same input, same output, every time |
-| ❌ "Trust me" AI answers | ✅ Grounded — right file in context <!--SM:hitWhole-->79%<!--/SM:hitWhole--> of the time, anchored tiers on a real line anchor |
+| ❌ "Trust me" AI answers | ✅ Grounded — right file in context <!--SM:hitWhole-->75%<!--/SM:hitWhole--> of the time, anchored tiers on a real line anchor |
 | ❌ Embeddings / vector DB required | ✅ Zero deps, no infra, fully offline |
 
 ---
@@ -124,13 +124,13 @@ Ask → Rank → Context → Validate → Judge → Learn
 <!--SM:benchmarkBlock-->
 ```
 Benchmark : sigmap-v8.51-main (21 repositories, including R language)
-Date      : 2026-09-27
+Date      : 2026-09-28
 
-Hit@5          : 78.6%   (retrieval corpus, 18 repos)
+Hit@5          : 75.3%   (retrieval corpus, 18 repos)
 Honest vs grep : 86.4% vs 40.8% grep baseline — 2.12× lift (125 tasks / 19 repos)
 Token reduction: 96.1%   (across 21 repos)
-Prompt reduction : 43.7% (2.84 → 1.6 prompts per task, modeled)
-Task success   : 61.9%   (proxy — modeled from retrieval tiers)
+Prompt reduction : 42.1% (2.84 → 1.65 prompts per task, modeled)
+Task success   : 60.0%   (proxy — modeled from retrieval tiers)
 Repos tested   : 21 (JavaScript, Python, Go, Rust, Java, R, C++, C#, Dart, Swift, Ruby, PHP, Scala, Kotlin, and more)
 ```
 <!--/SM:benchmarkBlock-->

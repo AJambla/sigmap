@@ -1467,7 +1467,7 @@ sigmap share
 
 ```
 Generated with SigMap — the deterministic, verifiable grounding layer for AI code work
-96.1% fewer tokens · 78.6% retrieval hit@5 · 43.7% fewer prompts
+96.1% fewer tokens · 75.3% retrieval hit@5 · 42.1% fewer prompts
 https://sigmap.io
 [sigmap] Copied to clipboard.
 ```
@@ -1565,7 +1565,7 @@ sigmap bench --submit --json
  Submitted      : 2026-09-13
 ────────────────────────────────────────────────────────
  Canonical metrics (official release):
- hit@5          : 78.6%
+ hit@5          : 75.3%
  token reduction: 96.1%
 ────────────────────────────────────────────────────────
  Local run metrics: none yet — run node scripts/run-retrieval-benchmark.mjs

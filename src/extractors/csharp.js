@@ -2,6 +2,7 @@
 
 const { lineAt, withAnchor } = require('./line-anchor');
 const { capWithNotice, capMembersWithNotice } = require('../util/truncate');
+const { stripComments, maskCode, readBalanced } = require('./scan');
 
 // Ceilings sit above the default `maxSigsPerFile` so the configured budget
 // governs output rather than a literal buried here, and omissions are disclosed
@@ -14,6 +15,9 @@ const MAX_CLASS_BODY_CHARS = 200000;
 const MEMBER_LIMIT = 120;
 const PER_FILE_LIMIT = 200;
 
+// Chars scanned past the params before giving up on a return type.
+const RET_SCAN_CHARS = 400;
+
 /**
  * Extract signatures from C# source code.
  * Signatures carry `:start-end` line anchors (Surgical Context); the comment
@@ -25,9 +29,11 @@ function extract(src) {
   if (!src || typeof src !== 'string') return [];
   const sigs = [];
 
-  const stripped = src
-    .replace(/\/\/.*$/gm, '')
-    .replace(/\/\*[\s\S]*?\*\//g, (s) => s.replace(/[^\n]/g, ' '));
+  // stripComments is length- AND newline-preserving; the previous regex strip
+  // DELETED comment text, so offsets no longer aligned with the masked surface
+  // the balanced reader walks (#695).
+  const stripped = stripComments(src);
+  const masked = maskCode(src);
 
   // Classes and interfaces
   const typeRe = /^\s*(?:public\s+|internal\s+|protected\s+)?(?:abstract\s+|sealed\s+|static\s+)?(class|interface|enum|record|struct)\s+(\w+)(?:<[^{]*>)?(?:\s*:\s*[\w<>, .]+)?\s*\{/gm;
@@ -36,13 +42,37 @@ function extract(src) {
     const bodyStart = m.index + m[0].length;
     const block = extractBlock(stripped, bodyStart);
     sigs.push(withAnchor(`${m[1]} ${m[2]}`, lineAt(stripped, declIdx), lineAt(stripped, bodyStart + block.length)));
-    for (const meth of extractMembers(block)) {
+    for (const meth of extractMembers(block, masked.slice(bodyStart, bodyStart + block.length))) {
       // The disclosure marker carries no offsets; anchor it at the class body.
       sigs.push(withAnchor(`  ${meth.text}`, lineAt(stripped, bodyStart + (meth.declIdx || 0)), lineAt(stripped, bodyStart + (meth.endIdx || 0))));
     }
   }
 
   return capWithNotice(sigs, PER_FILE_LIMIT, 'signatures');
+}
+
+/**
+ * Resolve a declaration's parameter list with a BALANCED read (#695).
+ *
+ * `\(([^)]*)\)` stopped at the first `)`, so a nested call or a
+ * function-typed parameter truncated the list mid-type.
+ */
+function readParams(stripped, masked, openIdx) {
+  const close = readBalanced(masked, openIdx);
+  if (close < 0) return null;
+  let i = close + 1;
+  const stop = Math.min(masked.length, i + RET_SCAN_CHARS);
+  while (i < stop) {
+    const ch = masked[i];
+    if (ch === '{' || ch === ';') break;
+    if (ch === '(') { const c = readBalanced(masked, i); if (c < 0) break; i = c + 1; continue; }
+    if (ch === '<') { const c = readBalanced(masked, i, '<', '>'); if (c < 0) { i++; continue; } i = c + 1; continue; }
+    i++;
+  }
+  // `close` anchors a member to its DECLARATION line; `end` may run onto the
+  // next line when the body brace sits there (C# style), which would widen the
+  // anchor past the signature itself.
+  return { params: stripped.slice(openIdx + 1, close), after: stripped.slice(close + 1, i), end: i, close };
 }
 
 function extractBlock(src, startIndex) {
@@ -56,16 +86,18 @@ function extractBlock(src, startIndex) {
   return src.slice(startIndex, i - 1);
 }
 
-function extractMembers(block) {
+function extractMembers(block, maskedBlock) {
   const members = [];
-  const methodRe = /^\s+(?:public|internal|protected)\s+(?:static\s+|virtual\s+|override\s+|async\s+)*(?:where\s+\w+\s*:\s*[^\n]+\s+)?([\w<>\[\]?., ]+)\s+(\w+)\s*\(([^)]*)\)/gm;
+  const methodRe = /^[ \t]+(?:public|internal|protected)\s+(?:static\s+|virtual\s+|override\s+|async\s+)*(?:where\s+\w+\s*:\s*[^\n]+\s+)?([\w<>\[\]?., ]+)\s+(\w+)\s*\(/gm;
   for (const m of block.matchAll(methodRe)) {
+    const pr = readParams(block, maskedBlock, m.index + m[0].length - 1);
+    if (!pr) continue;
     const ret = normalizeType(m[1]);
     const retStr = ret ? ` → ${ret}` : '';
     members.push({
-      text: `${m[2]}(${normalizeParams(m[3])})${retStr}`,
+      text: `${m[2]}(${normalizeParams(pr.params)})${retStr}`,
       declIdx: m.index + (m[0].length - m[0].trimStart().length),
-      endIdx: m.index + m[0].length,
+      endIdx: pr.close + 1,
     });
   }
   return capMembersWithNotice(members, MEMBER_LIMIT);

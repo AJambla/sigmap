@@ -22,238 +22,52 @@
   ],
   "languages": {
     "go": {
-      "tier": "2 — anchored regex (shared balanced scanner)",
+      "tier": "2 \u2014 anchored regex (shared balanced scanner)",
       "defects": []
     },
     "java": {
-      "tier": "2 — anchored regex (shared balanced scanner)",
+      "tier": "2 \u2014 anchored regex (shared balanced scanner)",
       "defects": []
     },
     "python": {
-      "tier": "1 — AST (python3 on PATH)",
-      "defects": [
-        {
-          "case": "kwonly",
-          "issue": 702,
-          "kind": "fidelity",
-          "actual": "def kwonly(a, b=..., **kw)  :10-11",
-          "shouldBe": "def kwonly(a, *, b=..., **kw)",
-          "note": "The keyword-only `*` marker is dropped, so a caller cannot tell `b` is keyword-only. Defaults collapsing to `...` is deliberate normalisation, not a defect. The Tier-2 regex fallback drops this declaration entirely — only the AST tier reaches it at all."
-        }
-      ]
+      "tier": "1 \u2014 AST (python3 on PATH)",
+      "defects": []
     },
     "kotlin": {
-      "tier": "2 — anchored regex (NOT migrated to the shared scanner)",
-      "defects": [
-        {
-          "case": "nestedDefault",
-          "issue": 695,
-          "kind": "corrupted",
-          "actual": "fun nestedDefault(a, 2)  :3-3",
-          "shouldBe": "fun nestedDefault(a, b): Int",
-          "note": "Params truncate at the first `)` inside `g(1, 2)`, leaving `2` as a phantom parameter and losing the return type. A plausible-looking signature that is simply false — worse than a visible truncation."
-        },
-        {
-          "case": "closureParam",
-          "issue": 695,
-          "kind": "corrupted",
-          "actual": "fun closureParam(cb)  :6-6",
-          "shouldBe": "fun closureParam(cb, n): Int",
-          "note": "`(Int) -> Int` closes the param list early; `n` is lost silently."
-        },
-        {
-          "case": "deepGenerics",
-          "issue": 695,
-          "kind": "corrupted",
-          "actual": "fun deepGenerics(m, List<Pair<Int, String>>>) → Int  :9-9",
-          "shouldBe": "fun deepGenerics(m): Int",
-          "note": "Nested generics leak a fragment of the type into the parameter list, including an unbalanced `>>>`."
-        },
-        {
-          "case": "stringDelims",
-          "issue": 695,
-          "kind": "corrupted",
-          "actual": "fun stringDelims(sep)  :12-12",
-          "shouldBe": "fun stringDelims(sep, other): String",
-          "note": "A `)` inside a string default terminates the scan; the second parameter and return type are lost."
-        }
-      ]
+      "tier": "2 \u2014 anchored regex (shared balanced scanner)",
+      "defects": []
     },
     "swift": {
-      "tier": "2 — anchored regex (NOT migrated)",
-      "defects": [
-        {
-          "case": "nestedDefault",
-          "issue": 695,
-          "kind": "corrupted",
-          "actual": "func nestedDefault(a, 2) → Int  :3-3",
-          "shouldBe": "func nestedDefault(a, b) → Int",
-          "note": "Same first-`)` truncation as Kotlin; `2` becomes a phantom parameter."
-        },
-        {
-          "case": "closureParam",
-          "issue": 695,
-          "kind": "corrupted",
-          "actual": "func closureParam(cb) → Int, n: Int) -> Int  :6-6",
-          "shouldBe": "func closureParam(cb, n) → Int",
-          "note": "Structurally malformed: the arrow substitution fires inside the closure type, then the remainder of the real parameter list is appended as prose. The worst single output in the corpus."
-        },
-        {
-          "case": "deepGenerics",
-          "issue": 695,
-          "kind": "corrupted",
-          "actual": "func deepGenerics(m) → Int  :9-9",
-          "shouldBe": "func deepGenerics(m) → Int",
-          "note": "Renders correctly by luck — `[String: [Int]]` carries no parentheses — but shares the unmigrated scanner, so it is listed to keep the language's status honest."
-        }
-      ]
+      "tier": "2 \u2014 anchored regex (shared balanced scanner)",
+      "defects": []
     },
     "scala": {
-      "tier": "2 — anchored regex (NOT migrated)",
-      "defects": [
-        {
-          "case": "nestedDefault",
-          "issue": 695,
-          "kind": "corrupted",
-          "actual": "def nestedDefault(a, 2)  :3-3",
-          "shouldBe": "def nestedDefault(a, b): Int",
-          "note": "First-`)` truncation; phantom `2`; return type lost."
-        },
-        {
-          "case": "stringDelims",
-          "issue": 695,
-          "kind": "corrupted",
-          "actual": "def stringDelims(sep)  :9-9",
-          "shouldBe": "def stringDelims(sep): String",
-          "note": "`)` inside the string default truncates; return type lost."
-        }
-      ]
+      "tier": "2 \u2014 anchored regex (shared balanced scanner)",
+      "defects": []
     },
     "dart": {
-      "tier": "2 — anchored regex (NOT migrated)",
-      "defects": [
-        {
-          "case": "namedParams",
-          "issue": 695,
-          "kind": "corrupted",
-          "actual": "namedParams(int a, {int b = 2, int Function(int) → int  :3-3",
-          "shouldBe": "namedParams(int a, {int b, int Function(int)? cb}) → int",
-          "note": "The `Function(int)` parameter type opens a paren the scanner never closes; the brace group is left unterminated and the return type is spliced onto the fragment."
-        },
-        {
-          "case": "stringDelims",
-          "issue": 695,
-          "kind": "truncated",
-          "actual": "stringDelims({String sep = \") → String  :9-9",
-          "shouldBe": "stringDelims({String sep}) → String",
-          "note": "`)` inside the string default ends the scan mid-literal, emitting an unterminated quote."
-        }
-      ]
+      "tier": "2 \u2014 anchored regex (shared balanced scanner)",
+      "defects": []
     },
     "rust": {
-      "tier": "2 — anchored regex (NOT migrated)",
-      "defects": [
-        {
-          "case": "closure_param",
-          "issue": 695,
-          "kind": "corrupted",
-          "actual": "pub fn closure_param(a: i32, b: Box<dyn Fn(i32) → i32>) -> i32  :2-4",
-          "shouldBe": "pub fn closure_param(a: i32, b: Box<dyn Fn(i32) -> i32>) → i32",
-          "note": "The `->` to `→` substitution hits the FIRST arrow, which belongs to the closure type, leaving the real return arrow as literal `-> i32`. Params survive; the rendering states the return type twice in two notations."
-        },
-        {
-          "case": "deep_generics",
-          "issue": 695,
-          "kind": "corrupted",
-          "actual": "pub fn deep_generics(v: Vec<Box<dyn Fn(i32) → i32>>) -> usize  :5-7",
-          "shouldBe": "pub fn deep_generics(v: Vec<Box<dyn Fn(i32) -> i32>>) → usize",
-          "note": "Same wrong-arrow substitution."
-        }
-      ]
+      "tier": "2 \u2014 anchored regex (shared balanced scanner)",
+      "defects": []
     },
     "csharp": {
-      "tier": "2 — anchored regex (NOT migrated)",
-      "defects": [
-        {
-          "case": "NestedDefault",
-          "issue": 695,
-          "kind": "truncated",
-          "actual": "  NestedDefault(int a, int b = G(1, 2) → int  :3-3",
-          "shouldBe": "  NestedDefault(int a, int b = G(1, 2)) → int",
-          "note": "Loses the closing paren of the parameter list — visibly unbalanced, so at least a reader can tell it is damaged."
-        }
-      ]
+      "tier": "2 \u2014 anchored regex (shared balanced scanner)",
+      "defects": []
     },
     "php": {
-      "tier": "2 — anchored regex (NOT migrated)",
-      "defects": [
-        {
-          "case": "nestedDefault",
-          "issue": 695,
-          "kind": "truncated",
-          "actual": "  function nestedDefault($a = g(1, 2)  :4-4",
-          "shouldBe": "  function nestedDefault($a = g(1, 2), $b = [1, 2])",
-          "note": "Truncates at the nested `)`; the second parameter is lost."
-        },
-        {
-          "case": "stringDelims",
-          "issue": 695,
-          "kind": "truncated",
-          "actual": "  function stringDelims($sep = \")  :10-10",
-          "shouldBe": "  function stringDelims($sep = \")\")",
-          "note": "`)` inside the string default truncates mid-literal."
-        },
-        {
-          "case": "same-line-php-tag",
-          "issue": 696,
-          "kind": "dropped",
-          "actual": "(absent — see test/integration/adversarial-fixtures.test.js)",
-          "shouldBe": "function f($a)  :1-1",
-          "note": "A declaration sharing its line with the opening `<?php` tag yields nothing at all. Covered as an inline assertion rather than a fixture, because a one-line file cannot also exercise the other PHP cases."
-        }
-      ]
+      "tier": "2 \u2014 anchored regex (shared balanced scanner)",
+      "defects": []
     },
     "ruby": {
-      "tier": "3 — pattern/heuristic (no anchors)",
-      "defects": [
-        {
-          "case": "nested_default",
-          "issue": 695,
-          "kind": "truncated",
-          "actual": "def nested_default(a = g(1, 2)",
-          "shouldBe": "def nested_default(a = g(1, 2), b: h(3))",
-          "note": "Truncates at the nested `)`; the keyword argument is lost. Tier 3, so no line anchor either."
-        },
-        {
-          "case": "string_delims",
-          "issue": 695,
-          "kind": "truncated",
-          "actual": "def string_delims(sep = \")",
-          "shouldBe": "def string_delims(sep = \")\")",
-          "note": "`)` inside the string default truncates mid-literal."
-        }
-      ]
+      "tier": "3 \u2014 pattern/heuristic (no anchors; params now balanced)",
+      "defects": []
     },
     "cpp": {
-      "tier": "3 — pattern/heuristic (no anchors)",
-      "defects": [
-        {
-          "case": "nested_default",
-          "issue": 695,
-          "kind": "dropped",
-          "actual": "(absent)",
-          "shouldBe": "nested_default(int a, int b = g(1, 2)) → int",
-          "note": "The declaration is dropped entirely rather than truncated, so the symbol becomes a fake-symbol false positive in `sigmap verify`. KNOWN_LIMITATIONS lists C/C++ as Tier 3 but does not distinguish DROP from TRUNCATE."
-        },
-        {
-          "case": "fn_pointer",
-          "issue": 695,
-          "kind": "dropped",
-          "actual": "(absent)",
-          "shouldBe": "fn_pointer(int (*cb)(int), int n) → int",
-          "note": "A function-pointer parameter drops the whole declaration."
-        }
-      ]
+      "tier": "3 \u2014 pattern/heuristic (no anchors; params now balanced)",
+      "defects": []
     }
   }
 }

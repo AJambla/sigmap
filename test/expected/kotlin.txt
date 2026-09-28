@@ -1,4 +1,5 @@
-class User  :4-14
+class User  :4-4
+class UserService  :6-14
   fun getUser(id) → User?  :7-7
   suspend fun createUser(dto) → User  :9-9
 interface Repository  :16-19

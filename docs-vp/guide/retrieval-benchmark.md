@@ -1,13 +1,13 @@
 ---
 title: Retrieval benchmark
-description: Latest saved retrieval benchmark for SigMap v8.51.5. 78.6% hit@5 across 105 tasks on 18 repos; the honest grep comparison scores 86.4% vs 40.8% (2.12× lift) on its own 125-task corpus.
+description: Latest saved retrieval benchmark for SigMap v8.51.6. 75.3% hit@5 across 105 tasks on 18 repos; the honest grep comparison scores 86.4% vs 40.8% (2.12× lift) on its own 125-task corpus.
 head:
   - - meta
     - property: og:title
-      content: "SigMap retrieval benchmark — 78.6% hit@5"
+      content: "SigMap retrieval benchmark — 75.3% hit@5"
   - - meta
     - property: og:description
-      content: "Latest saved run: 78.6% hit@5 over 105 tasks on 18 repos; honest grep comparison 86.4% vs 40.8% (2.12x lift, 125 tasks, 19 repos)."
+      content: "Latest saved run: 75.3% hit@5 over 105 tasks on 18 repos; honest grep comparison 86.4% vs 40.8% (2.12x lift, 125 tasks, 19 repos)."
   - - meta
     - property: og:url
       content: "https://sigmap.io/guide/retrieval-benchmark"
@@ -15,26 +15,34 @@ head:
 
 # Retrieval benchmark
 
-::: info Official v8.51.5 benchmark snapshot
+::: info Official v8.51.6 benchmark snapshot
 **Benchmark ID:** sigmap-v8.51-main &nbsp;·&nbsp; **Date:** 2026-09-25 (with R language)
 
 | Metric | Value |
 |---|---:|
-| Hit@5 (retrieval corpus, 105 tasks / 18 repos) | **78.6%** |
+| Hit@5 (retrieval corpus, 105 tasks / 18 repos) | **75.3%** |
 | Honest grep comparison (125 tasks / 19 repos) | **86.4%** vs 40.8% single-shot grep — **2.12× lift** |
-| Graph-boosted hit@5 | **78.6%** |
+| Graph-boosted hit@5 | **75.3%** |
 | Honest lift (vs grep agent) | **2.12×** |
-| Prompt reduction | **43.7%** (2.84 → 1.6) |
-| Task success proxy | **61.9%** |
+| Prompt reduction | **42.1%** (2.84 → 1.6) |
+| Task success proxy | **60.0%** |
 | Overall token reduction | **96.1%** |
 | GPT-4o overflow (without → with) | **16/21 → 0/21** |
 :::
 
-Latest saved run: **2026-09-25 (v8.51.5)**
+Latest saved run: **2026-09-25 (v8.51.6)**
 
 The task set, baselines, and the hit@5 definition are documented in [benchmark methodology](/guide/methodology).
 
-**Result:** SigMap finds the right file in the top 5 far more often than chance — **78.6% hit@5** vs **13.6%** random baseline across 105 tasks on 18 real repos.
+**Result:** SigMap finds the right file in the top 5 far more often than chance — **75.3% hit@5** vs **13.6%** random baseline across 105 tasks on 18 real repos.
+
+::: warning Why this moved 78.6% → 75.3% in v8.51.6
+Every point came from **one repo**. The v8.51.6 extractor migrations made Scala extraction ~3× more complete (akka: 836 → 2,545 types), and under akka's fixed 25,600-token budget that is a straight trade — more signatures per file means fewer files fit. The generated context now omits **179 of 211 files**, including the whole `akka-cluster` module that three of its five tasks target, so akka fell 1.0 → 0.4. The other 17 repos are unchanged.
+
+This corpus scores the **budgeted context file** — what a consumer actually pastes — not the full index. Retrieval capability itself did not regress: the index still holds all 320 akka files, and `sigmap ask "cluster join leave member gossip distributed"` still returns `akka-cluster/…/Cluster.scala`. The [honest grep comparison](#the-honest-grep-comparison) is also unchanged at **86.4% vs 40.8%**.
+
+The uncomfortable implication is worth stating plainly: a completeness improvement can lower this number while improving the product. [#743](https://github.com/manojmallick/sigmap/issues/743) tracks making the budget's drop order module-aware so no module can be evicted in full while another keeps full detail.
+:::
 
 ## Why this benchmark matters
 
@@ -51,10 +59,10 @@ This benchmark isolates that first question: *did the right file appear in conte
 | Metric | Without SigMap | With SigMap |
 |---|:---:|:---:|
 | Average hit@5 (honest corpus, 125 tasks) | 40.8% | **86.4%** |
-| Graph-boosted hit@5 | — | **78.6%** |
+| Graph-boosted hit@5 | — | **75.3%** |
 | Honest lift (vs single-shot grep, `benchmark:honest`) | — | **2.12x** |
 | Random-selection hit@5 (data only, no longer quoted) | 13.6% | — |
-| Correct (rank 1) | ~1% | **61.9%** |
+| Correct (rank 1) | ~1% | **60.0%** |
 | Partial (ranks 2–5) | ~13% | **17.1%** |
 | Wrong (not in top 5) | ~86% | **18.1%** |
 
@@ -62,7 +70,7 @@ This benchmark isolates that first question: *did the right file appear in conte
 
 | Tier | Tasks | Share |
 |---|---:|---:|
-| Correct | 65 / 105 | **61.9%** |
+| Correct | 65 / 105 | **60.0%** |
 | Partial | 18 / 105 | **17.1%** |
 | Wrong | 19 / 105 | **18.1%** |
 
@@ -90,7 +98,7 @@ single-shot grep baseline currently **beats** SigMap. That is the measured
 vocabulary-mismatch ceiling — the number repo-mined query expansion (planned
 for v9.0) exists to move. When it moves, this table is the proof.
 
-## The CI retrieval gate (v8.51.5)
+## The CI retrieval gate (v8.51.6)
 
 The split above comes from `benchmark:honest`, which scores **across repos**. A
 separate gate — `npm run validate:retrieval`, run on every CI job — scores four
