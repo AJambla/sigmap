@@ -17,4 +17,4 @@
 **References:**
 - `src/retrieval/bm25.js`
 - Benchmark results in `docs-vp/guide/benchmark.md` and `benchmarks/latest.json`
-- MASTER_PLAN §7.3 arithmetic: one embedding dependency adds ~200 MB, ~50 transitive deps, and collapses both the determinism and zero-dependency scores — the core reason BM25 was chosen and embeddings permanently rejected.
+- `package.json` (zero runtime dependencies) and `README.md` ("no LLM calls, no embeddings, byte-stable output") — the two public properties an embedding backend would cost. Adding one brings a model artifact plus a network or native-runtime requirement, which collapses the zero-dependency and determinism guarantees at once. That is the core reason BM25 was chosen and embeddings rejected.
