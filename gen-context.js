@@ -15391,20 +15391,35 @@ __factories["./src/format/usage-guidance"] = function(module, exports) {
    * (CLAUDE.md, AGENTS.md, .github/copilot-instructions.md, GEMINI.md, .cursorrules,
    * …) carry the same, single usage section — instead of each adapter inventing
    * its own wording (and codex emitting a redundant second JSON block).
+   *
+   * The block is DIRECTIVE, not a reference table (#754). A list of commands is
+   * something an agent reads past; an instruction to run them is something it
+   * acts on. Only commands that change what an answer COSTS or whether it is
+   * GROUNDED earn a row here — this ships in every context file, and on the
+   * `index` strategy the whole always-on file is ~500 tokens, so each row is
+   * paid for on every question. `sigmap skills install` ships the long-form
+   * playbook; this is what every agent gets without opting in.
    */
 
   function usageBlock() {
     return [
       '## SigMap commands',
       '',
+      '**Run these yourself in the terminal** — offline, deterministic, no model call.',
+      '',
       '| When | Command |',
       '|------|---------|',
-      '| Before answering a question about code | `sigmap ask "<your question>"` |',
+      '| Before answering anything about this code | `sigmap ask "<question>"` |',
+      '| To read code you hold a `:start-end` anchor for | `sigmap lines <file> :<line> --context 10` |',
+      '| Before editing a file / a function | `sigmap --impact <file>` · `sigmap --callers <symbol>` |',
+      '| Before trusting generated code | `sigmap verify <answer.md>` |',
       '| To rank files by topic | `sigmap --query "<topic>"` |',
+      '| Why a file is or is not in context | `sigmap explain <file>` |',
       '| After changing config or source dirs | `sigmap validate` |',
-      '| To verify an AI answer is grounded | `sigmap judge --response <file>` |',
+      '| To score an answer against this repo | `sigmap judge --response <file>` |',
       '',
-      'Always run `sigmap ask` (or `sigmap --query`) before searching for files relevant to a task.',
+      'Never open a file to "look around" — `sigmap ask` costs hundreds of tokens where',
+      'reading the same files costs thousands. `:425-425` means line 425: read that range.',
       '',
     ].join('\n');
   }
@@ -28265,10 +28280,22 @@ function applyTokenBudget(fileEntries, maxTokens) {
   const sectionOverhead = (e) => estimateTokens(String(e.filePath || '')) + 6;
   const renderedTotal = (entries) =>
     entries.reduce((s, e) => s + estimateTokens(e.sigs.join('\n')) + sectionOverhead(e), 0);
-  // The generated file also carries a ~150-token fixed preamble (SigMap command
-  // table + headers). Reserve at least that much so small budgets don't overflow;
-  // for large budgets this matches the historical 10% reserve.
-  const budgetForEntries = Math.max(1, maxTokens - Math.max(200, Math.ceil(maxTokens * 0.10)));
+  // The generated file also carries a fixed preamble the entry budget does not
+  // see: the adapter header, the marker lines, and the SigMap command block.
+  // That reserve used to be a hardcoded `max(200, 10%)` describing a "~150-token"
+  // preamble — so when the command block grew to ~224 tokens (#754) a
+  // `maxTokens: 500` run emitted 554 and only CI caught it. Measure the block
+  // instead of guessing at it, so the reserve can never drift from it again.
+  const { usageBlock } = requireSourceOrBundled('./src/format/usage-guidance');
+  // Chrome around the block: adapter header, timestamp/version markers,
+  // "# Code signatures", the coverage line and the budget disclosure. MEASURED
+  // at 124 tokens (see the preamble guard in usage-block-strategies.test.js,
+  // which fails if reality outgrows this) — an earlier guess of 80 was too
+  // small and only CI caught it, which is the same failure mode as the
+  // hardcoded 200 this replaced. The margin is deliberate.
+  const PREAMBLE_CHROME_TOKENS = 176;
+  const fixedPreamble = estimateTokens(usageBlock()) + PREAMBLE_CHROME_TOKENS;
+  const budgetForEntries = Math.max(1, maxTokens - Math.max(fixedPreamble, Math.ceil(maxTokens * 0.10)));
   let total = renderedTotal(fileEntries);
   if (total <= budgetForEntries) return fileEntries;
 
@@ -29147,6 +29174,12 @@ function writeInitConfig(cwd) {
 // Strategy: per-module — one output file per top-level srcDir
 // ---------------------------------------------------------------------------
 function runPerModuleStrategy(cwd, config, fileEntries, inputTokenTotal) {
+  // The overview IS the always-on primary output — the per-module files are
+  // on-demand — so it must carry the usage block (#754). It was hand-built
+  // here and never called usageBlock(), which left agents in per-module repos
+  // with no idea the CLI existed.
+  const { usageBlock } = requireSourceOrBundled('./src/format/usage-guidance');
+
   // Group entries by their top-level srcDir
   const modules = {};
   for (const entry of fileEntries) {
@@ -29165,6 +29198,9 @@ function runPerModuleStrategy(cwd, config, fileEntries, inputTokenTotal) {
     '<!-- Load the full module context file for detailed signatures -->',
     '',
     '# Codebase overview',
+    '',
+    usageBlock(),
+    '## Modules',
     '',
     '| Module | Full context file |',
     '|--------|-------------------|',
@@ -29195,8 +29231,10 @@ function runPerModuleStrategy(cwd, config, fileEntries, inputTokenTotal) {
   pruneStaleContextSplits(cwd, writtenSplits);
 
   overviewLines.push('');
-  overviewLines.push('> Inject the relevant module file into your IDE context window.');
-  overviewLines.push('> For cross-module questions load both files.');
+  overviewLines.push('> Run `sigmap ask "<question>"` first — it reads the retrieval index');
+  overviewLines.push('> directly and returns the ranked files across ALL modules, so you do not');
+  overviewLines.push('> have to pick one. Load a module file above only if you want its full');
+  overviewLines.push('> signature list; for cross-module questions load both.');
   const overviewContent = overviewLines.join('\n') + '\n';
   const primaryTargets = config.outputs || ['copilot'];
   writeOutputs(overviewContent, primaryTargets, cwd, config);
@@ -29214,9 +29252,21 @@ function runHotColdStrategy(cwd, config, fileEntries, recentFiles, inputTokenTot
   const coldEntries = fileEntries.filter((e) => !recentFiles.has(e.filePath));
 
   // Hot → primary output (auto-injected by IDE)
+  // An empty hot set still has to carry the usage block (#754): "nothing changed
+  // recently" is exactly when an agent most needs to be told to run `sigmap ask`
+  // rather than conclude the repo is uncontexted.
   const hotContent = hotEntries.length > 0
     ? formatOutput(hotEntries, cwd, false, config, null)
-    : '<!-- Generated by SigMap — no recently changed files -->\n';
+    : [
+        '<!-- Generated by SigMap — no recently changed files -->',
+        '',
+        '# Code signatures',
+        '',
+        'No files changed in the last ' + (config.hotCommits || 10) + ' commits, so nothing is',
+        'auto-injected. Every signature is still indexed — retrieve per question.',
+        '',
+        requireSourceOrBundled('./src/format/usage-guidance').usageBlock(),
+      ].join('\n');
   const primaryTargets = config.outputs || ['copilot'];
   writeOutputs(hotContent, primaryTargets, cwd, config);
   const hotTokens = estimateTokens(hotContent);
