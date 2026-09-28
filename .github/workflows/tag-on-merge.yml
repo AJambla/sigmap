@@ -1,0 +1,101 @@
+name: Tag prepared release
+
+# Closes the one manual step in the release flow.
+#
+# `/update-docs` prepares a version (package.json, version.json and the
+# CHANGELOG header all agree) and `/ship` merges it to `main` — but the tag was
+# pushed by hand afterwards. Miss that step and `main` claims a version npm does
+# not have: v8.51.5 sat untagged and unpublished until someone noticed, and
+# v8.51.6 went the same way a day later.
+#
+# This tags a merge to `main` ONLY when the release is unambiguously prepared:
+#
+#   * package.json version == the newest CHANGELOG header
+#   * that version is not already tagged
+#   * the CHANGELOG entry is not still `[Unreleased]`
+#
+# Any mismatch is a no-op with an explanation in the log — an in-progress or
+# half-prepared state must never be published by accident. Pushing the tag is
+# what triggers `npm-publish.yml` and `release-binaries.yml`.
+#
+# SYNC_PAT is required, NOT an optimisation: a tag pushed with GITHUB_TOKEN does
+# not start other workflows, so the tag would exist with no release behind it —
+# strictly worse than not tagging. Without the secret this job refuses rather
+# than creating that state.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    name: Tag if the release is prepared
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.SYNC_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Decide whether this commit is a prepared release
+        id: decide
+        run: |
+          set -euo pipefail
+          V=$(node -p "require('./package.json').version")
+          # `|| true`: under `pipefail` a grep that matches nothing aborts the
+          # step, so a CHANGELOG carrying only `[Unreleased]` would fail every
+          # push to main with a red X instead of quietly not tagging.
+          C=$(grep -m1 -E '^## \[[0-9]' CHANGELOG.md 2>/dev/null | sed -E 's/^## \[([0-9][^]]*)\].*/\1/' || true)
+          echo "package.json=$V  changelog=${C:-<none released>}"
+
+          if [ -z "$C" ]; then
+            echo "skip=true"    >> "$GITHUB_OUTPUT"
+            echo "::notice::Not tagging — the CHANGELOG has no released entry yet."
+            exit 0
+          fi
+          if [ "$V" != "$C" ]; then
+            echo "skip=true"    >> "$GITHUB_OUTPUT"
+            echo "::notice::Not tagging — package.json ($V) and CHANGELOG ($C) disagree, so this is not a prepared release."
+            exit 0
+          fi
+          if git rev-parse -q --verify "refs/tags/v$V" >/dev/null; then
+            echo "skip=true"    >> "$GITHUB_OUTPUT"
+            echo "::notice::Not tagging — v$V already exists."
+            exit 0
+          fi
+          echo "skip=false"     >> "$GITHUB_OUTPUT"
+          echo "version=$V"     >> "$GITHUB_OUTPUT"
+
+      # The `secrets` context is NOT available in a step `if`, so the check has
+      # to run inside the script with the value passed through `env`.
+      - name: Refuse rather than create a tag nothing reacts to
+        if: steps.decide.outputs.skip == 'false'
+        env:
+          SYNC_PAT: ${{ secrets.SYNC_PAT }}
+          V: ${{ steps.decide.outputs.version }}
+        run: |
+          if [ -z "${SYNC_PAT:-}" ]; then
+            echo "::error::v$V is ready to tag, but SYNC_PAT is not set."
+            echo "A tag pushed with GITHUB_TOKEN does not trigger npm-publish or release-binaries,"
+            echo "so tagging here would leave a tag with no release behind it. Tag manually instead:"
+            echo "  git tag -a v$V <merge-commit> -m '...' && git push origin v$V"
+            exit 1
+          fi
+
+      - name: Tag and push
+        if: steps.decide.outputs.skip == 'false'
+        env:
+          V: ${{ steps.decide.outputs.version }}
+        run: |
+          set -euo pipefail
+          SUBJECT=$(git log -1 --format=%s)
+          git config user.name  "${{ github.actor }}"
+          git config user.email "${{ github.actor }}@users.noreply.github.com"
+          # Tag the merge commit itself — the same commit /ship tags by hand.
+          git tag -a "v$V" -m "v$V — $SUBJECT"
+          git push origin "v$V"
+          echo "::notice::Tagged v$V on $(git rev-parse --short HEAD). npm publish and release binaries will follow."

@@ -45,10 +45,11 @@ function extract(src) {
 
   // Type declarations: classes, interfaces, enums, records — modifiers in any
   // order, sealed/non-sealed included, generic names allowed.
-  const typeRegex = /^(?:(?:public|protected|abstract|final|sealed|non-sealed|static|strictfp)\s+)*(class|interface|enum|record)\s+(\w+)/gm;
+  const typeRegex = /^[ \t]*(?:(?:public|protected|private|abstract|final|sealed|non-sealed|static|strictfp)\s+)*(class|interface|enum|record)\s+(\w+)/gm;
   for (const m of stripped.matchAll(typeRegex)) {
     const kw = m[1];
     const name = m[2];
+    const declIdx = m.index + (m[0].length - m[0].trimStart().length);
     let i = m.index + m[0].length;
     // Optional type parameters on the name: `<T, ID>`, `<T extends Comparable<T>>`.
     i = ws(i);
@@ -80,9 +81,14 @@ function extract(src) {
     if (bodyOpen < 0) continue;
     const bodyStart = bodyOpen + 1;
     const block = extractBlock(stripped, masked, bodyStart);
-    sigs.push(hinted(withAnchor(`${kw} ${name}${header}`, lineAt(stripped, m.index), lineAt(stripped, bodyStart + block.length)), name));
+    sigs.push(hinted(withAnchor(`${kw} ${name}${header}`, lineAt(stripped, declIdx), lineAt(stripped, bodyStart + block.length)), name));
     const maskedBlock = masked.slice(bodyStart, bodyStart + block.length);
-    for (const meth of extractMembers(block, maskedBlock, { implicitPublic: kw === 'interface' })) {
+    // Members of a NESTED type belong to that type. Reporting nested types at
+    // all (the anchor fix above) is what makes this necessary — without it the
+    // same method is emitted under both owners, as it was in kotlin/scala (#738).
+    const scoped = blankNestedTypeBodies(block, maskedBlock,
+      /^[ \t]+(?:(?:public|protected|private|abstract|final|sealed|non-sealed|static|strictfp)\s+)*(?:class|interface|enum|record)\s+\w+/gm);
+    for (const meth of extractMembers(scoped.block, scoped.masked, { implicitPublic: kw === 'interface' })) {
       // The disclosure marker carries no offsets; anchor it at the class body.
       const declIdx = meth.declIdx || 0;
       const endIdx = meth.endIdx || 0;
@@ -95,6 +101,36 @@ function extract(src) {
 
 // Depth-counted on the MASKED surface (a brace inside a string can no longer
 // open or close a block); content sliced from the stripped surface.
+/**
+ * Blank the bodies of NESTED type declarations so their members are not also
+ * attributed to the enclosing type (#741). Length- and newline-preserving.
+ */
+function blankNestedTypeBodies(block, maskedBlock, typeRe) {
+  const b = block.split('');
+  const mb = maskedBlock.split('');
+  for (const m of block.matchAll(typeRe)) {
+    let i = m.index + m[0].length;
+    const stop = Math.min(maskedBlock.length, i + HEAD_SCAN_CHARS);
+    let open = -1;
+    while (i < stop) {
+      const ch = maskedBlock[i];
+      if (ch === '{') { open = i; break; }
+      if (ch === '(') { const c = readBalanced(maskedBlock, i); if (c < 0) break; i = c + 1; continue; }
+      if (ch === '<') { const c = readBalanced(maskedBlock, i, '<', '>'); if (c < 0) { i++; continue; } i = c + 1; continue; }
+      if (ch === ';') break;
+      i++;
+    }
+    if (open < 0) continue;
+    const close = readBalanced(maskedBlock, open, '{', '}');
+    const end = close < 0 ? maskedBlock.length : close + 1;
+    for (let k = open; k < end && k < b.length; k++) {
+      if (b[k] !== '\n') b[k] = ' ';
+      if (mb[k] !== '\n') mb[k] = ' ';
+    }
+  }
+  return { block: b.join(''), masked: mb.join('') };
+}
+
 function extractBlock(stripped, masked, startIndex) {
   let depth = 1;
   let i = startIndex;

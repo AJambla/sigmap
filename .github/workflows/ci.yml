@@ -3,8 +3,13 @@ name: CI
 on:
   push:
     branches: [develop, main]
+  # No `branches` filter on pull_request. It used to be [develop, main], which
+  # meant a STACKED pr — one whose base is another feature branch — matched
+  # nothing and ran only the external Snyk check. Required checks could then
+  # never be satisfied, so the PR sat BLOCKED with no way to go green until the
+  # branch below it merged. Running CI for every PR costs a few extra minutes
+  # and removes a trap that silently skipped the test matrix.
   pull_request:
-    branches: [develop, main]
 
 jobs:
   test:

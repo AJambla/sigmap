@@ -1,3 +1,8 @@
 class Svc  :2-9
   deepGenerics(Map<String, List<Integer>> m) → int  :3-3
   closureParam(Function<Integer, Integer> cb, int n) → int  :6-6
+class Outer  :12-18
+  before(int a) → int  :13-13
+  after(int c) → int  :17-17
+interface Inner  :14-16
+  handle(int b) → int  :15-15

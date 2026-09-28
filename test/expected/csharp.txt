@@ -3,4 +3,6 @@ class UserService  :6-29
   CreateUserAsync(CreateUserDto dto) → Task<User>  :20-20
   ValidateUser(User user) → void  :25-25
 interface IUserRepository  :31-35
+  FindById(string id) → User  :33-33
+  SaveAsync(User user) → Task<User>  :34-34
 enum UserStatus  :37-37
