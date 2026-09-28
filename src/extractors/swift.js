@@ -2,6 +2,7 @@
 
 const { lineAt, withAnchor } = require('./line-anchor');
 const { capWithNotice, capMembersWithNotice } = require('../util/truncate');
+const { stripComments, maskCode, readBalanced } = require('./scan');
 
 // Ceilings sit above the default `maxSigsPerFile` so the configured budget
 // governs output rather than a literal buried here, and omissions are disclosed
@@ -14,6 +15,9 @@ const MAX_CLASS_BODY_CHARS = 200000;
 const MEMBER_LIMIT = 120;
 const PER_FILE_LIMIT = 200;
 
+// Chars scanned past the params for a `-> Return` before giving up.
+const RET_SCAN_CHARS = 400;
+
 /**
  * Extract signatures from Swift source code.
  * Signatures carry `:start-end` line anchors (Surgical Context); the comment
@@ -25,9 +29,11 @@ function extract(src) {
   if (!src || typeof src !== 'string') return [];
   const sigs = [];
 
-  const stripped = src
-    .replace(/\/\/.*$/gm, '')
-    .replace(/\/\*[\s\S]*?\*\//g, (s) => s.replace(/[^\n]/g, ' '));
+  // stripComments is length- AND newline-preserving; the previous regex strip
+  // DELETED comment text, so offsets no longer aligned with the masked surface
+  // the balanced reader walks (#695).
+  const stripped = stripComments(src);
+  const masked = maskCode(src);
 
   // Anchor range: scan past same-line modifiers to a body `{` (range) else single line.
   const rangeFor = (declIdx, afterIdx) => {
@@ -47,21 +53,51 @@ function extract(src) {
     const bodyStart = m.index + m[0].length;
     const block = extractBlock(stripped, bodyStart);
     sigs.push(withAnchor(`${m[1]} ${m[2]}`, lineAt(stripped, m.index), lineAt(stripped, bodyStart + block.length)));
-    for (const fn of extractMembers(block)) {
+    for (const fn of extractMembers(block, masked.slice(bodyStart, bodyStart + block.length))) {
       // The disclosure marker carries no offsets; anchor it at the class body.
       sigs.push(withAnchor(`  ${fn.text}`, lineAt(stripped, bodyStart + (fn.declIdx || 0)), lineAt(stripped, bodyStart + (fn.endIdx || 0))));
     }
   }
 
   // Top-level public functions — capture everything after ) to end of line for arrow type
-  for (const m of stripped.matchAll(/^(?:public\s+|internal\s+)?(?:static\s+)?(?:async\s+)?func\s+(\w+)(?:<[^(]*>)?\s*\(([^)]*)\)([^{\n]*)/gm)) {
+  for (const m of stripped.matchAll(/^(?:public\s+|internal\s+)?(?:static\s+)?(?:async\s+)?func\s+(\w+)(?:<[^(]*>)?\s*\(/gm)) {
     const asyncKw = m[0].includes('async') ? 'async ' : '';
-    const retStr = extractArrowType(m[3]);
-    const [s, e] = rangeFor(m.index, m.index + m[0].length);
-    sigs.push(withAnchor(`${asyncKw}func ${m[1]}(${normalizeParams(m[2])})${retStr}`, s, e));
+    const pr = readParams(stripped, masked, m.index + m[0].length - 1);
+    if (!pr) continue;
+    const retStr = extractArrowType(pr.after);
+    const [s, e] = rangeFor(m.index, pr.end);
+    sigs.push(withAnchor(`${asyncKw}func ${m[1]}(${normalizeParams(pr.params)})${retStr}`, s, e));
   }
 
   return capWithNotice(sigs, PER_FILE_LIMIT, 'signatures');
+}
+
+/**
+ * Resolve a `func` declaration's parameter list with a BALANCED read (#695).
+ *
+ * `\(([^)]*)\)` stopped at the first `)`, so a closure-typed parameter —
+ * `cb: (Int) -> Int` — closed the list early. The arrow substitution then fired
+ * inside the closure type and the remainder of the real parameter list was
+ * appended as prose: `func f(cb) → Int, n: Int) -> Int`, structurally malformed.
+ */
+function readParams(stripped, masked, openIdx) {
+  const close = readBalanced(masked, openIdx);
+  if (close < 0) return null;
+  // Arrow segment: to the body `{` or end of line, jumping balanced groups so a
+  // closure return type survives.
+  let i = close + 1;
+  const stop = Math.min(masked.length, i + RET_SCAN_CHARS);
+  while (i < stop) {
+    const ch = masked[i];
+    if (ch === '{' || ch === '\n') break;
+    if (ch === '(') { const c = readBalanced(masked, i); if (c < 0) break; i = c + 1; continue; }
+    if (ch === '<') { const c = readBalanced(masked, i, '<', '>'); if (c < 0) { i++; continue; } i = c + 1; continue; }
+    i++;
+  }
+  // `close` anchors a member to its DECLARATION line; `end` may run onto the
+  // next line when the body brace sits there (C# style), which would widen the
+  // anchor past the signature itself.
+  return { params: stripped.slice(openIdx + 1, close), after: stripped.slice(close + 1, i), end: i, close };
 }
 
 function extractBlock(src, startIndex) {
@@ -75,28 +111,52 @@ function extractBlock(src, startIndex) {
   return src.slice(startIndex, i - 1);
 }
 
-function extractMembers(block) {
+function extractMembers(block, maskedBlock) {
   const members = [];
-  for (const m of block.matchAll(/^\s+(?:public\s+|internal\s+|open\s+)?(?:static\s+|class\s+)?(?:mutating\s+)?(?:async\s+)?func\s+(\w+)(?:<[^(]*>)?\s*\(([^)]*)\)([^{\n]*)/gm)) {
+  for (const m of block.matchAll(/^[ \t]+(?:public\s+|internal\s+|open\s+)?(?:static\s+|class\s+)?(?:mutating\s+)?(?:async\s+)?func\s+(\w+)(?:<[^(]*>)?\s*\(/gm)) {
     if (m[1].startsWith('_')) continue;
     const asyncKw = m[0].includes('async') ? 'async ' : '';
-    const retStr = extractArrowType(m[3]);
+    const pr = readParams(block, maskedBlock, m.index + m[0].length - 1);
+    if (!pr) continue;
+    const retStr = extractArrowType(pr.after);
     members.push({
-      text: `${asyncKw}func ${m[1]}(${normalizeParams(m[2])})${retStr}`,
+      text: `${asyncKw}func ${m[1]}(${normalizeParams(pr.params)})${retStr}`,
       declIdx: m.index + (m[0].length - m[0].trimStart().length),
-      endIdx: m.index + m[0].length,
+      endIdx: pr.end,
     });
   }
   return capMembersWithNotice(members, MEMBER_LIMIT);
 }
 
+/**
+ * Parameter NAMES only, `: Type` and `= default` dropped.
+ *
+ * Depth- and string-aware: the old `split(',')` + `split(':')[0]` turned
+ * `a: Int = g(1, 2)` into the two params `a` and `2` (#695).
+ */
 function normalizeParams(params) {
-  if (!params) return '';
-  return params.trim()
-    .split(',')
-    .map((p) => p.trim().split(':')[0].trim())
-    .filter(Boolean)
-    .join(', ');
+  if (!params || !params.trim()) return '';
+  const names = [];
+  let depth = 0, quote = null, seg = '';
+  const flush = () => {
+    const name = seg.split(/[:=]/)[0].trim().replace(/\s+/g, ' ');
+    if (name) names.push(name);
+    seg = '';
+  };
+  for (let i = 0; i < params.length; i++) {
+    const ch = params[i];
+    if (quote) { if (ch === '\\') { i++; continue; } if (ch === quote) quote = null; continue; }
+    if (ch === '"') { quote = ch; continue; }
+    if (ch === '(' || ch === '[' || ch === '{') { depth++; continue; }
+    if (ch === ')' || ch === ']' || ch === '}') { depth--; continue; }
+    // `->` is a function-type arrow, not a generic close.
+    if (ch === '<') { depth++; continue; }
+    if (ch === '>') { if (params[i - 1] !== '-') depth--; continue; }
+    if (ch === ',' && depth === 0) { flush(); continue; }
+    if (depth === 0) seg += ch;
+  }
+  flush();
+  return names.join(', ');
 }
 
 function extractArrowType(str) {

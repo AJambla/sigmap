@@ -117,12 +117,21 @@ test('a clean language really is clean — no defect lines hiding in its snapsho
     assert.ok(snap.trim().length, `${lang} claims 0 defects but its snapshot is empty`);
     // Unbalanced parens or a stray arrow are the signatures of corruption.
     for (const line of snap.split('\n').filter(Boolean)) {
-      const open = (line.match(/\(/g) || []).length;
-      const close = (line.match(/\)/g) || []).length;
+      // Delimiters inside a STRING literal are data, not structure — PHP's
+      // `function stringDelims($sep = ")")` is correct output, and counting the
+      // quoted `)` made the check contradict the very fix it guards.
+      const structural = line.replace(/(['"])(?:\\.|(?!\1)[^\\])*\1/g, '""');
+      const open = (structural.match(/\(/g) || []).length;
+      const close = (structural.match(/\)/g) || []).length;
       assert.strictEqual(open, close,
         `${lang} claims 0 defects but a snapshot line is unbalanced: ${line}`);
-      assert.ok(!/->.*→|→.*->/.test(line),
-        `${lang} claims 0 defects but a line carries two return notations: ${line}`);
+      // `→` followed LATER by `->` is the defect signature: Swift rendered
+      // `func f(cb) → Int, n: Int) -> Int`, splicing the rest of the real
+      // parameter list on after the arrow. The reverse order is legitimate —
+      // Rust's `Box<dyn Fn(i32) -> i32>) → i32` has the `->` inside the
+      // closure TYPE, which is the correct rendering.
+      assert.ok(!/→[^→]*->/.test(line),
+        `${lang} claims 0 defects but an arrow is followed by a second notation: ${line}`);
     }
   }
 });
@@ -148,19 +157,25 @@ test('at least one control language handles the adversarial cases cleanly', () =
   assert.ok(clean.length >= 2,
     `expected >=2 clean control languages, got ${clean.length} — without controls the corpus cannot show the defects are real`);
   for (const lang of clean) {
-    assert.ok(/shared balanced scanner/.test(ledger.languages[lang].tier),
-      `${lang} is clean but its tier does not credit the shared scanner`);
+    // A clean language earns it either by using the shared balanced scanner or
+    // by being a real AST tier (Python parses with CPython's own ast module).
+    const tier = ledger.languages[lang].tier;
+    assert.ok(/shared balanced scanner|balanced|^1 — AST/.test(tier),
+      `${lang} is clean but its tier explains neither a scanner nor an AST: "${tier}"`);
   }
 });
 
 // ── 4. #696: PHP declaration on the <?php line ───────────────────────────────
 
-test('php: declaration sharing the <?php line is still dropped (#696)', () => {
+test('php: a declaration sharing the <?php line now extracts (#696)', () => {
+  // Previously yielded NOTHING at all: the top-level scan was anchored at
+  // column 0 and the opening tag occupied it.
   const out = extractFile('a.php', '<?php function f($a) { return 1; }');
   const ownLine = extractFile('a.php', '<?php\nfunction f($a) { return 1; }');
   assert.ok(ownLine.length > 0, 'own-line <?php should extract — baseline broken');
-  assert.strictEqual(out.length, 0,
-    'same-line <?php now extracts — #696 is fixed, update this assertion and the ledger');
+  assert.deepStrictEqual(out.map((s) => s.replace(/\s+:\d+-\d+$/, '')), ['function f($a)'],
+    'same-line <?php must extract the declaration');
+  assert.ok(/:1-1$/.test(out[0]), `anchor must stay on line 1, got "${out[0]}"`);
 });
 
 // ── 5. The happy-path corpus must not ratify a bug again ─────────────────────

@@ -6731,6 +6731,7 @@ __factories["./src/extractors/coverage"] = function(module, exports) {
 __factories["./src/extractors/cpp"] = function(module, exports) {
   
   const { capWithNotice, capMembersWithNotice } = __require('./src/util/truncate');
+  const { stripComments, maskCode, readBalanced } = __require('./src/extractors/scan');
 
   // Ceilings sit above the default `maxSigsPerFile` so the configured budget
   // governs output rather than a literal buried here, and omissions are disclosed
@@ -6752,28 +6753,48 @@ __factories["./src/extractors/cpp"] = function(module, exports) {
     if (!src || typeof src !== 'string') return [];
     const sigs = [];
 
-    const stripped = src
-      .replace(/\/\/.*$/gm, '')
-      .replace(/\/\*[\s\S]*?\*\//g, '');
+    // stripComments is length- AND newline-preserving; the previous strip DELETED
+    // comment text, so offsets no longer aligned with the masked surface the
+    // balanced reader walks (#695).
+    const stripped = stripComments(src);
+    const masked = maskCode(src);
 
     // Classes and structs
     const classRe = /^(?:class|struct)\s+(\w+)(?:\s*:\s*(?:public|protected|private)\s+[\w:]+)?\s*\{/gm;
     for (const m of stripped.matchAll(classRe)) {
       const kind = m[0].trimStart().startsWith('class') ? 'class' : 'struct';
       sigs.push(`${kind} ${m[1]}`);
-      const block = extractBlock(stripped, m.index + m[0].length);
-      for (const meth of extractMembers(block)) sigs.push(`  ${meth}`);
+      const bodyStart = m.index + m[0].length;
+      const block = extractBlock(stripped, bodyStart);
+      for (const meth of extractMembers(block, masked.slice(bodyStart, bodyStart + block.length))) sigs.push(`  ${meth}`);
     }
 
     // Top-level function declarations/definitions (not inside a class)
-    for (const m of stripped.matchAll(/^(?!class|struct|if|for|while|switch)([\w:*&<> ]+?)\s+(\w+)\s*\(([^)]*)\)\s*(?:const\s*)?\{/gm)) {
+    for (const m of stripped.matchAll(/^(?!class|struct|if|for|while|switch)([\w:*&<> ]+?)\s+(\w+)\s*\(/gm)) {
       if (m[2].startsWith('_')) continue;
+      const pr = readParams(stripped, masked, m.index + m[0].length - 1);
+      if (!pr) continue;
+      // Only a definition (body `{`) counts at top level, as before.
+      const tail = masked.slice(pr.close + 1, pr.close + 40);
+      if (!/^\s*(?:const\s*)?\{/.test(tail)) continue;
       const ret = normalizeType(m[1]);
       const retStr = ret ? ` → ${ret}` : '';
-      sigs.push(`${m[2]}(${normalizeParams(m[3])})${retStr}`);
+      sigs.push(`${m[2]}(${normalizeParams(pr.params)})${retStr}`);
     }
 
     return capWithNotice(sigs, PER_FILE_LIMIT, 'signatures');
+  }
+
+  /**
+   * Balanced parameter read (#695). `\(([^)]*)\)` stopped at the first `)`, so
+   * `int f(int a, int b = g(1, 2))` and a function-pointer parameter
+   * `int (*cb)(int)` failed the whole declaration match and were DROPPED — the
+   * symbol then became a fake-symbol false positive in `verify`.
+   */
+  function readParams(stripped, masked, openIdx) {
+    const close = readBalanced(masked, openIdx);
+    if (close < 0) return null;
+    return { params: stripped.slice(openIdx + 1, close), close };
   }
 
   function extractBlock(src, startIndex) {
@@ -6787,14 +6808,19 @@ __factories["./src/extractors/cpp"] = function(module, exports) {
     return src.slice(startIndex, i - 1);
   }
 
-  function extractMembers(block) {
+  function extractMembers(block, maskedBlock) {
     const members = [];
-    const methodRe = /^\s+(?:virtual\s+|static\s+|inline\s+)?(?!private:|protected:|public:)([\w:*&<> ]+?)\s+(\w+)\s*\(([^)]*)\)\s*(?:const\s*)?(?:override\s*)?(?:=\s*0\s*)?;/gm;
+    const methodRe = /^[ \t]+(?:virtual\s+|static\s+|inline\s+)?(?!private:|protected:|public:)([\w:*&<> ]+?)\s+(\w+)\s*\(/gm;
     for (const m of block.matchAll(methodRe)) {
       if (m[2].startsWith('_')) continue;
+      const pr = readParams(block, maskedBlock, m.index + m[0].length - 1);
+      if (!pr) continue;
+      // Declarations end in `;` (optionally after const/override/= 0), as before.
+      const tail = maskedBlock.slice(pr.close + 1, pr.close + 40);
+      if (!/^\s*(?:const\s*)?(?:override\s*)?(?:=\s*0\s*)?;/.test(tail)) continue;
       const ret = normalizeType(m[1]);
       const retStr = ret ? ` → ${ret}` : '';
-      members.push(`${m[2]}(${normalizeParams(m[3])})${retStr}`);
+      members.push(`${m[2]}(${normalizeParams(pr.params)})${retStr}`);
     }
     return capWithNotice(members, MEMBER_LIMIT, 'members');
   }
@@ -6818,6 +6844,7 @@ __factories["./src/extractors/csharp"] = function(module, exports) {
   
   const { lineAt, withAnchor } = __require('./src/extractors/line-anchor');
   const { capWithNotice, capMembersWithNotice } = __require('./src/util/truncate');
+  const { stripComments, maskCode, readBalanced } = __require('./src/extractors/scan');
 
   // Ceilings sit above the default `maxSigsPerFile` so the configured budget
   // governs output rather than a literal buried here, and omissions are disclosed
@@ -6830,6 +6857,9 @@ __factories["./src/extractors/csharp"] = function(module, exports) {
   const MEMBER_LIMIT = 120;
   const PER_FILE_LIMIT = 200;
 
+  // Chars scanned past the params before giving up on a return type.
+  const RET_SCAN_CHARS = 400;
+
   /**
    * Extract signatures from C# source code.
    * Signatures carry `:start-end` line anchors (Surgical Context); the comment
@@ -6841,9 +6871,11 @@ __factories["./src/extractors/csharp"] = function(module, exports) {
     if (!src || typeof src !== 'string') return [];
     const sigs = [];
 
-    const stripped = src
-      .replace(/\/\/.*$/gm, '')
-      .replace(/\/\*[\s\S]*?\*\//g, (s) => s.replace(/[^\n]/g, ' '));
+    // stripComments is length- AND newline-preserving; the previous regex strip
+    // DELETED comment text, so offsets no longer aligned with the masked surface
+    // the balanced reader walks (#695).
+    const stripped = stripComments(src);
+    const masked = maskCode(src);
 
     // Classes and interfaces
     const typeRe = /^\s*(?:public\s+|internal\s+|protected\s+)?(?:abstract\s+|sealed\s+|static\s+)?(class|interface|enum|record|struct)\s+(\w+)(?:<[^{]*>)?(?:\s*:\s*[\w<>, .]+)?\s*\{/gm;
@@ -6852,13 +6884,37 @@ __factories["./src/extractors/csharp"] = function(module, exports) {
       const bodyStart = m.index + m[0].length;
       const block = extractBlock(stripped, bodyStart);
       sigs.push(withAnchor(`${m[1]} ${m[2]}`, lineAt(stripped, declIdx), lineAt(stripped, bodyStart + block.length)));
-      for (const meth of extractMembers(block)) {
+      for (const meth of extractMembers(block, masked.slice(bodyStart, bodyStart + block.length))) {
         // The disclosure marker carries no offsets; anchor it at the class body.
         sigs.push(withAnchor(`  ${meth.text}`, lineAt(stripped, bodyStart + (meth.declIdx || 0)), lineAt(stripped, bodyStart + (meth.endIdx || 0))));
       }
     }
 
     return capWithNotice(sigs, PER_FILE_LIMIT, 'signatures');
+  }
+
+  /**
+   * Resolve a declaration's parameter list with a BALANCED read (#695).
+   *
+   * `\(([^)]*)\)` stopped at the first `)`, so a nested call or a
+   * function-typed parameter truncated the list mid-type.
+   */
+  function readParams(stripped, masked, openIdx) {
+    const close = readBalanced(masked, openIdx);
+    if (close < 0) return null;
+    let i = close + 1;
+    const stop = Math.min(masked.length, i + RET_SCAN_CHARS);
+    while (i < stop) {
+      const ch = masked[i];
+      if (ch === '{' || ch === ';') break;
+      if (ch === '(') { const c = readBalanced(masked, i); if (c < 0) break; i = c + 1; continue; }
+      if (ch === '<') { const c = readBalanced(masked, i, '<', '>'); if (c < 0) { i++; continue; } i = c + 1; continue; }
+      i++;
+    }
+    // `close` anchors a member to its DECLARATION line; `end` may run onto the
+    // next line when the body brace sits there (C# style), which would widen the
+    // anchor past the signature itself.
+    return { params: stripped.slice(openIdx + 1, close), after: stripped.slice(close + 1, i), end: i, close };
   }
 
   function extractBlock(src, startIndex) {
@@ -6872,16 +6928,18 @@ __factories["./src/extractors/csharp"] = function(module, exports) {
     return src.slice(startIndex, i - 1);
   }
 
-  function extractMembers(block) {
+  function extractMembers(block, maskedBlock) {
     const members = [];
-    const methodRe = /^\s+(?:public|internal|protected)\s+(?:static\s+|virtual\s+|override\s+|async\s+)*(?:where\s+\w+\s*:\s*[^\n]+\s+)?([\w<>\[\]?., ]+)\s+(\w+)\s*\(([^)]*)\)/gm;
+    const methodRe = /^[ \t]+(?:public|internal|protected)\s+(?:static\s+|virtual\s+|override\s+|async\s+)*(?:where\s+\w+\s*:\s*[^\n]+\s+)?([\w<>\[\]?., ]+)\s+(\w+)\s*\(/gm;
     for (const m of block.matchAll(methodRe)) {
+      const pr = readParams(block, maskedBlock, m.index + m[0].length - 1);
+      if (!pr) continue;
       const ret = normalizeType(m[1]);
       const retStr = ret ? ` → ${ret}` : '';
       members.push({
-        text: `${m[2]}(${normalizeParams(m[3])})${retStr}`,
+        text: `${m[2]}(${normalizeParams(pr.params)})${retStr}`,
         declIdx: m.index + (m[0].length - m[0].trimStart().length),
-        endIdx: m.index + m[0].length,
+        endIdx: pr.close + 1,
       });
     }
     return capMembersWithNotice(members, MEMBER_LIMIT);
@@ -6985,6 +7043,7 @@ __factories["./src/extractors/dart"] = function(module, exports) {
   
   const { lineAt, withAnchor } = __require('./src/extractors/line-anchor');
   const { capWithNotice, capMembersWithNotice } = __require('./src/util/truncate');
+  const { stripComments, maskCode, readBalanced } = __require('./src/extractors/scan');
 
   // Ceilings sit above the default `maxSigsPerFile` so the configured budget
   // governs output rather than a literal buried here, and omissions are disclosed
@@ -7008,9 +7067,11 @@ __factories["./src/extractors/dart"] = function(module, exports) {
     if (!src || typeof src !== 'string') return [];
     const sigs = [];
 
-    const stripped = src
-      .replace(/\/\/.*$/gm, '')
-      .replace(/\/\*[\s\S]*?\*\//g, (s) => s.replace(/[^\n]/g, ' '));
+    // stripComments is length- AND newline-preserving; the previous strip DELETED
+    // comment text, so offsets no longer aligned with the masked surface the
+    // balanced reader walks (#695).
+    const stripped = stripComments(src);
+    const masked = maskCode(src);
 
     // Anchor range: scan past same-line trivia (`async`, `=>` stops) to a body `{`.
     const rangeFor = (declIdx, afterIdx) => {
@@ -7030,21 +7091,30 @@ __factories["./src/extractors/dart"] = function(module, exports) {
       const bodyStart = m.index + m[0].length;
       const block = extractBlock(stripped, bodyStart);
       sigs.push(withAnchor(`${abs}class ${m[1]}`, lineAt(stripped, m.index), lineAt(stripped, bodyStart + block.length)));
-      for (const meth of extractMembers(block)) {
+      for (const meth of extractMembers(block, masked.slice(bodyStart, bodyStart + block.length))) {
         // The disclosure marker carries no offsets; anchor it at the class body.
         sigs.push(withAnchor(`  ${meth.text}`, lineAt(stripped, bodyStart + (meth.declIdx || 0)), lineAt(stripped, bodyStart + (meth.endIdx || 0))));
       }
     }
 
     // Top-level functions — capture return type (prefix before name) and show as suffix
-    for (const m of stripped.matchAll(/^((?:Future<[\w<>?,\s]*>|[\w<>?]+))\s+(\w+)\s*\(([^)]*)\)/gm)) {
+    for (const m of stripped.matchAll(/^((?:Future<[\w<>?,\s]*>|[\w<>?]+))\s+(\w+)\s*\(/gm)) {
       if (m[2].startsWith('_')) continue;
+      const pr = readParams(stripped, masked, m.index + m[0].length - 1);
+      if (!pr) continue;
       const retStr = (m[1] && m[1] !== 'void') ? ` → ${m[1].replace(/\s+/g, '').slice(0, 25)}` : '';
-      const [s, e] = rangeFor(m.index, m.index + m[0].length);
-      sigs.push(withAnchor(`${m[2]}(${normalizeParams(m[3])})${retStr}`, s, e));
+      const [s, e] = rangeFor(m.index, pr.close + 1);
+      sigs.push(withAnchor(`${m[2]}(${normalizeParams(pr.params)})${retStr}`, s, e));
     }
 
     return capWithNotice(sigs, PER_FILE_LIMIT, 'signatures');
+  }
+
+  /** Balanced parameter read — `\(([^)]*)\)` truncated at a nested `)` (#695). */
+  function readParams(stripped, masked, openIdx) {
+    const close = readBalanced(masked, openIdx);
+    if (close < 0) return null;
+    return { params: stripped.slice(openIdx + 1, close), close };
   }
 
   function extractBlock(src, startIndex) {
@@ -7058,23 +7128,49 @@ __factories["./src/extractors/dart"] = function(module, exports) {
     return src.slice(startIndex, i - 1);
   }
 
-  function extractMembers(block) {
+  function extractMembers(block, maskedBlock) {
     const members = [];
-    for (const m of block.matchAll(/^\s+(?:@override\s+)?(?:@\w+\s+)*((?:Future<[\w<>?,\s]*>|[\w<>?]+))\s+(\w+)\s*\(([^)]*)\)/gm)) {
+    for (const m of block.matchAll(/^[ \t]+(?:@override\s+)?(?:@\w+\s+)*((?:Future<[\w<>?,\s]*>|[\w<>?]+))\s+(\w+)\s*\(/gm)) {
       if (m[2].startsWith('_')) continue;
+      const pr = readParams(block, maskedBlock, m.index + m[0].length - 1);
+      if (!pr) continue;
       const retStr = (m[1] && m[1] !== 'void') ? ` → ${m[1].replace(/\s+/g, '').slice(0, 25)}` : '';
       members.push({
-        text: `${m[2]}(${normalizeParams(m[3])})${retStr}`,
+        text: `${m[2]}(${normalizeParams(pr.params)})${retStr}`,
         declIdx: m.index + (m[0].length - m[0].trimStart().length),
-        endIdx: m.index + m[0].length,
+        endIdx: pr.close + 1,
       });
     }
     return capMembersWithNotice(members, MEMBER_LIMIT);
   }
 
+  /**
+   * Compact the parameter text, keeping Dart's `{named}` / `[optional]` groups.
+   *
+   * The previous implementation deleted `{...}` groups wholesale — real API
+   * surface, and only tolerable because the first-`)` capture had usually
+   * mangled them anyway. Defaults are dropped at depth 0, so
+   * `{int b = 2, int Function(int)? cb}` renders `{int b, int Function(int)? cb}`.
+   */
   function normalizeParams(params) {
-    if (!params) return '';
-    return params.trim().replace(/\{[^}]*\}/g, '').replace(/\s+/g, ' ').trim();
+    if (!params || !params.trim()) return '';
+    let out = '';
+    let depth = 0;
+    let quote = null;
+    let skipDefault = false;
+    for (let i = 0; i < params.length; i++) {
+      const ch = params[i];
+      if (quote) { out += ch; if (ch === '\\') { out += params[++i] || ''; continue; } if (ch === quote) quote = null; continue; }
+      if (ch === '"' || ch === "'") { if (!skipDefault) { quote = ch; out += ch; } continue; }
+      if (ch === '(' || ch === '<') { depth++; if (!skipDefault) out += ch; continue; }
+      if (ch === ')' || ch === '>') { depth--; if (!skipDefault) out += ch; continue; }
+      if (ch === '{' || ch === '[') { if (!skipDefault) out += ch; continue; }
+      if (ch === '}' || ch === ']') { skipDefault = false; out += ch; continue; }
+      if (ch === '=' && depth === 0) { skipDefault = true; continue; }
+      if (ch === ',' && depth === 0) { skipDefault = false; out += ch; continue; }
+      if (!skipDefault) out += ch;
+    }
+    return out.replace(/\s+/g, ' ').replace(/\s*,\s*/g, ', ').replace(/,\s*([}\]])/g, '$1').replace(/\s+([}\])])/g, '$1').replace(/\(\s+/g, '(').trim().replace(/,$/, '');
   }
 
   module.exports = { extract };
@@ -9489,6 +9585,7 @@ __factories["./src/extractors/php"] = function(module, exports) {
   
   const { lineAt, withAnchor } = __require('./src/extractors/line-anchor');
   const { capWithNotice, capMembersWithNotice } = __require('./src/util/truncate');
+  const { stripComments, maskCode, readBalanced } = __require('./src/extractors/scan');
 
   // Ceilings sit above the default `maxSigsPerFile` so the configured budget
   // governs output rather than a literal buried here, and omissions are disclosed
@@ -9501,6 +9598,9 @@ __factories["./src/extractors/php"] = function(module, exports) {
   const MEMBER_LIMIT = 120;
   const PER_FILE_LIMIT = 200;
 
+  // Chars scanned past the params before giving up on a return type.
+  const RET_SCAN_CHARS = 400;
+
   /**
    * Extract signatures from PHP source code.
    * Signatures carry `:start-end` line anchors (Surgical Context); the comment
@@ -9512,10 +9612,12 @@ __factories["./src/extractors/php"] = function(module, exports) {
     if (!src || typeof src !== 'string') return [];
     const sigs = [];
 
-    const stripped = src
-      .replace(/\/\/.*$/gm, '')
-      .replace(/#.*$/gm, '')
-      .replace(/\/\*[\s\S]*?\*\//g, (s) => s.replace(/[^\n]/g, ' '));
+    // stripComments is length- AND newline-preserving; the previous regex strip
+    // DELETED comment text, so offsets no longer aligned with the masked surface
+    // the balanced reader walks (#695). The `#` line-comment form PHP also
+    // accepts is blanked separately, preserving length.
+    const stripped = blankHashComments(stripComments(src));
+    const masked = blankHashComments(maskCode(src));
 
     // Anchor range: scan past same-line trivia to a body `{` (range) else single line.
     const rangeFor = (declIdx, afterIdx) => {
@@ -9538,21 +9640,52 @@ __factories["./src/extractors/php"] = function(module, exports) {
       const bodyStart = m.index + m[0].length;
       const block = extractBlock(stripped, bodyStart);
       sigs.push(withAnchor(`${kind} ${m[1]}`, lineAt(stripped, m.index), lineAt(stripped, bodyStart + block.length)));
-      for (const meth of extractMembers(block)) {
+      for (const meth of extractMembers(block, masked.slice(bodyStart, bodyStart + block.length))) {
         // The disclosure marker carries no offsets; anchor it at the class body.
         sigs.push(withAnchor(`  ${meth.text}`, lineAt(stripped, bodyStart + (meth.declIdx || 0)), lineAt(stripped, bodyStart + (meth.endIdx || 0))));
       }
     }
 
     // Top-level functions
-    for (const m of stripped.matchAll(/^function\s+(\w+)\s*\(([^)]*)\)\s*(?::\s*([^\n{]+))?/gm)) {
-      const ret = normalizeType(m[3]);
+    // `(?:<\?php\s+)?` lets a declaration share its line with the opening tag —
+    // `<?php function f($a) {…}` previously yielded NOTHING at all (#696).
+    for (const m of stripped.matchAll(/^(?:<\?php\s+|<\?=\s+)?function\s+(\w+)\s*\(/gm)) {
+      const pr = readParams(stripped, masked, m.index + m[0].length - 1);
+      if (!pr) continue;
+      const rm = /^\s*:\s*([^\n{]+)/.exec(pr.after);
+      const ret = normalizeType(rm ? rm[1] : '');
       const retStr = ret ? ` → ${ret}` : '';
-      const [s, e] = rangeFor(m.index, m.index + m[0].length);
-      sigs.push(withAnchor(`function ${m[1]}(${normalizeParams(m[2])})${retStr}`, s, e));
+      const declIdx = m.index + (m[0].startsWith('<?') ? m[0].length - m[0].replace(/^<\?(?:php|=)\s+/, '').length : 0);
+      const [s, e] = rangeFor(declIdx, pr.end);
+      sigs.push(withAnchor(`function ${m[1]}(${normalizeParams(pr.params)})${retStr}`, s, e));
     }
 
     return capWithNotice(sigs, PER_FILE_LIMIT, 'signatures');
+  }
+
+  /** Blank `#` line comments, preserving length and newlines. */
+  function blankHashComments(src) {
+    return src.replace(/#[^\n]*/g, (m) => ' '.repeat(m.length));
+  }
+
+  /**
+   * Resolve a declaration's parameter list with a BALANCED read (#695).
+   *
+   * `\(([^)]*)\)` stopped at the first `)`, so `function f($a = g(1, 2), $b)`
+   * truncated to `function f($a = g(1, 2)` and a `)` inside a string default cut
+   * the scan mid-literal.
+   */
+  function readParams(stripped, masked, openIdx) {
+    const close = readBalanced(masked, openIdx);
+    if (close < 0) return null;
+    let i = close + 1;
+    const stop = Math.min(masked.length, i + RET_SCAN_CHARS);
+    while (i < stop) {
+      const ch = masked[i];
+      if (ch === '{' || ch === ';' || ch === '\n') break;
+      i++;
+    }
+    return { params: stripped.slice(openIdx + 1, close), after: stripped.slice(close + 1, i), end: i, close };
   }
 
   function extractBlock(src, startIndex) {
@@ -9566,18 +9699,21 @@ __factories["./src/extractors/php"] = function(module, exports) {
     return src.slice(startIndex, i - 1);
   }
 
-  function extractMembers(block) {
+  function extractMembers(block, maskedBlock) {
     const members = [];
-    const methodRe = /^\s+(?:public|protected)\s+(?:static\s+)?function\s+(\w+)\s*\(([^)]*)\)\s*(?::\s*([^\n{]+))?/gm;
+    const methodRe = /^[ \t]+(?:public|protected)\s+(?:static\s+)?function\s+(\w+)\s*\(/gm;
     for (const m of block.matchAll(methodRe)) {
       if (m[1].startsWith('_')) continue;
+      const pr = readParams(block, maskedBlock, m.index + m[0].length - 1);
+      if (!pr) continue;
       const isStatic = m[0].includes('static ') ? 'static ' : '';
-      const ret = normalizeType(m[3]);
+      const rm = /^\s*:\s*([^\n{]+)/.exec(pr.after);
+      const ret = normalizeType(rm ? rm[1] : '');
       const retStr = ret ? ` → ${ret}` : '';
       members.push({
-        text: `${isStatic}function ${m[1]}(${normalizeParams(m[2])})${retStr}`,
+        text: `${isStatic}function ${m[1]}(${normalizeParams(pr.params)})${retStr}`,
         declIdx: m.index + (m[0].length - m[0].trimStart().length),
-        endIdx: m.index + m[0].length,
+        endIdx: pr.close + 1,
       });
     }
     return capMembersWithNotice(members, MEMBER_LIMIT);
@@ -11265,6 +11401,7 @@ __factories["./src/extractors/r"] = function(module, exports) {
 __factories["./src/extractors/ruby"] = function(module, exports) {
   
   const { capWithNotice } = __require('./src/util/truncate');
+  const { readBalanced } = __require('./src/extractors/scan');
 
   // Ceiling sits above the default `maxSigsPerFile` so the configured budget
   // governs output rather than a literal buried here, and omissions are disclosed (#576).
@@ -11279,7 +11416,11 @@ __factories["./src/extractors/ruby"] = function(module, exports) {
     if (!src || typeof src !== 'string') return [];
     const sigs = [];
 
-    const stripped = src.replace(/#.*$/gm, '');
+    // Length- AND newline-preserving: a deleting strip would desynchronise the
+    // offsets the balanced reader walks (#695).
+    const stripped = src.replace(/#[^\n]*/g, (m) => ' '.repeat(m.length));
+    const masked = stripped.replace(/(['"])(?:\\.|(?!\1)[^\\\n])*\1/g,
+      (m) => m[0] + ' '.repeat(Math.max(0, m.length - 2)) + m[0]);
 
     // Modules and classes
     for (const m of stripped.matchAll(/^(?:module|class)\s+([\w:]+)(?:\s*<\s*[\w:]+)?\s*$/gm)) {
@@ -11288,23 +11429,32 @@ __factories["./src/extractors/ruby"] = function(module, exports) {
     }
 
     // Public methods (not private/protected)
-    for (const m of stripped.matchAll(/^[ \t]+def\s+(?:self\.)?(\w+)(?:\s*\(([^)]*)\))?/gm)) {
+    for (const m of stripped.matchAll(/^[ \t]+def\s+(?:self\.)?(\w+)(\s*\()?/gm)) {
       if (m[1].startsWith('_')) continue;
-      const params = m[2] ? `(${normalizeParams(m[2])})` : '';
+      const pr = m[2] ? readParams(stripped, masked, m.index + m[0].length - 1) : null;
+      const params = pr ? `(${normalizeParams(pr.params)})` : '';
       const selfPrefix = m[0].includes('self.') ? 'self.' : '';
       const retStr = extractReturnHint(stripped, m.index);
       sigs.push(`  def ${selfPrefix}${m[1]}${params}${retStr}`);
     }
 
     // Top-level def
-    for (const m of stripped.matchAll(/^def\s+(\w+)(?:\s*\(([^)]*)\))?/gm)) {
+    for (const m of stripped.matchAll(/^def\s+(\w+)(\s*\()?/gm)) {
       if (m[1].startsWith('_')) continue;
-      const params = m[2] ? `(${normalizeParams(m[2])})` : '';
+      const pr = m[2] ? readParams(stripped, masked, m.index + m[0].length - 1) : null;
+      const params = pr ? `(${normalizeParams(pr.params)})` : '';
       const retStr = extractReturnHint(stripped, m.index);
       sigs.push(`def ${m[1]}${params}${retStr}`);
     }
 
     return capWithNotice(sigs, PER_FILE_LIMIT, 'signatures');
+  }
+
+  /** Balanced parameter read — `\(([^)]*)\)` truncated at a nested `)` (#695). */
+  function readParams(stripped, masked, openIdx) {
+    const close = readBalanced(masked, openIdx);
+    if (close < 0) return null;
+    return { params: stripped.slice(openIdx + 1, close), close };
   }
 
   function normalizeParams(params) {
@@ -11330,6 +11480,7 @@ __factories["./src/extractors/rust"] = function(module, exports) {
   
   const { lineAt, withAnchor } = __require('./src/extractors/line-anchor');
   const { capWithNotice, capMembersWithNotice } = __require('./src/util/truncate');
+  const { stripComments, maskCode, readBalanced } = __require('./src/extractors/scan');
 
   // Ceiling sits above the default `maxSigsPerFile` so the configured budget
   // governs output rather than a literal buried here, and omissions are disclosed (#576).
@@ -11339,6 +11490,9 @@ __factories["./src/extractors/rust"] = function(module, exports) {
   // ceiling only guards against pathological input (Java parity, #551).
   const MAX_CLASS_BODY_CHARS = 200000;
   const PER_FILE_LIMIT = 200;
+
+  // Chars scanned past the params for a `-> Return` before giving up.
+  const RET_SCAN_CHARS = 400;
 
   // Per-impl member ceiling, disclosed via capMembersWithNotice (#576).
   const MEMBER_LIMIT = 120;
@@ -11358,9 +11512,16 @@ __factories["./src/extractors/rust"] = function(module, exports) {
     // convention as the Python/JS extractors' doc hints.
     const hinted = (sig, name) => (docHints.has(name) ? `${sig}  # ${docHints.get(name)}` : sig);
 
-    const stripped = src
-      .replace(/\/\/.*$/gm, '')
-      .replace(/\/\*[\s\S]*?\*\//g, (s) => s.replace(/[^\n]/g, ' '));
+    // stripComments is length- AND newline-preserving; the previous regex strip
+    // DELETED comment text, so offsets computed on it no longer aligned with the
+    // masked surface the balanced reader walks (#695).
+    const stripped = stripComments(src);
+    // Rust lifetimes (`&'db`, `<'_>`, `'static`) start with a single quote, which
+    // maskCode reads as a CHAR-LITERAL opener. That desynchronised the mask, so
+    // readBalanced failed and the whole declaration was dropped — 208 signatures
+    // on rust-analyzer, every one of them lifetime-annotated. Blanked on the mask
+    // surface only, length-preserving, so the rendered signature keeps them.
+    const masked = maskCode(blankLifetimes(src));
 
     // Anchor range for a declaration at declIdx whose header ends at afterIdx:
     // if a `{` body follows, range to its closing brace; else single-line.
@@ -11398,20 +11559,67 @@ __factories["./src/extractors/rust"] = function(module, exports) {
       const bodyStart = m.index + m[0].length;
       const block = extractBlock(stripped, bodyStart);
       sigs.push(withAnchor(`impl ${m[1]}`, lineAt(stripped, m.index), lineAt(stripped, bodyStart + block.length)));
-      for (const fn of extractMethods(block)) {
+      for (const fn of extractMethods(block, masked.slice(bodyStart, bodyStart + block.length))) {
         sigs.push(hinted(withAnchor(`  ${fn.text}`, lineAt(stripped, bodyStart + (fn.declIdx || 0)), lineAt(stripped, bodyStart + (fn.endIdx || 0))), fn.name));
       }
     }
 
     // Top-level pub fns — capture everything after ) up to { or ; for return type
-    for (const m of stripped.matchAll(/^pub(?:\s+async)?\s+fn\s+(\w+)(?:<[^(]*>)?\s*\(([^)]*)\)([^{;]*)/gm)) {
+    for (const m of stripped.matchAll(/^pub(?:\s+async)?\s+fn\s+(\w+)(?:<[^(]*>)?\s*\(/gm)) {
       const asyncKw = m[0].includes('async') ? 'async ' : '';
-      const retStr = extractReturnType(m[3]);
-      const [s, e] = rangeFor(m.index, m.index + m[0].length);
-      sigs.push(hinted(withAnchor(`pub ${asyncKw}fn ${m[1]}(${normalizeParams(m[2])})${retStr}`, s, e), m[1]));
+      const pr = readParams(stripped, masked, m.index + m[0].length - 1);
+      if (!pr) continue;
+      const retStr = extractReturnType(pr.after);
+      const [s, e] = rangeFor(m.index, pr.end);
+      sigs.push(hinted(withAnchor(`pub ${asyncKw}fn ${m[1]}(${normalizeParams(pr.params)})${retStr}`, s, e), m[1]));
     }
 
     return capWithNotice(sigs, PER_FILE_LIMIT, 'signatures');
+  }
+
+  /**
+   * Resolve a `fn` declaration's parameter list with a BALANCED read (#695).
+   *
+   * `\(([^)]*)\)` stopped at the first `)`, so a closure-typed parameter —
+   * `b: Box<dyn Fn(i32) -> i32>` — truncated mid-type. The `->` to `→`
+   * substitution in `extractReturnType` then fired on the CLOSURE's arrow,
+   * leaving the real return arrow as literal `-> i32`, so the rendering stated
+   * the return type twice in two notations.
+   *
+   * @param {string} stripped comment-blanked surface
+   * @param {string} masked   comment- AND string-blanked surface (same length)
+   * @param {number} openIdx  index of the `(` that opens the params
+   * @returns {{ params: string, after: string, end: number }|null}
+   */
+  /**
+   * Blank Rust lifetime tokens so they are not mistaken for char literals.
+   *
+   * A lifetime is `'` + identifier NOT followed by a closing `'` — which is what
+   * distinguishes `&'a` from the char literal `'a'`. Length-preserving.
+   * @param {string} src
+   * @returns {string}
+   */
+  function blankLifetimes(src) {
+    return src.replace(/'(?:[A-Za-z_][A-Za-z0-9_]*|_)(?!')/g, (m) => ' '.repeat(m.length));
+  }
+
+  function readParams(stripped, masked, openIdx) {
+    const close = readBalanced(masked, openIdx);
+    if (close < 0) return null;
+    // Return segment runs from after the params to the body `{` or a `;`.
+    let i = close + 1;
+    const stop = Math.min(masked.length, i + RET_SCAN_CHARS);
+    while (i < stop) {
+      const ch = masked[i];
+      if (ch === '{' || ch === ';') break;
+      if (ch === '(') { const c = readBalanced(masked, i); if (c < 0) break; i = c + 1; continue; }
+      if (ch === '<') { const c = readBalanced(masked, i, '<', '>'); if (c < 0) { i++; continue; } i = c + 1; continue; }
+      i++;
+    }
+    // `close` anchors a member to its DECLARATION line; `end` may run onto the
+    // next line when the body brace sits there (C# style), which would widen the
+    // anchor past the signature itself.
+    return { params: stripped.slice(openIdx + 1, close), after: stripped.slice(close + 1, i), end: i, close };
   }
 
   function extractBlock(src, startIndex) {
@@ -11425,16 +11633,18 @@ __factories["./src/extractors/rust"] = function(module, exports) {
     return src.slice(startIndex, i - 1);
   }
 
-  function extractMethods(block) {
+  function extractMethods(block, maskedBlock) {
     const methods = [];
-    for (const m of block.matchAll(/^\s+pub(?:\s+async)?\s+fn\s+(\w+)(?:<[^(]*>)?\s*\(([^)]*)\)([^{;]*)/gm)) {
+    for (const m of block.matchAll(/^[ \t]+pub(?:\s+async)?\s+fn\s+(\w+)(?:<[^(]*>)?\s*\(/gm)) {
       const asyncKw = m[0].includes('async') ? 'async ' : '';
-      const retStr = extractReturnType(m[3]);
+      const pr = readParams(block, maskedBlock, m.index + m[0].length - 1);
+      if (!pr) continue;
+      const retStr = extractReturnType(pr.after);
       methods.push({
-        text: `pub ${asyncKw}fn ${m[1]}(${normalizeParams(m[2])})${retStr}`,
+        text: `pub ${asyncKw}fn ${m[1]}(${normalizeParams(pr.params)})${retStr}`,
         name: m[1],
         declIdx: m.index + (m[0].length - m[0].trimStart().length),
-        endIdx: m.index + m[0].length,
+        endIdx: pr.end,
       });
     }
     return capMembersWithNotice(methods, MEMBER_LIMIT, 'methods');
@@ -12213,6 +12423,7 @@ __factories["./src/extractors/swift"] = function(module, exports) {
   
   const { lineAt, withAnchor } = __require('./src/extractors/line-anchor');
   const { capWithNotice, capMembersWithNotice } = __require('./src/util/truncate');
+  const { stripComments, maskCode, readBalanced } = __require('./src/extractors/scan');
 
   // Ceilings sit above the default `maxSigsPerFile` so the configured budget
   // governs output rather than a literal buried here, and omissions are disclosed
@@ -12225,6 +12436,9 @@ __factories["./src/extractors/swift"] = function(module, exports) {
   const MEMBER_LIMIT = 120;
   const PER_FILE_LIMIT = 200;
 
+  // Chars scanned past the params for a `-> Return` before giving up.
+  const RET_SCAN_CHARS = 400;
+
   /**
    * Extract signatures from Swift source code.
    * Signatures carry `:start-end` line anchors (Surgical Context); the comment
@@ -12236,9 +12450,11 @@ __factories["./src/extractors/swift"] = function(module, exports) {
     if (!src || typeof src !== 'string') return [];
     const sigs = [];
 
-    const stripped = src
-      .replace(/\/\/.*$/gm, '')
-      .replace(/\/\*[\s\S]*?\*\//g, (s) => s.replace(/[^\n]/g, ' '));
+    // stripComments is length- AND newline-preserving; the previous regex strip
+    // DELETED comment text, so offsets no longer aligned with the masked surface
+    // the balanced reader walks (#695).
+    const stripped = stripComments(src);
+    const masked = maskCode(src);
 
     // Anchor range: scan past same-line modifiers to a body `{` (range) else single line.
     const rangeFor = (declIdx, afterIdx) => {
@@ -12258,21 +12474,51 @@ __factories["./src/extractors/swift"] = function(module, exports) {
       const bodyStart = m.index + m[0].length;
       const block = extractBlock(stripped, bodyStart);
       sigs.push(withAnchor(`${m[1]} ${m[2]}`, lineAt(stripped, m.index), lineAt(stripped, bodyStart + block.length)));
-      for (const fn of extractMembers(block)) {
+      for (const fn of extractMembers(block, masked.slice(bodyStart, bodyStart + block.length))) {
         // The disclosure marker carries no offsets; anchor it at the class body.
         sigs.push(withAnchor(`  ${fn.text}`, lineAt(stripped, bodyStart + (fn.declIdx || 0)), lineAt(stripped, bodyStart + (fn.endIdx || 0))));
       }
     }
 
     // Top-level public functions — capture everything after ) to end of line for arrow type
-    for (const m of stripped.matchAll(/^(?:public\s+|internal\s+)?(?:static\s+)?(?:async\s+)?func\s+(\w+)(?:<[^(]*>)?\s*\(([^)]*)\)([^{\n]*)/gm)) {
+    for (const m of stripped.matchAll(/^(?:public\s+|internal\s+)?(?:static\s+)?(?:async\s+)?func\s+(\w+)(?:<[^(]*>)?\s*\(/gm)) {
       const asyncKw = m[0].includes('async') ? 'async ' : '';
-      const retStr = extractArrowType(m[3]);
-      const [s, e] = rangeFor(m.index, m.index + m[0].length);
-      sigs.push(withAnchor(`${asyncKw}func ${m[1]}(${normalizeParams(m[2])})${retStr}`, s, e));
+      const pr = readParams(stripped, masked, m.index + m[0].length - 1);
+      if (!pr) continue;
+      const retStr = extractArrowType(pr.after);
+      const [s, e] = rangeFor(m.index, pr.end);
+      sigs.push(withAnchor(`${asyncKw}func ${m[1]}(${normalizeParams(pr.params)})${retStr}`, s, e));
     }
 
     return capWithNotice(sigs, PER_FILE_LIMIT, 'signatures');
+  }
+
+  /**
+   * Resolve a `func` declaration's parameter list with a BALANCED read (#695).
+   *
+   * `\(([^)]*)\)` stopped at the first `)`, so a closure-typed parameter —
+   * `cb: (Int) -> Int` — closed the list early. The arrow substitution then fired
+   * inside the closure type and the remainder of the real parameter list was
+   * appended as prose: `func f(cb) → Int, n: Int) -> Int`, structurally malformed.
+   */
+  function readParams(stripped, masked, openIdx) {
+    const close = readBalanced(masked, openIdx);
+    if (close < 0) return null;
+    // Arrow segment: to the body `{` or end of line, jumping balanced groups so a
+    // closure return type survives.
+    let i = close + 1;
+    const stop = Math.min(masked.length, i + RET_SCAN_CHARS);
+    while (i < stop) {
+      const ch = masked[i];
+      if (ch === '{' || ch === '\n') break;
+      if (ch === '(') { const c = readBalanced(masked, i); if (c < 0) break; i = c + 1; continue; }
+      if (ch === '<') { const c = readBalanced(masked, i, '<', '>'); if (c < 0) { i++; continue; } i = c + 1; continue; }
+      i++;
+    }
+    // `close` anchors a member to its DECLARATION line; `end` may run onto the
+    // next line when the body brace sits there (C# style), which would widen the
+    // anchor past the signature itself.
+    return { params: stripped.slice(openIdx + 1, close), after: stripped.slice(close + 1, i), end: i, close };
   }
 
   function extractBlock(src, startIndex) {
@@ -12286,28 +12532,52 @@ __factories["./src/extractors/swift"] = function(module, exports) {
     return src.slice(startIndex, i - 1);
   }
 
-  function extractMembers(block) {
+  function extractMembers(block, maskedBlock) {
     const members = [];
-    for (const m of block.matchAll(/^\s+(?:public\s+|internal\s+|open\s+)?(?:static\s+|class\s+)?(?:mutating\s+)?(?:async\s+)?func\s+(\w+)(?:<[^(]*>)?\s*\(([^)]*)\)([^{\n]*)/gm)) {
+    for (const m of block.matchAll(/^[ \t]+(?:public\s+|internal\s+|open\s+)?(?:static\s+|class\s+)?(?:mutating\s+)?(?:async\s+)?func\s+(\w+)(?:<[^(]*>)?\s*\(/gm)) {
       if (m[1].startsWith('_')) continue;
       const asyncKw = m[0].includes('async') ? 'async ' : '';
-      const retStr = extractArrowType(m[3]);
+      const pr = readParams(block, maskedBlock, m.index + m[0].length - 1);
+      if (!pr) continue;
+      const retStr = extractArrowType(pr.after);
       members.push({
-        text: `${asyncKw}func ${m[1]}(${normalizeParams(m[2])})${retStr}`,
+        text: `${asyncKw}func ${m[1]}(${normalizeParams(pr.params)})${retStr}`,
         declIdx: m.index + (m[0].length - m[0].trimStart().length),
-        endIdx: m.index + m[0].length,
+        endIdx: pr.end,
       });
     }
     return capMembersWithNotice(members, MEMBER_LIMIT);
   }
 
+  /**
+   * Parameter NAMES only, `: Type` and `= default` dropped.
+   *
+   * Depth- and string-aware: the old `split(',')` + `split(':')[0]` turned
+   * `a: Int = g(1, 2)` into the two params `a` and `2` (#695).
+   */
   function normalizeParams(params) {
-    if (!params) return '';
-    return params.trim()
-      .split(',')
-      .map((p) => p.trim().split(':')[0].trim())
-      .filter(Boolean)
-      .join(', ');
+    if (!params || !params.trim()) return '';
+    const names = [];
+    let depth = 0, quote = null, seg = '';
+    const flush = () => {
+      const name = seg.split(/[:=]/)[0].trim().replace(/\s+/g, ' ');
+      if (name) names.push(name);
+      seg = '';
+    };
+    for (let i = 0; i < params.length; i++) {
+      const ch = params[i];
+      if (quote) { if (ch === '\\') { i++; continue; } if (ch === quote) quote = null; continue; }
+      if (ch === '"') { quote = ch; continue; }
+      if (ch === '(' || ch === '[' || ch === '{') { depth++; continue; }
+      if (ch === ')' || ch === ']' || ch === '}') { depth--; continue; }
+      // `->` is a function-type arrow, not a generic close.
+      if (ch === '<') { depth++; continue; }
+      if (ch === '>') { if (params[i - 1] !== '-') depth--; continue; }
+      if (ch === ',' && depth === 0) { flush(); continue; }
+      if (depth === 0) seg += ch;
+    }
+    flush();
+    return names.join(', ');
   }
 
   function extractArrowType(str) {
