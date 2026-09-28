@@ -1,13 +1,13 @@
 ---
 title: Benchmark overview
-description: Official v8.51.7 benchmark snapshot. 95.9% average token reduction across 21 repos, 78.6% retrieval hit@5, 43.4% fewer prompts, and R language support verified.
+description: Official v8.51.8 benchmark snapshot. 95.8% average token reduction across 21 repos, 78.6% retrieval hit@5, 43.4% fewer prompts, and R language support verified.
 head:
   - - meta
     - property: og:title
-      content: "SigMap benchmark overview — v8.51.7 snapshot with R language"
+      content: "SigMap benchmark overview — v8.51.8 snapshot with R language"
   - - meta
     - property: og:description
-      content: "Token, retrieval, quality, and task metrics from latest v8.51.7 benchmark run (2026-09-28) with 21 repositories including R language support."
+      content: "Token, retrieval, quality, and task metrics from latest v8.51.8 benchmark run (2026-09-28) with 21 repositories including R language support."
   - - meta
     - property: og:url
       content: "https://sigmap.io/guide/benchmark"
@@ -15,14 +15,14 @@ head:
 
 # Benchmark overview
 
-::: info Official v8.51.7 benchmark snapshot (21 repos, including R language)
+::: info Official v8.51.8 benchmark snapshot (21 repos, including R language)
 **Benchmark ID:** sigmap-v8.51-main &nbsp;·&nbsp; **Date:** 2026-09-28
 
 | Metric | Value |
 |---|---:|
 | Hit@5 (retrieval corpus, 105 tasks / 18 repos) | **78.6%** |
 | Honest grep comparison (125 tasks / 19 repos) | **86.4%** vs 40.8% single-shot grep — **2.12× lift** |
-| Token reduction (21 repos) | **95.9%** |
+| Token reduction (21 repos) | **95.8%** |
 | Honest lift (vs grep agent) | **2.12×** |
 | Prompt reduction | **43.4%** (2.84 → 1.6) |
 | Task success proxy | **61.0%** |
@@ -39,9 +39,9 @@ This is the landing page for the public benchmark story. It answers four differe
 | SigMap reduces retries and wrong-context answers | [Task benchmark](/guide/task-benchmark) |
 | SigMap keeps large repos inside model limits | [Quality benchmark](/guide/quality-benchmark) |
 
-## Official v8.51.7 snapshot (with R language support)
+## Official v8.51.8 snapshot (with R language support)
 
-Latest saved benchmark run: **2026-09-28 (v8.51.7)**
+Latest saved benchmark run: **2026-09-28 (v8.51.8)**
 
 Task selection, metric definitions, baselines, and the limits of what these tests cover are in [benchmark methodology](/guide/methodology).
 
@@ -60,27 +60,27 @@ So this is a deliberate trade, not drift: more accurate Python grounding at slig
 | Token reduction repos | 21 (including R: ggplot2, dplyr, shiny) |
 | Retrieval benchmark repos | 18 (core languages) |
 | Total tasks | 105 |
-| Average token reduction (all 21) | **95.9%** |
+| Average token reduction (all 21) | **95.8%** |
 | Retrieval hit@5 (18 core) | **78.6%** |
 | Graph-boosted hit@5 | **78.6%** |
 | Grep-agent baseline hit@5 (125 tasks, 19 repos) | 40.8% — **2.12× honest lift** |
 | Random baseline hit@5 (data only, no longer quoted) | 13.6% |
 | Prompt reduction | **43.4%** (2.84 → 1.6 prompts) |
 | GPT-4o overflow repos without SigMap | **14 / 21** |
-| GPT-4o monthly input savings at 10 calls/day | **$10,055.82** |
+| GPT-4o monthly input savings at 10 calls/day | **$10,054.04** |
 
 ## What each benchmark proves
 
 ### 1. Token reduction (21 repositories)
 
-- Raw source across benchmark set: **13,661,235** tokens (21 repos)
-- Final SigMap output: **253,473** tokens
+- Raw source across benchmark set: **13,661,354** tokens (21 repos)
+- Final SigMap output: **255,972** tokens
 - Pooled reduction across the whole corpus: **98.1%**
-- Average per-repo reduction — **the published figure**: **95.9%**
+- Average per-repo reduction — **the published figure**: **95.8%**
 - **New in v6.11.1:** R language support verified
-  - ggplot2: 95.1% reduction (381.5K → 18.5K tokens)
-  - dplyr: 94.3% reduction (145.1K → 8.2K tokens)
-  - shiny: 96.7% reduction (264.6K → 8.6K tokens)
+  - ggplot2: 95.1% reduction (381.5K → 18.6K tokens)
+  - dplyr: 94.2% reduction (145.1K → 8.3K tokens)
+  - shiny: 96.7% reduction (264.6K → 8.8K tokens)
 - **New in v6.12.0:** demand-driven *Surgical Context* (`ask --mode index` + the `get_lines` MCP tool) cuts upfront `ask` context further on top of the figures above by emitting symbol pointers instead of bodies — see the [Surgical Context guide](/guide/surgical-context).
 - **Line anchors (v6.13.0):** extended to JavaScript and to class methods / interface members (TS & JS), raising index-mode token reduction on real repos from ~4.6% to 32–42% (axios 43.4%, fastify 41.1%, svelte 36.8%, vue-core 32.4%).
 

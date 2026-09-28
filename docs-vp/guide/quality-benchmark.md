@@ -1,6 +1,6 @@
 ---
 title: Quality benchmark
-description: What token reduction means operationally in v8.51.7. 14/21 repos overflow GPT-4o without SigMap, 5,294 files would be hidden, 16,661 symbols are grounded, and input-cost savings reach $10,000+/month (GPT-4o), $12,000+ (Claude Sonnet), or $4,000+ (Claude Haiku) at 10 calls/day.
+description: What token reduction means operationally in v8.51.8. 14/21 repos overflow GPT-4o without SigMap, 5,294 files would be hidden, 16,661 symbols are grounded, and input-cost savings reach $10,000+/month (GPT-4o), $12,000+ (Claude Sonnet), or $4,000+ (Claude Haiku) at 10 calls/day.
 head:
   - - meta
     - property: og:title
@@ -15,7 +15,7 @@ head:
 
 # Quality benchmark
 
-::: info Official v8.51.7 benchmark snapshot
+::: info Official v8.51.8 benchmark snapshot
 **Benchmark ID:** sigmap-v8.51-main &nbsp;·&nbsp; **Date:** 2026-09-28 (with R language)
 
 | Metric | Value |
@@ -25,7 +25,7 @@ head:
 | Honest lift (vs grep agent) | **2.12×** |
 | Prompt reduction | **43.4%** (2.84 → 1.6) |
 | Task success proxy | **61.0%** |
-| Overall token reduction | **95.9%** |
+| Overall token reduction | **95.8%** |
 | GPT-4o overflow (without → with) | **16/21 → 0/21** |
 :::
 
@@ -35,7 +35,7 @@ Token reduction is the mechanism. This benchmark shows the operational consequen
 - how much code would be hidden without SigMap?
 - what does that mean for API cost?
 
-Latest saved run: **2026-09-28 (v8.51.7)**
+Latest saved run: **2026-09-28 (v8.51.8)**
 
 How the repos and tasks are picked, and what the token numbers do and don't prove, is in [benchmark methodology](/guide/methodology).
 
@@ -74,7 +74,7 @@ SigMap changes that by surfacing compact signatures for the project structure ah
 
 ## 3. Grounded symbols
 
-The latest saved run surfaced **16,661** grounded symbols across the benchmark repos, against **51,728** that stay dark without SigMap. That is the structural map the model can actually reason over.
+The latest saved run surfaced **16,661** grounded symbols across the benchmark repos, against **51,729** that stay dark without SigMap. That is the structural map the model can actually reason over.
 
 Counting is **structural** — non-empty lines inside the fenced blocks the generated context already delimits. Until v8.51.4 the counter matched each line against a keyword-prefix allowlist (`function `, `class `, `def `, …), so every language whose signature begins with the identifier read as zero. R was the worst case: `name <- function(args)` matched nothing, so ggplot2 reported **1** grounded symbol against 964 real ones and this page published **0% grounding for R**. See [#694](https://github.com/manojmallick/sigmap/issues/694).
 

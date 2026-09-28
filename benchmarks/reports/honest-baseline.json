@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-28T13:14:44.772Z",
+  "generated": "2026-09-28T14:50:11.398Z",
   "methodology": {
     "corpus": "benchmarks/tasks/*.jsonl",
     "scorer": "src/eval/scorer.js hitAtK/reciprocalRank, k=5",
@@ -29,7 +29,7 @@
         },
         "grepBaseline": {
           "hitAt5": 0.391,
-          "mrr": 0.187
+          "mrr": 0.186
         }
       },
       "hard": {

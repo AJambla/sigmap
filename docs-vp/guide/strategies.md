@@ -22,13 +22,15 @@ head:
 
 SigMap supports four output strategies: `full`, `index`, `per-module`, and `hot-cold`. This page shows when to use each one, what token cost to expect, and how MCP changes the decision.
 
+Every strategy's always-on file carries the same `## SigMap commands` block (~224 tokens), which is what tells an agent to run `sigmap ask` instead of reading files. Until v8.51.8 `per-module` and `hot-cold` omitted it, so the always-on figures below were smaller and the agent had no instruction to act on — a saving that cost more than it saved. The block is now included everywhere and is reserved against the token budget rather than added on top of it.
+
 ## Quick comparison
 
 | Strategy | Always injected | Context loss | MCP required | Best fit |
 |----------|----------------|--------------|--------------|----------|
 | `full` | ~4,000 tokens | No | No | Default for all IDEs and onboarding |
 | `index` | ~400 tokens (map only) | No — index holds everything | No (`sigmap ask` suffices) | Large repos; agents that will actually look things up |
-| `per-module` | ~100–300 tokens overview | No | No | Module-based projects, focused work |
+| `per-module` | ~350–450 tokens overview | No | No | Module-based projects, focused work |
 | `hot-cold` | ~200–800 hot set | Cold files unless fetched | Yes for cold | Claude Code / Cursor with MCP |
 
 ## Best strategy by task
