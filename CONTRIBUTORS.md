@@ -38,6 +38,10 @@ To ensure proper attribution:
 
 We welcome contributions! See [Contributing](./docs/CONTRIBUTING.md) for guidelines.
 
+### Recent Contributors (v8.51.6)
+- **@manojmallick** — fix(extractors): nine extractors truncated, corrupted or dropped declarations at the first `)`; Swift rendered a structurally malformed signature, C++ dropped declarations outright (becoming `fake-symbol` false positives in `verify`), and Kotlin invented a parameter that did not exist. All now resolve parameters with the shared balanced scanner, and the adversarial defect ledger is empty for all twelve corpus languages (#695, #696, PRs #739, #740, #742)
+- **@manojmallick** — fix(kotlin,scala): a body-less `data class`/`case class` swallowed the next type's body, reporting it with the wrong members while the real type vanished — hiding more than half the types on akka, okhttp and kotlinx-coroutines, and live on both committed fixtures (#738, PRs #739, #740)
+
 ### Recent Contributors (v8.51.5)
 - **[@AJambla](https://github.com/AJambla)** — fix(gain): `gain --model <typo>` mapped any unknown key to `claude-sonnet` and printed the dollar figures with no notice, so a typo read as a valid quote; the substitution is now disclosed on stderr and `gain --models` lists the known keys and rates, with exit code and dashboard output unchanged (#665, PR #734)
 - **@manojmallick** — test(extractors): adversarial fixture corpus + defect ledger — `--diagnose-extractors` reported 36/36 green while ten languages corrupt, truncate or drop declarations, and the committed Ruby expectation had ratified a duplicated signature; the ledger now fails in both directions, so a fix forces the entry out (#702, #735, PR #736)

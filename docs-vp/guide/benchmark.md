@@ -1,13 +1,13 @@
 ---
 title: Benchmark overview
-description: Official v8.51.5 benchmark snapshot. 96.1% average token reduction across 21 repos, 78.6% retrieval hit@5, 43.7% fewer prompts, and R language support verified.
+description: Official v8.51.6 benchmark snapshot. 96.1% average token reduction across 21 repos, 75.3% retrieval hit@5, 42.1% fewer prompts, and R language support verified.
 head:
   - - meta
     - property: og:title
-      content: "SigMap benchmark overview — v8.51.5 snapshot with R language"
+      content: "SigMap benchmark overview — v8.51.6 snapshot with R language"
   - - meta
     - property: og:description
-      content: "Token, retrieval, quality, and task metrics from latest v8.51.5 benchmark run (2026-09-25) with 21 repositories including R language support."
+      content: "Token, retrieval, quality, and task metrics from latest v8.51.6 benchmark run (2026-09-25) with 21 repositories including R language support."
   - - meta
     - property: og:url
       content: "https://sigmap.io/guide/benchmark"
@@ -15,17 +15,17 @@ head:
 
 # Benchmark overview
 
-::: info Official v8.51.5 benchmark snapshot (21 repos, including R language)
+::: info Official v8.51.6 benchmark snapshot (21 repos, including R language)
 **Benchmark ID:** sigmap-v8.51-main &nbsp;·&nbsp; **Date:** 2026-09-25
 
 | Metric | Value |
 |---|---:|
-| Hit@5 (retrieval corpus, 105 tasks / 18 repos) | **78.6%** |
+| Hit@5 (retrieval corpus, 105 tasks / 18 repos) | **75.3%** |
 | Honest grep comparison (125 tasks / 19 repos) | **86.4%** vs 40.8% single-shot grep — **2.12× lift** |
 | Token reduction (21 repos) | **96.1%** |
 | Honest lift (vs grep agent) | **2.12×** |
-| Prompt reduction | **43.7%** (2.84 → 1.6) |
-| Task success proxy | **61.9%** |
+| Prompt reduction | **42.1%** (2.84 → 1.6) |
+| Task success proxy | **60.0%** |
 | Test discovery (impl→test) | **F1 98.0%** · hit@1 97.4% (28 repos) |
 | GPT-4o overflow (without → with) | **16/21 → 0/21** |
 :::
@@ -39,9 +39,9 @@ This is the landing page for the public benchmark story. It answers four differe
 | SigMap reduces retries and wrong-context answers | [Task benchmark](/guide/task-benchmark) |
 | SigMap keeps large repos inside model limits | [Quality benchmark](/guide/quality-benchmark) |
 
-## Official v8.51.5 snapshot (with R language support)
+## Official v8.51.6 snapshot (with R language support)
 
-Latest saved benchmark run: **2026-09-25 (v8.51.5)**
+Latest saved benchmark run: **2026-09-25 (v8.51.6)**
 
 Task selection, metric definitions, baselines, and the limits of what these tests cover are in [benchmark methodology](/guide/methodology).
 
@@ -61,11 +61,11 @@ So this is a deliberate trade, not drift: more accurate Python grounding at slig
 | Retrieval benchmark repos | 18 (core languages) |
 | Total tasks | 90 |
 | Average token reduction (all 21) | **96.1%** |
-| Retrieval hit@5 (18 core) | **78.6%** |
-| Graph-boosted hit@5 | **78.6%** |
+| Retrieval hit@5 (18 core) | **75.3%** |
+| Graph-boosted hit@5 | **75.3%** |
 | Grep-agent baseline hit@5 (125 tasks, 19 repos) | 40.8% — **2.12× honest lift** |
 | Random baseline hit@5 (data only, no longer quoted) | 13.6% |
-| Prompt reduction | **43.7%** (2.84 → 1.6 prompts) |
+| Prompt reduction | **42.1%** (2.84 → 1.6 prompts) |
 | GPT-4o overflow repos without SigMap | **16 / 21** |
 | GPT-4o monthly input savings at 10 calls/day | **$9,953.02** |
 
@@ -94,7 +94,7 @@ This is the best benchmark when the question is: *"Does SigMap actually put the 
 
 ### 3. Task outcomes
 
-- Correct: **65 / 105** (61.9%)
+- Correct: **65 / 105** (60.0%)
 - Partial: **17 / 90** (18.9%)
 - Wrong: **13 / 90** (14.4%)
 - Average prompts: **2.84 → 1.6**
