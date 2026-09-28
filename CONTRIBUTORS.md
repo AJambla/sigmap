@@ -38,6 +38,10 @@ To ensure proper attribution:
 
 We welcome contributions! See [Contributing](./docs/CONTRIBUTING.md) for guidelines.
 
+### Recent Contributors (v8.51.8)
+- **@manojmallick** — fix(context): two of four strategies never told the agent SigMap exists — per-module hand-built its overview without the commands block, and hot-cold dropped it whenever nothing had changed recently, which is the worst moment to lose it. The always-on file is the only one an IDE injects, so agents in those repos never learned the CLI was there. The block is also directive now rather than a passive table, and names `lines`, `--impact`/`--callers`, `verify` and `explain` (#754, PR #755)
+- **@manojmallick** — fix(budget): `maxTokens` was not honoured as a total — the fixed preamble was never budgeted, so a hardcoded reserve describing a "~150-token" block that had grown to 224 pushed a 500-token run to 554. The reserve is now measured from the block itself, with a guard that compares it against the preamble actually emitted; both breaches were invisible locally and caught only by CI (PR #755)
+
 ### Recent Contributors (v8.51.7)
 - **@manojmallick** — fix(deps): manifests were discovered at the repo root only, so a multi-module Maven build — the normal shape for Java — reported every declared dependency as invisible; plus three pom.xml parsing defects, where `<parent>` shadowed the project's own identity in every Spring Boot POM, `<dependencyManagement>` constraints were counted as real dependencies and leaked into `sigmap sbom`, and Maven scope collapsed so a `provided` compile-time dependency looked shipped (#747, PR #748)
 - **@manojmallick** — fix(deps): only npm projects described the packages they use — the installed-versions section can only resolve `node_modules` and `site-packages`, so a new `## dependencies (declared — <ecosystems>)` section carries manifest-declared pins for every ecosystem; the import map also dropped all bare specifiers (showing internal wiring but never the libraries), had no JVM mapping at all, and never dispatched `extractLuaDeps`, dead since it was written (PR #749)

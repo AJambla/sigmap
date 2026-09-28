@@ -155,6 +155,8 @@ The base file is a plain `gen-context.config.json` without an `extends` key itse
 
 When the hard cap prevents hitting the coverage target by more than 10 percentage points, SigMap prints a warning and suggests switching to `strategy: "per-module"`.
 
+The budget is a **total**, not a signatures-only allowance (v8.51.8). Every context file carries a fixed preamble — the adapter header, the `## SigMap commands` block, the coverage line and the budget disclosure — and that cost is reserved before any file is admitted, so the emitted file stays at or under the effective budget rather than exceeding it by the size of the preamble. Note this is the *effective* budget: with `autoMaxTokens: true` (the default) the scaler may legitimately raise the target above `maxTokens`, so pin `autoMaxTokens: false` if you need `maxTokens` itself to be the ceiling.
+
 To pin a fixed budget (v4.0 behaviour):
 ```json
 { "autoMaxTokens": false, "maxTokens": 6000 }

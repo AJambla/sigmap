@@ -1,6 +1,6 @@
 ---
 title: Roadmap
-description: SigMap version history and roadmap. From v0.0 to v8.51.7, with recent releases completing the grounded-codegen plan — a realistic §9 ablation (real-symbol corpus, exact-signature grounding, --verbose), a Gemini (AI Studio) provider for the §9 ablation, the init Creation-workflow CLAUDE.md block, scaffold persistence, the LLM A/B hallucination ablation harness, the sigmap create orchestrator and its four guard stages (scaffold, verify-plan, verify-ai-output, review-pr), the conventions command with its full flag set (--conflicts, --inject, --report, --ci, --fix, --update), the grounding benchmark, read-time self-heal, live-index MCP write hooks, the get_callee_signatures MCP tool (exact callee signatures), realistic per-query savings, release-pipeline robustness (bundle integrity + version.json gates, standalone-bundle smoke test), the sigmap gain token-savings dashboard, supply-chain hardening (zero system-shell access), Squeeze input minimization with symbol enrichment, source-of-truth llms.txt, the verify-ai-output Hallucination Guard, and Memory tools (note, status, read_memory MCP tool).
+description: SigMap version history and roadmap. From v0.0 to v8.51.8, with recent releases completing the grounded-codegen plan — a realistic §9 ablation (real-symbol corpus, exact-signature grounding, --verbose), a Gemini (AI Studio) provider for the §9 ablation, the init Creation-workflow CLAUDE.md block, scaffold persistence, the LLM A/B hallucination ablation harness, the sigmap create orchestrator and its four guard stages (scaffold, verify-plan, verify-ai-output, review-pr), the conventions command with its full flag set (--conflicts, --inject, --report, --ci, --fix, --update), the grounding benchmark, read-time self-heal, live-index MCP write hooks, the get_callee_signatures MCP tool (exact callee signatures), realistic per-query savings, release-pipeline robustness (bundle integrity + version.json gates, standalone-bundle smoke test), the sigmap gain token-savings dashboard, supply-chain hardening (zero system-shell access), Squeeze input minimization with symbol enrichment, source-of-truth llms.txt, the verify-ai-output Hallucination Guard, and Memory tools (note, status, read_memory MCP tool).
 head:
   - - meta
     - property: og:title
@@ -22,7 +22,7 @@ head:
 
 One hundred eighty-seven versions shipped. MIT open source from day one.
 
-**Stats:** 95.9% overall token reduction · 78.6% retrieval hit@5 · 2.12× measured lift vs single-shot grep (86.4% vs 40.8%, honest corpus) · 98.0% test-discovery F1 · installed-library grounding (JS/TS + Python) · method-level call-graph (JS/TS, Python, Java, Go, Rust, Kotlin, Scala) · 22 MCP tools · 36 languages · 17-language source resolver · 0 npm deps
+**Stats:** 95.8% overall token reduction · 78.6% retrieval hit@5 · 2.12× measured lift vs single-shot grep (86.4% vs 40.8%, honest corpus) · 98.0% test-discovery F1 · installed-library grounding (JS/TS + Python) · method-level call-graph (JS/TS, Python, Java, Go, Rust, Kotlin, Scala) · 22 MCP tools · 36 languages · 17-language source resolver · 0 npm deps
 
 ## Token reduction by version
 
@@ -835,6 +835,24 @@ Two milestones in one release. **`verify-ai-output` Reliable MVP** (#232) grows 
 **Tags:** `KNOWN_LIMITATIONS.md` · `extraction honesty` · `tier label` · `drift guard` · `G1` · `#520` · `PR #521`
 
 **Impact:** the credibility gap a skeptical reviewer finds first is closed in writing; 6 new guard checks (133 files); zero runtime changes.
+
+---
+
+### v8.51.8 — the instructions nobody was reading ✓ (2026-09-28)
+
+**Patch release from a user bug report:** *"in per-module mode the sigmap commands are not getting added in the copilot instruction file, so the LLM does not pick it up."* Reproduced, and it was two strategies rather than one.
+
+The always-on primary output is the only file an IDE auto-injects. `runPerModuleStrategy` hand-built its overview and never called `usageBlock()` — the per-module `context-<module>.md` files *did* carry the block via `formatOutput`, but those are on-demand, so the one file that actually reaches the agent was the one without it. Separately, `runHotColdStrategy` fell back to a bare HTML comment whenever `hotEntries` was empty, skipping `formatOutput` and the block with it; that is the worst possible moment to lose it, because "nothing changed recently" is exactly when an agent needs telling to run `sigmap ask` rather than concluding the repo has no context. `full` and `index` were unaffected throughout, which is why the defect survived so long. The overview also closed with *"Inject the relevant module file into your IDE context window"* — an instruction only a human can act on.
+
+The second half of the report was the block itself. It named four commands out of roughly fifty, in a passive table an agent reads past. It is now imperative — **"Run these yourself in the terminal"** — and publishes the commands that change what an answer costs or whether it is grounded: `sigmap lines` (read an anchored range instead of a whole file), `--impact` and `--callers` (blast radius before editing), `verify` (the grounding guard) and `explain`. The long form already shipped in `sigmap skills install`, but that is opt-in; this is what every agent gets without asking.
+
+Growing the block then exposed a budget defect it had been hiding. `applyTokenBudget` reserved a hardcoded `max(200, 10%)` for what its own comment called a "~150-token fixed preamble" — a literal that had already drifted from the thing it described — so `maxTokens` was never really a total, and a 500-token budget emitted 554. The fix measures the reserve from `usageBlock()` directly; the first attempt then repeated the same mistake one size smaller, guessing 80 tokens of surrounding chrome against a measured 124. Both breaches were invisible locally and caught only by CI, because whether the budget overflows depends on how many entries happen to fit — so the constant now carries a guard that measures the **emitted** preamble and fails if reality outgrows it.
+
+Worth naming because it is the same failure class as #697 and #743: a number written down once, describing something that then changed. The fix is never a better number — it is a test that re-derives it.
+
+**Tags:** `usageBlock` · `runPerModuleStrategy` · `runHotColdStrategy` · `applyTokenBudget` · `PREAMBLE_CHROME_TOKENS` · `#754` · PR `#755`
+
+**Impact:** all four strategies now carry the commands block in the always-on file, where two carried nothing; `maxTokens` is honoured as a total (500 → 440 emitted, 4000 → 3474); the block grew ~104 → ~224 tokens, and the one metric that moved is exactly that: average token reduction **95.9% → 95.8%**, with every affected repo growing by precisely 119 tokens against a measured block delta of 120 — 11 repos down, none up, ten unchanged by rounding. Everything else is unmoved: 78.6% hit@5, 86.4% vs 40.8% honest grep pair, 61.0% task-success proxy, 43.4% prompt reduction. 191 integration tests (up from 190), 20 new assertions, each mutation-checked.
 
 ---
 
