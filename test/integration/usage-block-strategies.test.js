@@ -178,5 +178,47 @@ test('the budget reserve tracks the block instead of a hardcoded guess', () => {
     'applyTokenBudget must measure the real usage block, not assume a size');
 });
 
+test('the reserve actually covers the preamble the tool emits', () => {
+  // The point of failure twice over: a CONSTANT describing the preamble drifted
+  // from the preamble. First `max(200, 10%)` for a "~150-token" block that had
+  // grown to 224; then my own chrome estimate of 80 against a real 124. Both
+  // times local runs passed and CI failed, because whether it breaches depends
+  // on how many entries happen to fit. So measure the emitted preamble and fail
+  // if it outgrows what applyTokenBudget reserves for it.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sigmap-preamble-'));
+  try {
+    const src = path.join(dir, 'src');
+    fs.mkdirSync(src, { recursive: true });
+    // Must force the WORST-CASE preamble: enough files that the budget drops
+    // some, so the coverage line and the "dropped N files" disclosure are both
+    // present. A single small file emits neither, which is how a too-small
+    // chrome constant slipped past an earlier version of this very guard.
+    const line = 'function placeholder() { return 42; }\n';
+    for (let i = 0; i < 30; i++) {
+      let c = '';
+      while (c.length < 1200) c += line;
+      fs.writeFileSync(path.join(src, `m${i}.js`), c);
+    }
+    fs.writeFileSync(path.join(dir, 'gen-context.config.json'),
+      JSON.stringify({ maxTokens: 500, autoMaxTokens: false, outputs: ['copilot'], secretScan: false }));
+    execFileSync(process.execPath, [GEN], { cwd: dir, stdio: 'pipe' });
+    const out = fs.readFileSync(path.join(dir, '.github', 'copilot-instructions.md'), 'utf8');
+
+    // Everything before the first "### <file>" section is fixed preamble.
+    const idx = out.indexOf('\n### ');
+    const preamble = Math.ceil((idx === -1 ? out.length : idx) / 4);
+
+    const { usageBlock } = require(path.join(ROOT, 'src', 'format', 'usage-guidance'));
+    const gen = fs.readFileSync(GEN, 'utf8');
+    const chrome = Number((gen.match(/PREAMBLE_CHROME_TOKENS\s*=\s*(\d+)/) || [])[1]);
+    assert.ok(Number.isFinite(chrome), 'PREAMBLE_CHROME_TOKENS not found in gen-context.js');
+    const reserved = Math.ceil(usageBlock().length / 4) + chrome;
+
+    assert.ok(preamble <= reserved,
+      `the emitted preamble is ${preamble} tokens but only ${reserved} are reserved — ` +
+      'raise PREAMBLE_CHROME_TOKENS; a maxTokens run will overflow by the difference');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
 console.log(`\n  usage-block-strategies: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

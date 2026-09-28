@@ -28287,7 +28287,13 @@ function applyTokenBudget(fileEntries, maxTokens) {
   // `maxTokens: 500` run emitted 554 and only CI caught it. Measure the block
   // instead of guessing at it, so the reserve can never drift from it again.
   const { usageBlock } = requireSourceOrBundled('./src/format/usage-guidance');
-  const PREAMBLE_CHROME_TOKENS = 80; // adapter header + markers + "# Code signatures"
+  // Chrome around the block: adapter header, timestamp/version markers,
+  // "# Code signatures", the coverage line and the budget disclosure. MEASURED
+  // at 124 tokens (see the preamble guard in usage-block-strategies.test.js,
+  // which fails if reality outgrows this) — an earlier guess of 80 was too
+  // small and only CI caught it, which is the same failure mode as the
+  // hardcoded 200 this replaced. The margin is deliberate.
+  const PREAMBLE_CHROME_TOKENS = 176;
   const fixedPreamble = estimateTokens(usageBlock()) + PREAMBLE_CHROME_TOKENS;
   const budgetForEntries = Math.max(1, maxTokens - Math.max(fixedPreamble, Math.ceil(maxTokens * 0.10)));
   let total = renderedTotal(fileEntries);
