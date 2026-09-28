@@ -1,6 +1,6 @@
 ---
 title: Roadmap
-description: SigMap version history and roadmap. From v0.0 to v8.51.6, with recent releases completing the grounded-codegen plan — a realistic §9 ablation (real-symbol corpus, exact-signature grounding, --verbose), a Gemini (AI Studio) provider for the §9 ablation, the init Creation-workflow CLAUDE.md block, scaffold persistence, the LLM A/B hallucination ablation harness, the sigmap create orchestrator and its four guard stages (scaffold, verify-plan, verify-ai-output, review-pr), the conventions command with its full flag set (--conflicts, --inject, --report, --ci, --fix, --update), the grounding benchmark, read-time self-heal, live-index MCP write hooks, the get_callee_signatures MCP tool (exact callee signatures), realistic per-query savings, release-pipeline robustness (bundle integrity + version.json gates, standalone-bundle smoke test), the sigmap gain token-savings dashboard, supply-chain hardening (zero system-shell access), Squeeze input minimization with symbol enrichment, source-of-truth llms.txt, the verify-ai-output Hallucination Guard, and Memory tools (note, status, read_memory MCP tool).
+description: SigMap version history and roadmap. From v0.0 to v8.51.7, with recent releases completing the grounded-codegen plan — a realistic §9 ablation (real-symbol corpus, exact-signature grounding, --verbose), a Gemini (AI Studio) provider for the §9 ablation, the init Creation-workflow CLAUDE.md block, scaffold persistence, the LLM A/B hallucination ablation harness, the sigmap create orchestrator and its four guard stages (scaffold, verify-plan, verify-ai-output, review-pr), the conventions command with its full flag set (--conflicts, --inject, --report, --ci, --fix, --update), the grounding benchmark, read-time self-heal, live-index MCP write hooks, the get_callee_signatures MCP tool (exact callee signatures), realistic per-query savings, release-pipeline robustness (bundle integrity + version.json gates, standalone-bundle smoke test), the sigmap gain token-savings dashboard, supply-chain hardening (zero system-shell access), Squeeze input minimization with symbol enrichment, source-of-truth llms.txt, the verify-ai-output Hallucination Guard, and Memory tools (note, status, read_memory MCP tool).
 head:
   - - meta
     - property: og:title
@@ -22,7 +22,7 @@ head:
 
 One hundred eighty-seven versions shipped. MIT open source from day one.
 
-**Stats:** 96.1% overall token reduction · 78.6% retrieval hit@5 · 2.12× measured lift vs single-shot grep (86.4% vs 40.8%, honest corpus) · 98.0% test-discovery F1 · installed-library grounding (JS/TS + Python) · method-level call-graph (JS/TS, Python, Java, Go, Rust, Kotlin, Scala) · 22 MCP tools · 36 languages · 17-language source resolver · 0 npm deps
+**Stats:** 95.9% overall token reduction · 78.6% retrieval hit@5 · 2.12× measured lift vs single-shot grep (86.4% vs 40.8%, honest corpus) · 98.0% test-discovery F1 · installed-library grounding (JS/TS + Python) · method-level call-graph (JS/TS, Python, Java, Go, Rust, Kotlin, Scala) · 22 MCP tools · 36 languages · 17-language source resolver · 0 npm deps
 
 ## Token reduction by version
 
@@ -835,6 +835,24 @@ Two milestones in one release. **`verify-ai-output` Reliable MVP** (#232) grows 
 **Tags:** `KNOWN_LIMITATIONS.md` · `extraction honesty` · `tier label` · `drift guard` · `G1` · `#520` · `PR #521`
 
 **Impact:** the credibility gap a skeptical reviewer finds first is closed in writing; 6 new guard checks (133 files); zero runtime changes.
+
+---
+
+### v8.51.7 — the dependencies nobody could see ✓ (2026-09-28)
+
+**Patch release from a user bug report:** *"only npm projects write about the packages they use — pom.xml and requirements.txt are not read, and pom.xml is not parsed correctly."* It resolved into two unrelated subsystems and four separate defects, which is why the diagnosis came before any patch.
+
+The inventory looked at the repo **root and nowhere else**. `collectDependencies` probed `cwd/<manifest>` and never walked, so the normal shape of a Java build — an aggregator `pom.xml` whose `<modules>` hold the real dependencies — reported `0 deps` with every declared dependency invisible. Three `pom.xml` defects sat behind that: `<parent>` shadowed the project's own identity, so every Spring Boot POM reported itself as `spring-boot-starter-parent`; `<dependencyManagement>` version constraints were counted as real dependencies and leaked into `sigmap sbom` as components the project does not depend on; and Maven scope collapsed, so lombok at `<scope>provided</scope>` — compile-time, never shipped — was indistinguishable from one that is. A bounded walk (depth 4, 200 manifests) now finds them, honouring the project's `exclude` config and `.contextignore`, which the fix forced: sigmap's own `benchmarks/repos/` holds 43 cloned third-party repos, and every one of their manifests was briefly reported as a sigmap dependency.
+
+The second subsystem was the instruction file itself. `## versions (installed direct deps)` resolves versions out of `node_modules` and `site-packages`, so it can only ever describe npm and Python — a Maven, Go, Cargo, Gem or Composer project got nothing, and an npm project that had not run `npm install` got nothing either. A new `## dependencies (declared — <ecosystems>)` section carries the manifest-declared pins, labelled separately because "what the manifest asks for" and "what is installed here" are different claims. The `## deps` import map had its own version of the same blindness: it matched only specifiers beginning with `.`, so a file's row named its internal wiring but never the libraries it imports, and there was no JVM mapping at all. `extractLuaDeps` turned out to be defined, exported, and dispatched from nowhere — dead since it was written.
+
+Shipping alongside: nested types in Java, Swift and C# were under-reported or misattributed — three languages, three different root causes. Swift was the sharpest, reporting a nested type's methods against the **enclosing** type while never reporting the type itself. The committed `test/expected/csharp.txt` recorded an interface with no members while the fixture declares two, and `--diagnose-extractors` graded it a pass: the fifth committed expectation found this cycle asserting a bug was correct.
+
+The release also closes the two process failures that made the previous two releases fragile. v8.51.5 and v8.51.6 both merged to `main` untagged, leaving npm behind what `main` claimed, because pushing the tag was a manual step — `tag-on-merge.yml` now does it when, and only when, `package.json` and the newest CHANGELOG header agree and no tag exists. And CI's `pull_request` trigger was filtered to `[develop, main]`, so a stacked PR matched no workflow and could never satisfy its own required checks.
+
+**Tags:** `findManifests` bounded walk · `projectExcludes` · Maven parent/`dependencyManagement`/scope · `## dependencies (declared)` · `extractJavaDeps` · `blankNestedTypeBodies` · `tag-on-merge.yml` · `#741` · `#747` · `#751` · PRs `#748`, `#749`, `#750`, `#752`
+
+**Impact:** multi-module Maven repos go from 0 declared dependencies to all of them; akka 3,151 → 4,462 signatures (+42%), serilog 1,108 → 1,163, alamofire 1,466 → 1,585; 184 integration tests (up from 180), 44 new assertions. Average token reduction 96.1% → **95.9%** — the declared-dependency section adds real content to every manifest-bearing context file, and the per-repo drops land exactly there (express −1.5, okhttp −1.0, spring-petclinic −0.7). Every other headline metric is unmoved: 78.6% hit@5, 61.0% task-success proxy, 43.4% prompt reduction, 86.4% vs 40.8% honest grep pair.
 
 ---
 

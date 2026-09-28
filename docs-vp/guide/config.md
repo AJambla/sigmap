@@ -262,7 +262,7 @@ Per-operation gain capture (`.context/gain.ndjson`, surfaced by [`sigmap gain`](
 | `todos` | `boolean` | `true` | Append a TODO/FIXME/HACK/XXX section extracted from inline comments (max 20 entries). |
 | `changes` | `boolean` | `true` | Append a recent git log summary showing files changed in the last `changesCommits` commits. |
 | `changesCommits` | `number` | `10` | Number of recent commits analyzed for the `changes` section. |
-| `versionPins` | `boolean` | `true` | Append a `## versions (installed direct deps)` section listing `name@version` for the installed direct dependencies (JS from `node_modules`, Python from the venv `site-packages`). Grounds agents against what is actually installed. See [versionPins](#versionpins). |
+| `versionPins` | `boolean` | `true` | Append two dependency sections: `## versions (installed direct deps)` (JS from `node_modules`, Python from the venv `site-packages`) and, since v8.51.7, `## dependencies (declared — <ecosystems>)` read from the manifests, which covers every supported ecosystem and works with nothing installed. See [versionPins](#versionpins). |
 | `terse` | `boolean` | `false` | Deterministic terse encoding of the signature block (`function `→`fn `, tightened params/arrows/exports). Line anchors and doc hints are preserved byte-exactly. Measured −16.1% signature tokens on the SigMap repo (`npm run benchmark:terse`). Also available at runtime as the `--terse` flag. See [terse](#terse). |
 | `testCoverage` | `boolean` | `false` | Annotate each function signature with `✓` (tested) or `✗` (untested). Can also be set at runtime via the `--coverage` flag without editing this file. |
 | `testDirs` | `string[]` | `["tests","test","__tests__","spec"]` | Directories scanned to build the test index when `testCoverage` is enabled. |
@@ -307,6 +307,8 @@ Enable incremental signature caching with mtime-based validation. When enabled, 
 ### versionPins
 
 **v8.6.0+ (D8).** Emit a compact `## versions (installed direct deps)` block in the generated context header, listing the installed version of each **direct** dependency as `name@version` — resolved from `node_modules` (JS/TS) and the venv `site-packages` (Python), versions only, no symbol parsing. This lets an agent reading `CLAUDE.md`/`AGENTS.md` ground its suggestions against the libraries **actually installed here** (it compounds with the [installed-library grounding](/guide/verify-ai-output) moat — e.g. "`foo()` doesn't exist in `lodash@4.17` installed here"). Byte-stable given a fixed installed tree; the list is sorted and capped. Set `false` to omit the section.
+
+**v8.51.7** adds a second block, `## dependencies (declared — <ecosystems>)`, read from the manifests rather than the installed tree. The installed block can only ever describe npm and Python, because those are the ecosystems whose versions are resolvable from disk — so a Maven, Go, Cargo, Gem or Composer project previously got nothing at all, and an npm project that had not run `npm install` got nothing either. The two are labelled separately rather than merged because they are different claims: "what the manifest asks for" and "what is installed here". The installed one is the stronger evidence, so it still leads. The heading names the ecosystems it covers, so the claim is checkable. Setting `versionPins: false` suppresses **both** sections.
 
 ```json
 {
