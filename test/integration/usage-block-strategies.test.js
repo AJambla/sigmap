@@ -139,5 +139,44 @@ test('the block does not dominate the index strategy always-on file', () => {
   assert.ok(total < 900, `index always-on file is ~${total} tokens — the block should not dominate it`);
 });
 
+// ── the block must be PAID FOR, not added on top of the budget ─────────────
+
+test('maxTokens is honoured as a total, preamble included', () => {
+  // The entry budget never saw the usage block: it reserved a hardcoded
+  // `max(200, 10%)` for a preamble the comment described as "~150 tokens".
+  // Growing the block to ~224 therefore pushed a maxTokens:500 run to 554 —
+  // and only CI caught it, because the margin was thin enough to differ by
+  // environment. The reserve is now measured from usageBlock() itself.
+  for (const budget of [500, 1000, 4000]) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sigmap-budget-'));
+    try {
+      const src = path.join(dir, 'src');
+      fs.mkdirSync(src, { recursive: true });
+      const line = 'function placeholder() { return 42; }\n';
+      for (let i = 0; i < 30; i++) {
+        let c = '';
+        while (c.length < 1200) c += line;
+        fs.writeFileSync(path.join(src, `m${i}.js`), c);
+      }
+      fs.writeFileSync(path.join(dir, 'gen-context.config.json'),
+        JSON.stringify({ maxTokens: budget, autoMaxTokens: false, outputs: ['copilot'], secretScan: false }));
+      execFileSync(process.execPath, [GEN], { cwd: dir, stdio: 'pipe' });
+      const out = fs.readFileSync(path.join(dir, '.github', 'copilot-instructions.md'), 'utf8');
+      const tokens = Math.ceil(out.length / 4);
+      assert.ok(tokens <= budget,
+        `maxTokens:${budget} produced ${tokens} tokens — the fixed preamble is not being reserved`);
+      assert.ok(out.includes('## SigMap commands'),
+        `maxTokens:${budget} dropped the commands block instead of budgeting for it`);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }
+});
+
+test('the budget reserve tracks the block instead of a hardcoded guess', () => {
+  // A literal number here would drift the moment the block changes again.
+  const gen = fs.readFileSync(GEN, 'utf8');
+  assert.ok(/fixedPreamble\s*=\s*estimateTokens\(usageBlock\(\)\)/.test(gen),
+    'applyTokenBudget must measure the real usage block, not assume a size');
+});
+
 console.log(`\n  usage-block-strategies: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

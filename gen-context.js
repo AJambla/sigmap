@@ -28280,10 +28280,16 @@ function applyTokenBudget(fileEntries, maxTokens) {
   const sectionOverhead = (e) => estimateTokens(String(e.filePath || '')) + 6;
   const renderedTotal = (entries) =>
     entries.reduce((s, e) => s + estimateTokens(e.sigs.join('\n')) + sectionOverhead(e), 0);
-  // The generated file also carries a ~150-token fixed preamble (SigMap command
-  // table + headers). Reserve at least that much so small budgets don't overflow;
-  // for large budgets this matches the historical 10% reserve.
-  const budgetForEntries = Math.max(1, maxTokens - Math.max(200, Math.ceil(maxTokens * 0.10)));
+  // The generated file also carries a fixed preamble the entry budget does not
+  // see: the adapter header, the marker lines, and the SigMap command block.
+  // That reserve used to be a hardcoded `max(200, 10%)` describing a "~150-token"
+  // preamble — so when the command block grew to ~224 tokens (#754) a
+  // `maxTokens: 500` run emitted 554 and only CI caught it. Measure the block
+  // instead of guessing at it, so the reserve can never drift from it again.
+  const { usageBlock } = requireSourceOrBundled('./src/format/usage-guidance');
+  const PREAMBLE_CHROME_TOKENS = 80; // adapter header + markers + "# Code signatures"
+  const fixedPreamble = estimateTokens(usageBlock()) + PREAMBLE_CHROME_TOKENS;
+  const budgetForEntries = Math.max(1, maxTokens - Math.max(fixedPreamble, Math.ceil(maxTokens * 0.10)));
   let total = renderedTotal(fileEntries);
   if (total <= budgetForEntries) return fileEntries;
 
