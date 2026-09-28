@@ -38,6 +38,9 @@ To ensure proper attribution:
 
 We welcome contributions! See [Contributing](./docs/CONTRIBUTING.md) for guidelines.
 
+### Recent Contributors (v8.51.9)
+- **@manojmallick** — fix(compare): `sigmap compare` failed for every user and made them wait ~90s first — the `--compare` payload was emitted after the terminal table, so the consumer's strict `JSON.parse` of the whole stdout died on the leading box rule. Both halves were correct; only their order was wrong. Found by smoke-testing the entire CLI surface, 93 of 97 commands green, this the only genuine defect (#757, PR #758)
+
 ### Recent Contributors (v8.51.8)
 - **@manojmallick** — fix(context): two of four strategies never told the agent SigMap exists — per-module hand-built its overview without the commands block, and hot-cold dropped it whenever nothing had changed recently, which is the worst moment to lose it. The always-on file is the only one an IDE injects, so agents in those repos never learned the CLI was there. The block is also directive now rather than a passive table, and names `lines`, `--impact`/`--callers`, `verify` and `explain` (#754, PR #755)
 - **@manojmallick** — fix(budget): `maxTokens` was not honoured as a total — the fixed preamble was never budgeted, so a hardcoded reserve describing a "~150-token" block that had grown to 224 pushed a 500-token run to 554. The reserve is now measured from the block itself, with a guard that compares it against the preamble actually emitted; both breaches were invisible locally and caught only by CI (PR #755)

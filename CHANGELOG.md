@@ -10,6 +10,18 @@ Format: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [8.51.9] — 2026-09-28
+
+### Fixed
+- **`sigmap compare` failed for every user, and made them wait ~90 seconds first** (#757, PR #758) — the command spawns `run-retrieval-benchmark.mjs --compare` and does a strict `JSON.parse` of that process's **entire** stdout, but the payload was emitted at the bottom of the script, *after* the terminal table. So stdout was a box-drawn results table followed by the JSON, the parse died on the leading `─`, and `compare` exited 1 — after running the full 18-repo retrieval benchmark. Both halves were correct; only their **order** was wrong. `--json` had always got this right, emitting and calling `process.exit(0)` before any human output. `--compare` now does the same. Found by smoke-testing the whole CLI surface command by command: **93 of 97 green**, and this was the only genuine defect — the other three were correct refusals reported from the wrong directory (`--diagnose-extractors` needs SigMap's own fixtures and passes 36/36 from the repo root; `scaffold` declines below its confidence floor in a repo with no naming convention, and proposes correctly at 100% consistency when one exists)
+- **The first fix for the above broke it differently** (PR #758) — moving the block above the table made it read `avgHit` and `avgRand`, which are accumulated by the loop that *prints* that table, so it became a `ReferenceError` at runtime rather than a parse error at the boundary. The block now derives the same task-weighted averages straight from `results`, with no dependency on the rendering path, and a test pins that it never reaches for those locals again. Exiting early must also not silently stop recording the run, so the benchmark-history append became a parameterised function called on both paths
+- **The `compare` consumer now degrades instead of failing outright** (PR #758) — it falls back to the last JSON-looking line on stdout and validates the `{sigmap, baseline}` shape before using it, so a future stray line costs a malformed table rather than a dead command
+
+### Changed
+- **Full-surface verification run** — all 20 benchmark and gate scripts executed (matrix, retrieval, quality, task, honest, verify, squeeze, test-discovery, terse, callgraph-boost, callgraph-jvm, centrality-blend, surface-enrichment, mined-expansions, source-roots, retrieval-gate, grounding, cross-suite determinism, validate:llms, check-corpus) — **20/20 pass**. Run without `--save`, so the released v8.51.8 reports were left intact and no published metric moved. Headline figures held: **86.4% vs 40.8% grep (2.12× honest lift)**, test-discovery **F1 98.0%** (P 97.1 / R 98.8), squeeze 73–89% reduction at 100% ground-truth retention, terse 10.8% signature-token reduction
+
+---
+
 ## [8.51.8] — 2026-09-28
 
 ### Fixed

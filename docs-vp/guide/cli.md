@@ -1453,11 +1453,18 @@ sigmap compare --json
 ────────────────────────────────────────────
  SigMap vs Baseline
 ────────────────────────────────────────────
- hit@5         86.4% vs 40.8% grep   (2.12× lift)
- Avg prompts   1.53 vs 2.84
- Token story   95.8% overall reduction
+ hit@5         78.1% vs 16.0%   (4.9× lift)
+ Avg tokens    93 vs 1,289,556
 ────────────────────────────────────────────
 ```
+
+::: warning The baseline here is the RANDOM baseline, not the grep agent
+`compare` scores against the random-selection baseline (~16%), which is the weaker
+comparison and yields a larger multiplier. The **published** headline — 86.4% vs
+**40.8%**, a 2.12× lift — is the [honest grep-agent corpus](/guide/retrieval-benchmark),
+measured by `npm run benchmark:honest` over 125 tasks. Quote that one. The random
+baseline is retained as data, not as a claim.
+:::
 
 ---
 
