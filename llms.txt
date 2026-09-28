@@ -25,11 +25,11 @@ Cursor, GitHub Copilot, Aider, Windsurf, local LLMs, and MCP.
 
 ## Core metrics (benchmark: sigmap-v8.51-main, 2026-09-28)
 
-- hit@5 retrieval: 75.3% (retrieval corpus)
+- hit@5 retrieval: 78.6% (retrieval corpus)
 - honest vs grep: 86.4% vs 40.8% single-shot grep (2.12× lift, 125 tasks / 19 repos)
 - Token reduction: 96.1% average across benchmark repos
-- Task-success proxy: 60.0% (modeled from retrieval tiers, not measured LLM sessions)
-- Prompts per task: 1.65 vs 2.84 baseline (42.1% fewer, modeled)
+- Task-success proxy: 61.0% (modeled from retrieval tiers, not measured LLM sessions)
+- Prompts per task: 1.61 vs 2.84 baseline (43.4% fewer, modeled)
 - Languages: 36 supported · MCP tools: 22
 - Dependencies: zero npm runtime dependencies · fully offline
 

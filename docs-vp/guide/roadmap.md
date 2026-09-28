@@ -22,7 +22,7 @@ head:
 
 One hundred eighty-seven versions shipped. MIT open source from day one.
 
-**Stats:** 96.1% overall token reduction · 75.3% retrieval hit@5 · 2.12× measured lift vs single-shot grep (86.4% vs 40.8%, honest corpus) · 98.0% test-discovery F1 · installed-library grounding (JS/TS + Python) · method-level call-graph (JS/TS, Python, Java, Go, Rust, Kotlin, Scala) · 22 MCP tools · 36 languages · 17-language source resolver · 0 npm deps
+**Stats:** 96.1% overall token reduction · 78.6% retrieval hit@5 · 2.12× measured lift vs single-shot grep (86.4% vs 40.8%, honest corpus) · 98.0% test-discovery F1 · installed-library grounding (JS/TS + Python) · method-level call-graph (JS/TS, Python, Java, Go, Rust, Kotlin, Scala) · 22 MCP tools · 36 languages · 17-language source resolver · 0 npm deps
 
 ## Token reduction by version
 
@@ -802,7 +802,7 @@ Widens line-anchor coverage so demand-driven retrieval actually pays off. The **
 
 **Tags:** `line anchors` · `surgical context` · `javascript` · `member anchors` · `token budget` · `issue #223` · `PR #224`
 
-**Impact:** index-mode token reduction on real repos rises from ~4.6% to **32–42%** (axios 42.1%, fastify 41.1%, svelte 36.8%, vue-core 32.4%), now 100% anchored — with no `hit@5` regression.
+**Impact:** index-mode token reduction on real repos rises from ~4.6% to **32–42%** (axios 43.4%, fastify 41.1%, svelte 36.8%, vue-core 32.4%), now 100% anchored — with no `hit@5` regression.
 
 ---
 
@@ -844,7 +844,7 @@ Two milestones in one release. **`verify-ai-output` Reliable MVP** (#232) grows 
 
 Two defects were worse than truncation. A body-less `data class`/`case class` **swallowed the next type's body** — `(?:[^{]*)\{` matched newlines — so the first type was reported with the second's members while the second vanished entirely. Misattribution, not truncation: every symbol named is real, just bolted to the wrong owner, which is exactly what `verify` cannot flag. It was live on both committed fixtures, and `--diagnose-extractors` reported it as a pass. And Rust **lifetimes** (`&'db`, `<'_>`) read as char-literal openers to the mask, desynchronising it and dropping 208 signatures on rust-analyzer — every one lifetime-annotated.
 
-The honest part of this release is what it cost. Making Scala ~3× more complete pushed akka's context past its 25,600-token budget: **179 of 211 files omitted**, including the whole `akka-cluster` module, so published retrieval hit@5 fell **78.6% → 75.3%** — all of it from that one repo. Retrieval capability did not regress; the index still holds all 320 files and `sigmap ask` still finds them. The corpus scores the *budgeted context*, so a completeness gain can lower the published number while improving the product. [#743](https://github.com/manojmallick/sigmap/issues/743) tracks making the drop order module-aware rather than tuning the benchmark to flatter the result.
+The honest part of this release is what it cost. Making Scala ~3× more complete pushed akka's context past its 25,600-token budget: **179 of 211 files omitted**, including the whole `akka-cluster` module, so published retrieval hit@5 fell **78.6% → 75.3%** — all of it from that one repo. Retrieval capability did not regress; the index still holds all 320 files and `sigmap ask` still finds them. The corpus scores the *budgeted context*, so a completeness gain can lower the published number while improving the product. The cause was the budget's drop order, not the extraction: it spent itself strictly best-first, so `akka-stream` took all 128 surviving slots while `akka-actor` and `akka-cluster` got zero. Fixed immediately after in [#743](https://github.com/manojmallick/sigmap/issues/743) — a module can be thinned but never erased — which returned hit@5 to 78.6% with the extractor improvements kept.
 
 **Tags:** `src/extractors/scan.js` · balanced parameter reads · `blankNestedTypeBodies` · lifetime masking · `#695` · `#696` · `#735` · `#738` · `#743` · PRs `#739`, `#740`, `#742`
 

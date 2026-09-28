@@ -28024,16 +28024,78 @@ function applyTokenBudget(fileEntries, maxTokens) {
   const verboseDropped = [];
   let collapsedCount = 0;
   let used = 0;
-  for (const entry of bestFirst) { // best first
+
+  // Spend the budget FAIRLY ACROSS MODULES rather than strictly best-first
+  // (#743). The global ordering let one module consume everything: on akka,
+  // `akka-stream` took all 128 surviving slots while `akka-actor` (192 files)
+  // and `akka-cluster` (28 files) got ZERO — two of three configured srcDirs
+  // rendered invisible, and every task targeting them failed. Completer
+  // extraction makes this worse, not better: more signatures per file means
+  // the leading module exhausts the budget sooner.
+  //
+  // Round-robin over modules, taking each module's next-best file in turn, so
+  // a module can be thinned but never erased. Within a module the existing
+  // best-first order is preserved, and a SINGLE-module repo yields exactly the
+  // former sequence — so only genuinely multi-module repos change.
+  const moduleKeyFor = (filePath) => {
+    const rel = path.relative(process.cwd(), String(filePath || ''));
+    if (!rel || rel.startsWith('..')) return '';
+    const seg = rel.split(path.sep)[0];
+    return seg === rel ? '' : seg; // a root-level file belongs to no module
+  };
+  const groups = new Map();
+  for (const entry of bestFirst) {
+    const key = moduleKeyFor(entry.filePath);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(entry);
+  }
+  const admit = (entry) => {
     if (used + entryCost(entry) <= budgetForEntries) {
-      finalByPath.set(entry.filePath, entry); used += entryCost(entry); continue;
+      finalByPath.set(entry.filePath, entry); used += entryCost(entry); return;
     }
     const slim = collapseEntry(entry);
     if (used + entryCost(slim) <= budgetForEntries) {
-      finalByPath.set(entry.filePath, slim); used += entryCost(slim); collapsedCount++; continue;
+      finalByPath.set(entry.filePath, slim); used += entryCost(slim); collapsedCount++; return;
     }
     verboseDropped.push({ filePath: entry.filePath, reason: entry.dropReason });
+  };
+  if (groups.size <= 1) {
+    for (const entry of bestFirst) admit(entry);
+  } else {
+    // A bounded FLOOR per module, then global best-first for the remainder.
+    //
+    // Two weaker designs were measured and rejected on the benchmark corpus:
+    // equal round-robin recovered akka (0.4 -> 1.0) but thinned the modules
+    // that mattered on rails (1.0 -> 0.8) and gin (1.0 -> 0.875); strictly
+    // proportional share was worse still (akka 0.4 -> 0.2, rails 1.0 -> 0.6),
+    // because a module sized at 7% of the repo gets too little to answer
+    // anything while the large modules still lose ground.
+    //
+    // The floor only guarantees a FOOTHOLD — enough that a module can never be
+    // erased, which is the #743 defect — and leaves the rest of the budget to
+    // the existing best-first ranking, so large modules keep their weight.
+    const MODULE_FLOOR_FILES = 24;
+    // Cap what the floor may consume so a repo with many modules still leaves
+    // room for the best-first pass — otherwise the floor degenerates into equal
+    // round-robin, which measured worse (rails 1.0 -> 0.8, gin 1.0 -> 0.875).
+    const FLOOR_BUDGET_SHARE = 0.6;
+    const floorCeiling = Math.floor(budgetForEntries * FLOOR_BUDGET_SHARE);
+    for (const [, list] of groups) {
+      for (const entry of list.slice(0, MODULE_FLOOR_FILES)) {
+        // The first file of every module is always offered, so no module can be
+        // erased even once the floor allowance is spent — that is the #743 defect.
+        if (used >= floorCeiling && finalByPath.size && entry !== list[0]) break;
+        admit(entry);
+      }
+    }
+    for (const entry of bestFirst) {
+      if (finalByPath.has(entry.filePath)) continue;
+      const i2 = verboseDropped.findIndex((d) => d.filePath === entry.filePath);
+      if (i2 >= 0) verboseDropped.splice(i2, 1);
+      admit(entry);
+    }
   }
+
   // Restore the original file order for stable output.
   const kept = withPriority.filter((e) => finalByPath.has(e.filePath)).map((e) => finalByPath.get(e.filePath));
 

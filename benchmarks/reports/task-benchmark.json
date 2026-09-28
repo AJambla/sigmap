@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-28T00:16:29.333Z",
+  "generated": "2026-09-28T02:29:10.954Z",
   "methodology": {
     "promptWeights": {
       "correct": 1,
@@ -14,20 +14,20 @@
   "summary": {
     "totalRepos": 18,
     "totalTasks": 105,
-    "correctTotal": 63,
-    "partialTotal": 16,
-    "wrongTotal": 26,
-    "correctPct": 60,
-    "partialPct": 15.2,
-    "wrongPct": 24.8,
-    "avgPromptsWith": 1.65,
+    "correctTotal": 64,
+    "partialTotal": 18,
+    "wrongTotal": 23,
+    "correctPct": 61,
+    "partialPct": 17.1,
+    "wrongPct": 21.9,
+    "avgPromptsWith": 1.61,
     "avgPromptsWithout": 2.84,
-    "avgReductionPct": 42.1,
+    "avgReductionPct": 43.4,
     "hitAt5Without": 13.6,
-    "hitAt5With": 75.3,
-    "avgImprovement": 57.9,
-    "totalGroundedSymbols": 16203,
-    "totalDarkSymbols": 51902,
+    "hitAt5With": 78.6,
+    "avgImprovement": 59.3,
+    "totalGroundedSymbols": 16229,
+    "totalDarkSymbols": 51875,
     "hallucinationRiskPct": 76.2
   },
   "repos": [
@@ -69,9 +69,9 @@
       "promptsWith": 1.13,
       "promptsWithout": 2.94,
       "reductionPct": 61.8,
-      "groundedSymbols": 651,
-      "darkSymbols": 460,
-      "hallucinationRiskPct": 41.4
+      "groundedSymbols": 622,
+      "darkSymbols": 488,
+      "hallucinationRiskPct": 44
     },
     {
       "repo": "spring-petclinic",
@@ -97,9 +97,9 @@
       "promptsWith": 1.4,
       "promptsWithout": 3,
       "reductionPct": 53.3,
-      "groundedSymbols": 1904,
-      "darkSymbols": 5591,
-      "hallucinationRiskPct": 74.6
+      "groundedSymbols": 1979,
+      "darkSymbols": 5516,
+      "hallucinationRiskPct": 73.6
     },
     {
       "repo": "axios",
@@ -203,15 +203,15 @@
       "repo": "akka",
       "fileCount": 211,
       "tasks": 5,
-      "correctPct": 20,
-      "partialPct": 20,
-      "wrongPct": 60,
-      "promptsWith": 2.4,
+      "correctPct": 40,
+      "partialPct": 60,
+      "wrongPct": 0,
+      "promptsWith": 1.6,
       "promptsWithout": 2.97,
-      "reductionPct": 19.2,
-      "groundedSymbols": 1608,
-      "darkSymbols": 3516,
-      "hallucinationRiskPct": 68.6
+      "reductionPct": 46.2,
+      "groundedSymbols": 1588,
+      "darkSymbols": 3536,
+      "hallucinationRiskPct": 69
     },
     {
       "repo": "vapor",
