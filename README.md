@@ -54,7 +54,7 @@ That map is exactly what agentic grep is worst at: reproducible, auditable conte
 
 **Deterministic and verifiable — the two things an agentic-grep loop can't give you:**
 - **Deterministic** — no LLM calls, no agent loop; the same repo always produces a byte-identical map you can diff, cache, and gate in CI.
-- **Auditable & grounded** — every file and symbol traces to a real line anchor; `sigmap verify` flags any AI claim that isn't.
+- **Auditable & grounded** — every symbol in the AST and anchored-regex tiers carries a real `:start-end` line anchor; Tier-3 formats (Ruby, R, Lua, Elixir, C/C++, config formats) are listed without anchors, as [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md) states. `sigmap verify` flags any AI claim that isn't grounded.
 - **Zero dependencies** — `npx sigmap` on any machine; no embeddings, no vector DB, no hosted service, fully offline.
 
 **Proof it pays off** (full benchmark below):
@@ -62,8 +62,8 @@ That map is exactly what agentic grep is worst at: reproducible, auditable conte
 - **78.6% hit@5** — right file in top 5 results (retrieval corpus, 18 repos)
 - **86.4% vs 40.8% single-shot grep baseline** — 2.12× measured lift on the honest corpus (125 tasks / 19 repos)
 - **96.1% token reduction** — average across 21 real repos
-- **61.9% task-success proxy** — modeled from retrieval tiers, not measured LLM sessions
-- **1.6 prompts per task** — down from 2.84 (43.7% fewer retries, modeled)
+- **61.0% task-success proxy** — modeled from retrieval tiers, not measured LLM sessions
+- **1.61 prompts per task** — down from 2.84 (43.4% fewer retries, modeled)
 <!--/SM:whyMetrics-->
 - **<!--SM:languages-->36<!--/SM:languages--> languages supported** — TypeScript, Python, Go, Rust, Java, R, and more
 - **No vendor lock-in** — works with any AI assistant or local LLM
@@ -99,7 +99,7 @@ sigmap verify answer.md --report        # standalone red/amber/green HTML report
 | Without SigMap | With SigMap |
 |---|---|
 | ❌ Non-reproducible agent guesses | ✅ Deterministic map — same input, same output, every time |
-| ❌ "Trust me" AI answers | ✅ Grounded — right file in context <!--SM:hitWhole-->79%<!--/SM:hitWhole--> of the time, every symbol on a real line anchor |
+| ❌ "Trust me" AI answers | ✅ Grounded — right file in context <!--SM:hitWhole-->79%<!--/SM:hitWhole--> of the time, anchored tiers on a real line anchor |
 | ❌ Embeddings / vector DB required | ✅ Zero deps, no infra, fully offline |
 
 ---
@@ -124,13 +124,13 @@ Ask → Rank → Context → Validate → Judge → Learn
 <!--SM:benchmarkBlock-->
 ```
 Benchmark : sigmap-v8.51-main (21 repositories, including R language)
-Date      : 2026-09-26
+Date      : 2026-09-28
 
 Hit@5          : 78.6%   (retrieval corpus, 18 repos)
 Honest vs grep : 86.4% vs 40.8% grep baseline — 2.12× lift (125 tasks / 19 repos)
 Token reduction: 96.1%   (across 21 repos)
-Prompt reduction : 43.7% (2.84 → 1.6 prompts per task, modeled)
-Task success   : 61.9%   (proxy — modeled from retrieval tiers)
+Prompt reduction : 43.4% (2.84 → 1.61 prompts per task, modeled)
+Task success   : 61.0%   (proxy — modeled from retrieval tiers)
 Repos tested   : 21 (JavaScript, Python, Go, Rust, Java, R, C++, C#, Dart, Swift, Ruby, PHP, Scala, Kotlin, and more)
 ```
 <!--/SM:benchmarkBlock-->

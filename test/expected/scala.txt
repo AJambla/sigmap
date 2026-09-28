@@ -1,4 +1,5 @@
-case class User  :4-9
+case class User  :4-4
+trait Repository  :6-9
   def findById(id) → Option[T]  :7-7
   def save(entity) → T  :8-8
 class UserService  :11-18

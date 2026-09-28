@@ -3,5 +3,4 @@ module Services
   def get_user(id)
   def create_user(data)
   def self.build(repo)
-  def hash_password(password)
 def hash_password(password)

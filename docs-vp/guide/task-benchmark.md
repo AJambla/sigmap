@@ -1,13 +1,13 @@
 ---
 title: Task benchmark
-description: Latest saved task benchmark for SigMap v8.51.4. 61.9% correct, 43.7% fewer prompts, 78.6% hit@5 across 105 tasks, with R language support.
+description: Latest saved task benchmark for SigMap v8.51.6. 61.0% correct, 43.4% fewer prompts, 78.6% hit@5 across 105 tasks, with R language support.
 head:
   - - meta
     - property: og:title
       content: "SigMap task benchmark — fewer retries, better context (with R language)"
   - - meta
     - property: og:description
-      content: "Latest saved run: 61.9% correct, 1.6 prompts per task, 43.7% prompt reduction, 105 tasks, 18 repos with R support."
+      content: "Latest saved run: 61.0% correct, 1.6 prompts per task, 43.4% prompt reduction, 105 tasks, 18 repos with R support."
   - - meta
     - property: og:url
       content: "https://sigmap.io/guide/task-benchmark"
@@ -15,7 +15,7 @@ head:
 
 # Task benchmark
 
-::: info Official v8.51.4 benchmark snapshot
+::: info Official v8.51.6 benchmark snapshot
 **Benchmark ID:** sigmap-v8.51-main &nbsp;·&nbsp; **Date:** 2026-09-25 (with R language)
 
 | Metric | Value |
@@ -24,13 +24,13 @@ head:
 | Honest grep comparison (125 tasks / 19 repos) | **86.4%** vs 40.8% single-shot grep — **2.12× lift** |
 | Graph-boosted hit@5 | **78.6%** |
 | Honest lift (vs grep agent) | **2.12×** |
-| Prompt reduction | **43.7%** (2.84 → 1.6) |
-| Task success proxy | **61.9%** |
+| Prompt reduction | **43.4%** (2.84 → 1.6) |
+| Task success proxy | **61.0%** |
 | Token reduction (21 repos) | **96.1%** |
 | GPT-4o overflow (without → with) | **16/21 → 0/21** |
 :::
 
-Latest saved run: **2026-09-25 (v8.51.4)** — includes R language support (ggplot2, dplyr, shiny)
+Latest saved run: **2026-09-25 (v8.51.6)** — includes R language support (ggplot2, dplyr, shiny)
 
 The success/proxy definitions and the task corpus are described in [benchmark methodology](/guide/methodology).
 
@@ -42,7 +42,7 @@ This page answers the question people care about most:
 
 | Metric | Without SigMap | With SigMap |
 |---|:---:|:---:|
-| Task success proxy | 10% | **61.9%** |
+| Task success proxy | 10% | **61.0%** |
 | Prompts per task | 2.84 | **1.6** |
 | Prompt reduction | — | **48%** |
 | Retrieval hit@5 | 13.6% | **88%** |
@@ -66,7 +66,7 @@ The task benchmark models that outcome from the ranked file quality tiers:
 
 | Tier | Meaning | Tasks | Share |
 |---|---|---:|---:|
-| Correct | Right file was ranked first | 65 | **61.9%** |
+| Correct | Right file was ranked first | 65 | **61.0%** |
 | Partial | Right file was present but not first | 18 | **17.1%** |
 | Wrong | Right file never surfaced in top 5 | 23 | **21.9%** |
 
@@ -76,7 +76,7 @@ The task benchmark models that outcome from the ranked file quality tiers:
 |---|---:|
 | Average prompts without SigMap | 2.84 |
 | Average prompts with SigMap | **1.6** |
-| Reduction | **43.7%** |
+| Reduction | **43.4%** |
 | Honest hit@5 lift | **2.12x** — 86.4% vs 40.8% on the honest corpus (125 tasks / 19 repos); per-repo random lifts remain in the report as data |
 
 ## What changed in the v5 story
@@ -105,7 +105,7 @@ That makes the benchmark more than a marketing claim. It maps onto the actual da
 | serilog | 4.7% | 0 / 1 / 4 |
 | riverpod | 53.1% | 4 / 0 / 1 |
 | okhttp | 62.5% | 5 / 0 / 0 |
-| laravel | 60.0% | 4 / 1 / 0 |
+| laravel | 61.0% | 4 / 1 / 0 |
 | akka | 52.9% | 3 / 2 / 0 |
 | vapor | 5.2% | 0 / 1 / 4 |
 | vue-core | 59.6% | 4 / 1 / 0 |

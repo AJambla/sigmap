@@ -1,0 +1,4 @@
+class Svc  :2-12
+  NestedDefault(int a, int b = G(1, 2)) → int  :3-3
+  DeepGenerics(Dictionary<string, List<int>> m) → int  :6-6
+  ClosureParam(Func<int, int> cb, int n) → int  :9-9

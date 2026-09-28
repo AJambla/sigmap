@@ -1,14 +1,14 @@
 ---
 layout: home
 title: SigMap — the deterministic, verifiable grounding layer for AI code work
-description: SigMap builds a deterministic, auditable signature-and-evidence map that AI agents, CI, and reviewers can trust and verify. Zero dependencies, no embeddings, fully offline. Proof — 78.6% hit@5, 43.7% fewer prompts, 96.1% average token reduction, 36 languages with R support.
+description: SigMap builds a deterministic, auditable signature-and-evidence map that AI agents, CI, and reviewers can trust and verify. Zero dependencies, no embeddings, fully offline. Proof — 78.6% hit@5, 43.4% fewer prompts, 96.1% average token reduction, 36 languages with R support.
 head:
   - - meta
     - property: og:title
       content: "SigMap — the deterministic, verifiable grounding layer for AI code work"
   - - meta
     - property: og:description
-      content: "A reproducible signature-and-evidence map agents and CI can audit. Proof — 78.6% hit@5, 43.7% fewer prompts, 96.1% overall token reduction."
+      content: "A reproducible signature-and-evidence map agents and CI can audit. Proof — 78.6% hit@5, 43.4% fewer prompts, 96.1% overall token reduction."
   - - meta
     - property: og:url
       content: "https://sigmap.io/"
@@ -20,7 +20,7 @@ head:
       content: "SigMap — the deterministic, verifiable grounding layer for AI code work"
   - - meta
     - name: twitter:description
-      content: "A reproducible signature-and-evidence map agents and CI can audit. Proof — 78.6% hit@5, 43.7% fewer prompts, 96.1% overall token reduction."
+      content: "A reproducible signature-and-evidence map agents and CI can audit. Proof — 78.6% hit@5, 43.4% fewer prompts, 96.1% overall token reduction."
   - - meta
     - name: twitter:image:alt
       content: "SigMap — the deterministic, verifiable grounding layer for AI code work"
@@ -46,7 +46,7 @@ hero:
 features:
   - icon: 💬
     title: Fewer prompts to finish the task
-    details: "Latest saved run: 2.84 prompts without SigMap vs 1.6 with SigMap. That is a 43.7% reduction across 105 real coding tasks."
+    details: "Latest saved run: 2.84 prompts without SigMap vs 1.6 with SigMap. That is a 43.4% reduction across 105 real coding tasks."
     link: /guide/task-benchmark
     linkText: Task benchmark →
   - icon: 🎯
@@ -78,9 +78,9 @@ features:
 
 <div style="max-width:840px;margin:0 auto;padding:18px 24px 0;text-align:center">
 <div style="display:inline-flex;flex-wrap:wrap;gap:.5rem;justify-content:center;background:var(--vp-c-brand-soft,#ede9fe);border:1px solid rgba(124,106,247,.25);border-radius:999px;padding:.55rem .9rem;font-size:.9rem;color:var(--vp-c-text-1)">
-  <span><strong>Release:</strong> v8.51.4</span>
+  <span><strong>Release:</strong> v8.51.6</span>
   <span>·</span>
-  <span><strong>New — the language that counted as zero:</strong> the quality benchmark matched each context line against a keyword allowlist (<code>function </code>, <code>class </code>, <code>def </code>, …), so every language whose signature starts with the <em>identifier</em> read as zero. R is shaped <code>name &lt;- function(args)</code>, so ggplot2 reported <strong>1 grounded symbol against 964 real ones</strong> and this site published <strong>0% grounding for R</strong> — a language with its own benchmark doc and a test inside <code>npm test</code>. Counting is now structural, over the fenced blocks the context already delimits, so a new extractor cannot go silently blind. R grounding reads 51% / 41% / 71%; the aggregate moves 9,544 → <strong>15,674</strong> grounded. An impossible <strong>114%</strong> is clamped and flagged as a failed estimate instead of printed, a zero-with-content row now fails the suite, and six stale figures on the quality page — including a "16,500+" no saved run ever supported — are re-sourced from the report. 36 languages, zero dependencies, offline, deterministic.</span>
+  <span><strong>New — nine extractors stop inventing parameters:</strong> a parameter scan that stopped at the first <code>)</code> meant a nested call in a default, a function-typed parameter or a <code>)</code> inside a string ended the scan early. Kotlin rendered <code>fun f(a: Int = g(1, 2))</code> as <strong><code>fun f(a, 2)</code></strong> — a well-formed signature naming a parameter that does not exist — while C++ dropped whole declarations, which then became <em>fake-symbol</em> false positives in <code>verify</code>. Nine languages now use the shared balanced scanner, and every committed fixture is byte-identical afterwards. Two worse defects went with it: a body-less <code>data class</code> <strong>swallowed the next class's body</strong>, reporting it with the wrong members while the real type vanished, and Rust lifetimes read as char literals, silently dropping <strong>208 signatures</strong> on rust-analyzer. Completer extraction also exposed a budget defect — one module could take the whole budget, leaving two of akka's three source dirs invisible — so the same release gives every module a floor it cannot be pushed below. Every headline metric holds: <strong>78.6% hit@5</strong>, 96.1% token reduction. 36 languages, zero dependencies, offline, deterministic.</span>
 </div>
 <div style="margin-top:.4rem;display:inline-flex;flex-wrap:wrap;gap:.5rem;justify-content:center;background:var(--vp-c-default-soft,#f3f4f6);border:1px solid rgba(0,0,0,.08);border-radius:999px;padding:.55rem .9rem;font-size:.9rem;color:var(--vp-c-text-2)">
   <span><strong>Benchmark:</strong> sigmap-v8.51-main</span>
@@ -170,14 +170,14 @@ See the full [end-to-end walkthrough](/guide/walkthrough) to watch this in actio
 
 | Metric | Without SigMap | With SigMap |
 |---|:---:|:---:|
-| Task success proxy | — (proxy, modeled from retrieval tiers) | **61.9%** |
+| Task success proxy | — (proxy, modeled from retrieval tiers) | **61.0%** |
 | Prompts per task | 2.84 | **1.6** |
 | Retrieval hit@5 (retrieval corpus) | — | **78.6%** |
 | Honest corpus hit@5 (125 tasks) | 40.8% (single-shot grep) | **86.4%** (2.12× lift) |
 | Overall token reduction | — | **96.1%** |
 | GPT-4o overflow repos | 16/21 | **0/21** |
 
-Latest saved benchmark run: **2026-09-25 (v8.51.4)**.
+Latest saved benchmark run: **2026-09-25 (v8.51.6)**.
 
 </div>
 

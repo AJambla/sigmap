@@ -17,6 +17,7 @@ SigMap is built by a great community of contributors. Thank you to everyone who 
 - [kumamaki](https://github.com/kumamaki) — Bug fixes, improvements
 - [Tung Lam](https://github.com/tunglambk) — Secret redaction (#668); docs-nav coverage guard (#700); config-reference drift gate (#708)
 - [rudi193-cmd](https://github.com/rudi193-cmd) — Hot-cold cold signatures in the bundled MCP server (#201); Python AST extractor wired into the shipped pipeline (#693)
+- [AJambla](https://github.com/AJambla) — Unknown `gain --model` fallback disclosure + `gain --models` listing (#665)
 
 ## Supporters
 
@@ -36,6 +37,16 @@ To ensure proper attribution:
 ## How to Contribute
 
 We welcome contributions! See [Contributing](./docs/CONTRIBUTING.md) for guidelines.
+
+### Recent Contributors (v8.51.6)
+- **@manojmallick** — fix(extractors): nine extractors truncated, corrupted or dropped declarations at the first `)`; Swift rendered a structurally malformed signature, C++ dropped declarations outright (becoming `fake-symbol` false positives in `verify`), and Kotlin invented a parameter that did not exist. All now resolve parameters with the shared balanced scanner, and the adversarial defect ledger is empty for all twelve corpus languages (#695, #696, PRs #739, #740, #742)
+- **@manojmallick** — fix(kotlin,scala): a body-less `data class`/`case class` swallowed the next type's body, reporting it with the wrong members while the real type vanished — hiding more than half the types on akka, okhttp and kotlinx-coroutines, and live on both committed fixtures (#738, PRs #739, #740)
+- **@manojmallick** — fix(budget): the token budget spent itself strictly best-first across a repo, so one module could take all of it — on akka `akka-stream` kept all 128 surviving slots while `akka-actor` and `akka-cluster` got zero, rendering two of three configured source dirs invisible. A bounded per-module floor means a module can be thinned but never erased, which returned hit@5 to 78.6% while keeping the extractor work (#743, PR #745)
+
+### Recent Contributors (v8.51.5)
+- **[@AJambla](https://github.com/AJambla)** — fix(gain): `gain --model <typo>` mapped any unknown key to `claude-sonnet` and printed the dollar figures with no notice, so a typo read as a valid quote; the substitution is now disclosed on stderr and `gain --models` lists the known keys and rates, with exit code and dashboard output unchanged (#665, PR #734)
+- **@manojmallick** — test(extractors): adversarial fixture corpus + defect ledger — `--diagnose-extractors` reported 36/36 green while ten languages corrupt, truncate or drop declarations, and the committed Ruby expectation had ratified a duplicated signature; the ledger now fails in both directions, so a fix forces the entry out (#702, #735, PR #736)
+- **@manojmallick** — docs: every published language/extractor/MCP-tool count is classified and gated against `version.json`, closing a page that said 31 in its SEO meta and 36 in its body; the README's universal line-anchor claim is scoped to the tiers that actually anchor (#697, #698, PR #733)
 
 ### Recent Contributors (v8.51.4)
 - **@manojmallick** — fix(benchmarks): the quality benchmark counted signatures with a keyword-prefix allowlist, so every language whose signature starts with the identifier read as zero — ggplot2 reported 1 grounded symbol against 964 real ones and published "0% grounding" for R. Counting is now structural (fenced blocks), the impossible 114% is clamped and flagged as a failed estimate rather than printed, and a zero-with-content row fails the suite instead of reaching the public page (#694, PR #731)

@@ -95,6 +95,11 @@ def format_args(args_node, drop_receiver=False):
     # keyword-only args
     kwonly = args_node.kwonlyargs or []
     kw_defaults = args_node.kw_defaults or []
+    # A bare `*` separator when there is no `*args` — without it a caller cannot
+    # tell the following parameters are keyword-only, so `def f(a, *, b=2)` read
+    # as `def f(a, b=...)` and implied `b` was positional (#702).
+    if kwonly and not vararg:
+        parts.append("*")
     for i, arg in enumerate(kwonly):
         name = arg.arg
         ann = annotation_to_str(arg.annotation) if arg.annotation else None

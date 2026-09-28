@@ -1,0 +1,9 @@
+class Svc  :2-21
+  fun nestedDefault(a, b) → Int  :3-3
+  fun closureParam(cb, n) → Int  :6-6
+  fun deepGenerics(m) → Int  :9-9
+  fun stringDelims(sep, other) → String  :12-12
+  fun trailingComma(a, b) → Int  :15-18
+class Dto  :24-24
+class Consumer  :26-30
+  fun consume(n) → String  :27-27

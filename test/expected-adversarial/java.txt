@@ -1,0 +1,3 @@
+class Svc  :2-9
+  deepGenerics(Map<String, List<Integer>> m) → int  :3-3
+  closureParam(Function<Integer, Integer> cb, int n) → int  :6-6

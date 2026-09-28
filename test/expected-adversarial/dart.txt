@@ -1,0 +1,4 @@
+class Svc  :2-12
+  namedParams(int a, {int b, int Function(int)? cb}) → int  :3-3
+  nestedDefault(int a, [int b]) → int  :6-6
+  stringDelims({String sep}) → String  :9-9

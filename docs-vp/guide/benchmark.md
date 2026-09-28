@@ -1,13 +1,13 @@
 ---
 title: Benchmark overview
-description: Official v8.51.4 benchmark snapshot. 96.1% average token reduction across 21 repos, 78.6% retrieval hit@5, 43.7% fewer prompts, and R language support verified.
+description: Official v8.51.6 benchmark snapshot. 96.1% average token reduction across 21 repos, 78.6% retrieval hit@5, 43.4% fewer prompts, and R language support verified.
 head:
   - - meta
     - property: og:title
-      content: "SigMap benchmark overview — v8.51.4 snapshot with R language"
+      content: "SigMap benchmark overview — v8.51.6 snapshot with R language"
   - - meta
     - property: og:description
-      content: "Token, retrieval, quality, and task metrics from latest v8.51.4 benchmark run (2026-09-25) with 21 repositories including R language support."
+      content: "Token, retrieval, quality, and task metrics from latest v8.51.6 benchmark run (2026-09-25) with 21 repositories including R language support."
   - - meta
     - property: og:url
       content: "https://sigmap.io/guide/benchmark"
@@ -15,7 +15,7 @@ head:
 
 # Benchmark overview
 
-::: info Official v8.51.4 benchmark snapshot (21 repos, including R language)
+::: info Official v8.51.6 benchmark snapshot (21 repos, including R language)
 **Benchmark ID:** sigmap-v8.51-main &nbsp;·&nbsp; **Date:** 2026-09-25
 
 | Metric | Value |
@@ -24,8 +24,8 @@ head:
 | Honest grep comparison (125 tasks / 19 repos) | **86.4%** vs 40.8% single-shot grep — **2.12× lift** |
 | Token reduction (21 repos) | **96.1%** |
 | Honest lift (vs grep agent) | **2.12×** |
-| Prompt reduction | **43.7%** (2.84 → 1.6) |
-| Task success proxy | **61.9%** |
+| Prompt reduction | **43.4%** (2.84 → 1.6) |
+| Task success proxy | **61.0%** |
 | Test discovery (impl→test) | **F1 98.0%** · hit@1 97.4% (28 repos) |
 | GPT-4o overflow (without → with) | **16/21 → 0/21** |
 :::
@@ -39,9 +39,9 @@ This is the landing page for the public benchmark story. It answers four differe
 | SigMap reduces retries and wrong-context answers | [Task benchmark](/guide/task-benchmark) |
 | SigMap keeps large repos inside model limits | [Quality benchmark](/guide/quality-benchmark) |
 
-## Official v8.51.4 snapshot (with R language support)
+## Official v8.51.6 snapshot (with R language support)
 
-Latest saved benchmark run: **2026-09-25 (v8.51.4)**
+Latest saved benchmark run: **2026-09-25 (v8.51.6)**
 
 Task selection, metric definitions, baselines, and the limits of what these tests cover are in [benchmark methodology](/guide/methodology).
 
@@ -65,7 +65,7 @@ So this is a deliberate trade, not drift: more accurate Python grounding at slig
 | Graph-boosted hit@5 | **78.6%** |
 | Grep-agent baseline hit@5 (125 tasks, 19 repos) | 40.8% — **2.12× honest lift** |
 | Random baseline hit@5 (data only, no longer quoted) | 13.6% |
-| Prompt reduction | **43.7%** (2.84 → 1.6 prompts) |
+| Prompt reduction | **43.4%** (2.84 → 1.6 prompts) |
 | GPT-4o overflow repos without SigMap | **16 / 21** |
 | GPT-4o monthly input savings at 10 calls/day | **$9,953.02** |
 
@@ -81,7 +81,7 @@ So this is a deliberate trade, not drift: more accurate Python grounding at slig
   - dplyr: 93.4% reduction (145.1K → 9.5K tokens)
   - shiny: 96.1% reduction (264.6K → 10.0K tokens)
 - **New in v6.12.0:** demand-driven *Surgical Context* (`ask --mode index` + the `get_lines` MCP tool) cuts upfront `ask` context further on top of the figures above by emitting symbol pointers instead of bodies — see the [Surgical Context guide](/guide/surgical-context).
-- **Line anchors (v6.13.0):** extended to JavaScript and to class methods / interface members (TS & JS), raising index-mode token reduction on real repos from ~4.6% to 32–42% (axios 42.1%, fastify 41.1%, svelte 36.8%, vue-core 32.4%).
+- **Line anchors (v6.13.0):** extended to JavaScript and to class methods / interface members (TS & JS), raising index-mode token reduction on real repos from ~4.6% to 32–42% (axios 43.4%, fastify 41.1%, svelte 36.8%, vue-core 32.4%).
 
 ### 2. Retrieval quality
 
@@ -94,7 +94,7 @@ This is the best benchmark when the question is: *"Does SigMap actually put the 
 
 ### 3. Task outcomes
 
-- Correct: **65 / 105** (61.9%)
+- Correct: **65 / 105** (61.0%)
 - Partial: **17 / 90** (18.9%)
 - Wrong: **13 / 90** (14.4%)
 - Average prompts: **2.84 → 1.6**

@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-26T00:04:53.928Z",
+  "generated": "2026-09-28T03:04:18.693Z",
   "methodology": {
     "promptWeights": {
       "correct": 1,
@@ -14,21 +14,21 @@
   "summary": {
     "totalRepos": 18,
     "totalTasks": 105,
-    "correctTotal": 65,
-    "partialTotal": 17,
+    "correctTotal": 64,
+    "partialTotal": 18,
     "wrongTotal": 23,
-    "correctPct": 61.9,
-    "partialPct": 16.2,
+    "correctPct": 61,
+    "partialPct": 17.1,
     "wrongPct": 21.9,
-    "avgPromptsWith": 1.6,
+    "avgPromptsWith": 1.61,
     "avgPromptsWithout": 2.84,
-    "avgReductionPct": 43.7,
+    "avgReductionPct": 43.4,
     "hitAt5Without": 13.6,
     "hitAt5With": 78.6,
     "avgImprovement": 59.3,
-    "totalGroundedSymbols": 15674,
-    "totalDarkSymbols": 51183,
-    "hallucinationRiskPct": 76.6
+    "totalGroundedSymbols": 16229,
+    "totalDarkSymbols": 51875,
+    "hallucinationRiskPct": 76.2
   },
   "repos": [
     {
@@ -69,9 +69,9 @@
       "promptsWith": 1.13,
       "promptsWithout": 2.94,
       "reductionPct": 61.8,
-      "groundedSymbols": 651,
-      "darkSymbols": 460,
-      "hallucinationRiskPct": 41.4
+      "groundedSymbols": 622,
+      "darkSymbols": 488,
+      "hallucinationRiskPct": 44
     },
     {
       "repo": "spring-petclinic",
@@ -97,9 +97,9 @@
       "promptsWith": 1.4,
       "promptsWithout": 3,
       "reductionPct": 53.3,
-      "groundedSymbols": 1903,
-      "darkSymbols": 5592,
-      "hallucinationRiskPct": 74.6
+      "groundedSymbols": 1979,
+      "darkSymbols": 5516,
+      "hallucinationRiskPct": 73.6
     },
     {
       "repo": "axios",
@@ -125,9 +125,9 @@
       "promptsWith": 1.2,
       "promptsWithout": 2.99,
       "reductionPct": 59.9,
-      "groundedSymbols": 1582,
-      "darkSymbols": 16074,
-      "hallucinationRiskPct": 91
+      "groundedSymbols": 1579,
+      "darkSymbols": 16077,
+      "hallucinationRiskPct": 91.1
     },
     {
       "repo": "abseil-cpp",
@@ -139,9 +139,9 @@
       "promptsWith": 1,
       "promptsWithout": 2.99,
       "reductionPct": 66.6,
-      "groundedSymbols": 1726,
-      "darkSymbols": 10012,
-      "hallucinationRiskPct": 85.3
+      "groundedSymbols": 1760,
+      "darkSymbols": 10056,
+      "hallucinationRiskPct": 85.1
     },
     {
       "repo": "serilog",
@@ -153,9 +153,9 @@
       "promptsWith": 2.8,
       "promptsWithout": 2.94,
       "reductionPct": 4.7,
-      "groundedSymbols": 174,
-      "darkSymbols": 395,
-      "hallucinationRiskPct": 69.4
+      "groundedSymbols": 173,
+      "darkSymbols": 396,
+      "hallucinationRiskPct": 69.6
     },
     {
       "repo": "riverpod",
@@ -167,9 +167,9 @@
       "promptsWith": 1.4,
       "promptsWithout": 2.99,
       "reductionPct": 53.1,
-      "groundedSymbols": 1627,
-      "darkSymbols": 2109,
-      "hallucinationRiskPct": 56.5
+      "groundedSymbols": 1565,
+      "darkSymbols": 2171,
+      "hallucinationRiskPct": 58.1
     },
     {
       "repo": "okhttp",
@@ -181,7 +181,7 @@
       "promptsWith": 1,
       "promptsWithout": 2.67,
       "reductionPct": 62.5,
-      "groundedSymbols": 179,
+      "groundedSymbols": 178,
       "darkSymbols": 0,
       "hallucinationRiskPct": 0
     },
@@ -195,23 +195,23 @@
       "promptsWith": 1.2,
       "promptsWithout": 3,
       "reductionPct": 60,
-      "groundedSymbols": 1451,
-      "darkSymbols": 6947,
+      "groundedSymbols": 1454,
+      "darkSymbols": 6944,
       "hallucinationRiskPct": 82.7
     },
     {
       "repo": "akka",
       "fileCount": 211,
       "tasks": 5,
-      "correctPct": 60,
-      "partialPct": 40,
+      "correctPct": 40,
+      "partialPct": 60,
       "wrongPct": 0,
-      "promptsWith": 1.4,
+      "promptsWith": 1.6,
       "promptsWithout": 2.97,
-      "reductionPct": 52.9,
-      "groundedSymbols": 1052,
-      "darkSymbols": 2901,
-      "hallucinationRiskPct": 73.4
+      "reductionPct": 46.2,
+      "groundedSymbols": 1588,
+      "darkSymbols": 3536,
+      "hallucinationRiskPct": 69
     },
     {
       "repo": "vapor",
@@ -223,9 +223,9 @@
       "promptsWith": 2.8,
       "promptsWithout": 2.95,
       "reductionPct": 5.2,
-      "groundedSymbols": 217,
-      "darkSymbols": 640,
-      "hallucinationRiskPct": 74.7
+      "groundedSymbols": 219,
+      "darkSymbols": 638,
+      "hallucinationRiskPct": 74.4
     },
     {
       "repo": "vue-core",

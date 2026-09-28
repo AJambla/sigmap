@@ -1,0 +1,4 @@
+class Svc  :3-13
+  function nestedDefault($a = g(1, 2), $b = [1, 2])  :4-4
+  function arrayDefault($a = ['k' => 'v'], $b = 2)  :7-7
+  function stringDelims($sep = ")")  :10-10

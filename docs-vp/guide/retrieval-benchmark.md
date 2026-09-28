@@ -1,6 +1,6 @@
 ---
 title: Retrieval benchmark
-description: Latest saved retrieval benchmark for SigMap v8.51.4. 78.6% hit@5 across 105 tasks on 18 repos; the honest grep comparison scores 86.4% vs 40.8% (2.12× lift) on its own 125-task corpus.
+description: Latest saved retrieval benchmark for SigMap v8.51.6. 78.6% hit@5 across 105 tasks on 18 repos; the honest grep comparison scores 86.4% vs 40.8% (2.12× lift) on its own 125-task corpus.
 head:
   - - meta
     - property: og:title
@@ -15,7 +15,7 @@ head:
 
 # Retrieval benchmark
 
-::: info Official v8.51.4 benchmark snapshot
+::: info Official v8.51.6 benchmark snapshot
 **Benchmark ID:** sigmap-v8.51-main &nbsp;·&nbsp; **Date:** 2026-09-25 (with R language)
 
 | Metric | Value |
@@ -24,17 +24,25 @@ head:
 | Honest grep comparison (125 tasks / 19 repos) | **86.4%** vs 40.8% single-shot grep — **2.12× lift** |
 | Graph-boosted hit@5 | **78.6%** |
 | Honest lift (vs grep agent) | **2.12×** |
-| Prompt reduction | **43.7%** (2.84 → 1.6) |
-| Task success proxy | **61.9%** |
+| Prompt reduction | **43.4%** (2.84 → 1.6) |
+| Task success proxy | **61.0%** |
 | Overall token reduction | **96.1%** |
 | GPT-4o overflow (without → with) | **16/21 → 0/21** |
 :::
 
-Latest saved run: **2026-09-25 (v8.51.4)**
+Latest saved run: **2026-09-25 (v8.51.6)**
 
 The task set, baselines, and the hit@5 definition are documented in [benchmark methodology](/guide/methodology).
 
 **Result:** SigMap finds the right file in the top 5 far more often than chance — **78.6% hit@5** vs **13.6%** random baseline across 105 tasks on 18 real repos.
+
+::: tip Why this number dipped in v8.51.6 and recovered
+v8.51.6 made nine extractors resolve parameters correctly, which also made Scala extraction ~3× more complete (akka: 836 → 2,545 types). Under a fixed token budget that is a straight trade — more signatures per file means fewer files fit — and the budget spent itself strictly best-first across the whole repo. On akka, `akka-stream` took **all 128 surviving slots** while `akka-actor` (192 files) and `akka-cluster` (28 files) got **zero**: two of three configured source modules rendered invisible. akka fell 1.0 → 0.4 and the published figure dipped to 75.3%.
+
+The extraction was right; the budget's drop order was wrong. A module can now be thinned but never erased ([#743](https://github.com/manojmallick/sigmap/issues/743)), and hit@5 is back to **78.6%** with the extractor improvements kept. Equal round-robin and strictly proportional share were both measured and rejected — they recovered akka at the cost of rails and gin.
+
+Worth naming, because it will recur: this corpus scores the **budgeted context file**, so a completeness gain can lower the published number while improving the product. The [honest grep comparison](#the-honest-grep-comparison) was unaffected throughout at **86.4% vs 40.8%**.
+:::
 
 ## Why this benchmark matters
 
@@ -54,7 +62,7 @@ This benchmark isolates that first question: *did the right file appear in conte
 | Graph-boosted hit@5 | — | **78.6%** |
 | Honest lift (vs single-shot grep, `benchmark:honest`) | — | **2.12x** |
 | Random-selection hit@5 (data only, no longer quoted) | 13.6% | — |
-| Correct (rank 1) | ~1% | **61.9%** |
+| Correct (rank 1) | ~1% | **61.0%** |
 | Partial (ranks 2–5) | ~13% | **17.1%** |
 | Wrong (not in top 5) | ~86% | **18.1%** |
 
@@ -62,7 +70,7 @@ This benchmark isolates that first question: *did the right file appear in conte
 
 | Tier | Tasks | Share |
 |---|---:|---:|
-| Correct | 65 / 105 | **61.9%** |
+| Correct | 65 / 105 | **61.0%** |
 | Partial | 18 / 105 | **17.1%** |
 | Wrong | 19 / 105 | **18.1%** |
 
@@ -90,7 +98,7 @@ single-shot grep baseline currently **beats** SigMap. That is the measured
 vocabulary-mismatch ceiling — the number repo-mined query expansion (planned
 for v9.0) exists to move. When it moves, this table is the proof.
 
-## The CI retrieval gate (v8.51.4)
+## The CI retrieval gate (v8.51.6)
 
 The split above comes from `benchmark:honest`, which scores **across repos**. A
 separate gate — `npm run validate:retrieval`, run on every CI job — scores four

@@ -1,0 +1,73 @@
+{
+  "$comment": [
+    "Defect ledger for the adversarial extractor corpus (#702).",
+    "",
+    "test/fixtures/ is happy-path only: 36 fixtures, 36 pass, while ten languages",
+    "corrupt, truncate or drop declarations on inputs that appear in ordinary code.",
+    "A green suite that misses that is worse than no suite, because it is the",
+    "evidence cited for the tier labels in KNOWN_LIMITATIONS.md.",
+    "",
+    "test/expected-adversarial/ snapshots what each extractor ACTUALLY produces",
+    "today. This file records which of those snapshot lines are WRONG, what the",
+    "correct signature would be, and which issue owns the fix. So:",
+    "",
+    "  - a behaviour change with no ledger update fails (regression caught)",
+    "  - a FIX also fails, because the snapshot no longer matches (forces the",
+    "    ledger entry to be removed, so the ledger cannot rot)",
+    "  - `defects: 0` for a language is a positive claim that it handles the",
+    "    adversarial cases, not an absence of testing",
+    "",
+    "`shouldBe` is the signature a correct extractor would emit. It is prose-exact",
+    "where that is unambiguous and indicative where the rendering is a choice."
+  ],
+  "languages": {
+    "go": {
+      "tier": "2 \u2014 anchored regex (shared balanced scanner)",
+      "defects": []
+    },
+    "java": {
+      "tier": "2 \u2014 anchored regex (shared balanced scanner)",
+      "defects": []
+    },
+    "python": {
+      "tier": "1 \u2014 AST (python3 on PATH)",
+      "defects": []
+    },
+    "kotlin": {
+      "tier": "2 \u2014 anchored regex (shared balanced scanner)",
+      "defects": []
+    },
+    "swift": {
+      "tier": "2 \u2014 anchored regex (shared balanced scanner)",
+      "defects": []
+    },
+    "scala": {
+      "tier": "2 \u2014 anchored regex (shared balanced scanner)",
+      "defects": []
+    },
+    "dart": {
+      "tier": "2 \u2014 anchored regex (shared balanced scanner)",
+      "defects": []
+    },
+    "rust": {
+      "tier": "2 \u2014 anchored regex (shared balanced scanner)",
+      "defects": []
+    },
+    "csharp": {
+      "tier": "2 \u2014 anchored regex (shared balanced scanner)",
+      "defects": []
+    },
+    "php": {
+      "tier": "2 \u2014 anchored regex (shared balanced scanner)",
+      "defects": []
+    },
+    "ruby": {
+      "tier": "3 \u2014 pattern/heuristic (no anchors; params now balanced)",
+      "defects": []
+    },
+    "cpp": {
+      "tier": "3 \u2014 pattern/heuristic (no anchors; params now balanced)",
+      "defects": []
+    }
+  }
+}
