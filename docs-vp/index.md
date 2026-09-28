@@ -1,14 +1,14 @@
 ---
 layout: home
 title: SigMap — the deterministic, verifiable grounding layer for AI code work
-description: SigMap builds a deterministic, auditable signature-and-evidence map that AI agents, CI, and reviewers can trust and verify. Zero dependencies, no embeddings, fully offline. Proof — 78.6% hit@5, 43.4% fewer prompts, 96.1% average token reduction, 36 languages with R support.
+description: SigMap builds a deterministic, auditable signature-and-evidence map that AI agents, CI, and reviewers can trust and verify. Zero dependencies, no embeddings, fully offline. Proof — 78.6% hit@5, 43.4% fewer prompts, 95.9% average token reduction, 36 languages with R support.
 head:
   - - meta
     - property: og:title
       content: "SigMap — the deterministic, verifiable grounding layer for AI code work"
   - - meta
     - property: og:description
-      content: "A reproducible signature-and-evidence map agents and CI can audit. Proof — 78.6% hit@5, 43.4% fewer prompts, 96.1% overall token reduction."
+      content: "A reproducible signature-and-evidence map agents and CI can audit. Proof — 78.6% hit@5, 43.4% fewer prompts, 95.9% overall token reduction."
   - - meta
     - property: og:url
       content: "https://sigmap.io/"
@@ -20,7 +20,7 @@ head:
       content: "SigMap — the deterministic, verifiable grounding layer for AI code work"
   - - meta
     - name: twitter:description
-      content: "A reproducible signature-and-evidence map agents and CI can audit. Proof — 78.6% hit@5, 43.4% fewer prompts, 96.1% overall token reduction."
+      content: "A reproducible signature-and-evidence map agents and CI can audit. Proof — 78.6% hit@5, 43.4% fewer prompts, 95.9% overall token reduction."
   - - meta
     - name: twitter:image:alt
       content: "SigMap — the deterministic, verifiable grounding layer for AI code work"
@@ -31,7 +31,7 @@ head:
 hero:
   name: SigMap
   text: Grounded context AI can trust. Deterministic. Verifiable.
-  tagline: "The deterministic, verifiable grounding layer for AI code work. Proof — 78.6% hit@5 · 96.1% token reduction · zero deps, fully offline."
+  tagline: "The deterministic, verifiable grounding layer for AI code work. Proof — 78.6% hit@5 · 95.9% token reduction · zero deps, fully offline."
   actions:
     - theme: brand
       text: Get Started →
@@ -78,14 +78,14 @@ features:
 
 <div style="max-width:840px;margin:0 auto;padding:18px 24px 0;text-align:center">
 <div style="display:inline-flex;flex-wrap:wrap;gap:.5rem;justify-content:center;background:var(--vp-c-brand-soft,#ede9fe);border:1px solid rgba(124,106,247,.25);border-radius:999px;padding:.55rem .9rem;font-size:.9rem;color:var(--vp-c-text-1)">
-  <span><strong>Release:</strong> v8.51.6</span>
+  <span><strong>Release:</strong> v8.51.7</span>
   <span>·</span>
-  <span><strong>New — nine extractors stop inventing parameters:</strong> a parameter scan that stopped at the first <code>)</code> meant a nested call in a default, a function-typed parameter or a <code>)</code> inside a string ended the scan early. Kotlin rendered <code>fun f(a: Int = g(1, 2))</code> as <strong><code>fun f(a, 2)</code></strong> — a well-formed signature naming a parameter that does not exist — while C++ dropped whole declarations, which then became <em>fake-symbol</em> false positives in <code>verify</code>. Nine languages now use the shared balanced scanner, and every committed fixture is byte-identical afterwards. Two worse defects went with it: a body-less <code>data class</code> <strong>swallowed the next class's body</strong>, reporting it with the wrong members while the real type vanished, and Rust lifetimes read as char literals, silently dropping <strong>208 signatures</strong> on rust-analyzer. Completer extraction also exposed a budget defect — one module could take the whole budget, leaving two of akka's three source dirs invisible — so the same release gives every module a floor it cannot be pushed below. Every headline metric holds: <strong>78.6% hit@5</strong>, 96.1% token reduction. 36 languages, zero dependencies, offline, deterministic.</span>
+  <span><strong>New — the dependencies nobody could see:</strong> reported as <em>&quot;only npm projects write about the packages they use.&quot;</em> The dependency inventory looked at the repo <strong>root and nowhere else</strong>, so the normal shape of a Java build — an aggregator <code>pom.xml</code> whose <code>&lt;modules&gt;</code> hold the real dependencies — reported <strong>0 deps</strong>, every declared dependency invisible. Three <code>pom.xml</code> defects sat behind it: <code>&lt;parent&gt;</code> shadowed the project's own identity so every Spring Boot POM called itself <code>spring-boot-starter-parent</code>, <code>&lt;dependencyManagement&gt;</code> constraints were counted as real dependencies and leaked into <code>sbom</code>, and Maven scope collapsed so a <code>provided</code> compile-time dependency looked shipped. A new <code>## dependencies (declared)</code> section now names them for <strong>every ecosystem</strong>, not just the two whose versions are resolvable from disk. Shipping with it: nested types in Java, Swift and C# were under-reported or misattributed — Swift filed a nested type's methods under the <strong>enclosing</strong> type while never reporting the type itself — worth <strong>+42% signatures on akka</strong>. 36 languages, zero dependencies, offline, deterministic.</span>
 </div>
 <div style="margin-top:.4rem;display:inline-flex;flex-wrap:wrap;gap:.5rem;justify-content:center;background:var(--vp-c-default-soft,#f3f4f6);border:1px solid rgba(0,0,0,.08);border-radius:999px;padding:.55rem .9rem;font-size:.9rem;color:var(--vp-c-text-2)">
   <span><strong>Benchmark:</strong> sigmap-v8.51-main</span>
   <span>·</span>
-  <span>78.6% hit@5 · 96.1% token reduction · 2026-09-25</span>
+  <span>78.6% hit@5 · 95.9% token reduction · 2026-09-28</span>
 </div>
 </div>
 
@@ -171,13 +171,13 @@ See the full [end-to-end walkthrough](/guide/walkthrough) to watch this in actio
 | Metric | Without SigMap | With SigMap |
 |---|:---:|:---:|
 | Task success proxy | — (proxy, modeled from retrieval tiers) | **61.0%** |
-| Prompts per task | 2.84 | **1.6** |
+| Prompts per task | 2.84 | **1.61** |
 | Retrieval hit@5 (retrieval corpus) | — | **78.6%** |
 | Honest corpus hit@5 (125 tasks) | 40.8% (single-shot grep) | **86.4%** (2.12× lift) |
-| Overall token reduction | — | **96.1%** |
-| GPT-4o overflow repos | 16/21 | **0/21** |
+| Overall token reduction | — | **95.9%** |
+| GPT-4o overflow repos | 14/21 | **0/21** |
 
-Latest saved benchmark run: **2026-09-25 (v8.51.6)**.
+Latest saved benchmark run: **2026-09-28 (v8.51.7)**.
 
 </div>
 

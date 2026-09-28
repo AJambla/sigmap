@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-28T03:03:16.803Z",
+  "generated": "2026-09-28T12:46:05.142Z",
   "repos": [
     {
       "repo": "express",
@@ -701,7 +701,7 @@
     {
       "repo": "serilog",
       "fileCount": 99,
-      "sigCount": 49,
+      "sigCount": 48,
       "tasks": 5,
       "hitAt5": 0.2,
       "mrr": 0.1,
@@ -741,7 +741,7 @@
             "src/Serilog/Configuration/LoggerEnrichmentConfiguration.cs",
             "src/Serilog/Context/LogContext.cs"
           ],
-          "top1": "src/Serilog/Log.cs",
+          "top1": "src/Serilog/ILogger.cs",
           "firstHitRank": null,
           "tier": "wrong"
         },
@@ -1048,10 +1048,10 @@
     {
       "repo": "vapor",
       "fileCount": 131,
-      "sigCount": 58,
+      "sigCount": 92,
       "tasks": 5,
       "hitAt5": 0.2,
-      "mrr": 0.067,
+      "mrr": 0.05,
       "randomBaseline": 0.038,
       "improvement": 5.2,
       "tiers": {
@@ -1078,8 +1078,8 @@
             "Sources/Vapor/Routing/RoutesBuilder+Method.swift",
             "Sources/Vapor/Application.swift"
           ],
-          "top1": "Sources/Vapor/Routing/Routes.swift",
-          "firstHitRank": 3,
+          "top1": "Sources/Vapor/Routing/RoutesBuilder+Middleware.swift",
+          "firstHitRank": 4,
           "tier": "partial"
         },
         {
@@ -1089,7 +1089,7 @@
             "Sources/Vapor/Content/ContentContainer.swift",
             "Sources/Vapor/Content/Request+Content.swift"
           ],
-          "top1": "Sources/Vapor/URLEncodedForm/URLEncodedFormDecoder.swift",
+          "top1": "Sources/Vapor/Request/Request+Body.swift",
           "firstHitRank": null,
           "tier": "wrong"
         },
