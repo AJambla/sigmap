@@ -48,23 +48,36 @@ function extractPythonDeps(src) {
 function extractTSDeps(src) {
   // Strip single-line comments to avoid matching commented-out imports
   const stripped = src.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
-  const deps = new Set();
-  for (const m of stripped.matchAll(/from\s+['"](\.[\/\w.-]+)['"]/g)) {
-    // Normalise: '../store/authStore' → store/authStore, './utils' → utils
-    const clean = m[1]
-      .replace(/^\.\.\//, '')
-      .replace(/^\.\//,  '')
-      .replace(/\.\w+$/, '');
-    if (clean) deps.add(clean);
-  }
-  return [...deps].slice(0, 5);
-}
+  const local = new Set();
+  const pkgs = new Set();
 
-// R base packages — present in every install, not informative as deps.
-const R_BASE_PKGS = new Set([
-  'base', 'stats', 'utils', 'graphics', 'grDevices', 'methods', 'datasets',
-  'parallel', 'splines', 'stats4', 'tools', 'tcltk', 'grid', 'compiler',
-]);
+  const add = (spec) => {
+    if (!spec) return;
+    if (spec.startsWith('.')) {
+      // Normalise: '../store/authStore' -> store/authStore, './utils' -> utils
+      const clean = spec.replace(/^\.\.\//, '').replace(/^\.\//, '').replace(/\.\w+$/, '');
+      if (clean) local.add(clean);
+      return;
+    }
+    if (spec.startsWith('/') || /^[a-z]+:/i.test(spec)) return; // absolute / url / node:
+    // A bare specifier is an installed PACKAGE. These were dropped entirely,
+    // so the dep map showed a JS project's internal wiring and never the
+    // libraries it actually depends on — the reason "only npm projects list
+    // their packages" read as false for this section.
+    const parts = spec.split('/');
+    const name = spec.startsWith('@') ? parts.slice(0, 2).join('/') : parts[0];
+    if (name) pkgs.add(name);
+  };
+
+  for (const m of stripped.matchAll(/\bfrom\s+['"]([^'"]+)['"]/g)) add(m[1]);
+  for (const m of stripped.matchAll(/\brequire\(\s*['"]([^'"]+)['"]\s*\)/g)) add(m[1]);
+  for (const m of stripped.matchAll(/\bimport\s+['"]([^'"]+)['"]/g)) add(m[1]);
+  for (const m of stripped.matchAll(/\bimport\(\s*['"]([^'"]+)['"]\s*\)/g)) add(m[1]);
+
+  // Packages first: which libraries a file uses is the scarcer signal, and the
+  // local wiring is already recoverable from the file tree.
+  return [...pkgs, ...local].slice(0, 5);
+}
 
 /**
  * Extract project-level import dependencies from R source.
@@ -144,4 +157,36 @@ function buildReverseDepMap(forwardMap) {
   return reverse;
 }
 
-module.exports = { extractPythonDeps, extractTSDeps, extractRDeps, extractLuaDeps, extractElixirDeps, buildReverseDepMap };
+/** `java.*`/`javax.*` are the platform, not a dependency worth mapping. */
+const JAVA_PLATFORM = /^(?:java|javax|jdk|sun|com\.sun)\./;
+
+/**
+ * Extract third-party package dependencies from Java/Kotlin source.
+ *
+ * There was no Java extractor at all, so a file importing jackson or Spring
+ * produced an empty dep row while the POM beside it declared both. The import
+ * is reduced to its PACKAGE (the class name dropped) so it lines up with the
+ * groupId shape a reader sees in `sigmap deps`.
+ *
+ * @param {string} src
+ * @returns {string[]}
+ */
+function extractJavaDeps(src) {
+  const deps = new Set();
+  for (const m of src.matchAll(/^\s*import\s+(static\s+)?([\w.]+)(?:\.\*)?\s*;/gm)) {
+    const isStatic = Boolean(m[1]);
+    const full = m[2];
+    if (JAVA_PLATFORM.test(full)) continue;
+    const segs = full.split('.');
+    // A static import ends in a MEMBER (`assertEquals`), which may be lowercase
+    // and so would not be popped by the class rule below. Drop it first.
+    if (isStatic && segs.length > 2) segs.pop();
+    // Then drop the trailing Class name(s).
+    while (segs.length > 2 && /^[A-Z]/.test(segs[segs.length - 1])) segs.pop();
+    const pkg = segs.join('.');
+    if (pkg && pkg.includes('.')) deps.add(pkg);
+  }
+  return [...deps].slice(0, 5);
+}
+
+module.exports = { extractPythonDeps, extractTSDeps, extractJavaDeps, extractRDeps, extractLuaDeps, extractElixirDeps, buildReverseDepMap };
