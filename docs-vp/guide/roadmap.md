@@ -22,7 +22,7 @@ head:
 
 One hundred eighty-seven versions shipped. MIT open source from day one.
 
-**Stats:** 96.1% overall token reduction · 75.3% retrieval hit@5 · 2.12× measured lift vs single-shot grep (86.4% vs 40.8%, honest corpus) · 98.0% test-discovery F1 · installed-library grounding (JS/TS + Python) · method-level call-graph (JS/TS, Python, Java, Go, Rust, Kotlin, Scala) · 22 MCP tools · 36 languages · 17-language source resolver · 0 npm deps
+**Stats:** 96.1% overall token reduction · 78.6% retrieval hit@5 · 2.12× measured lift vs single-shot grep (86.4% vs 40.8%, honest corpus) · 98.0% test-discovery F1 · installed-library grounding (JS/TS + Python) · method-level call-graph (JS/TS, Python, Java, Go, Rust, Kotlin, Scala) · 22 MCP tools · 36 languages · 17-language source resolver · 0 npm deps
 
 ## Token reduction by version
 
@@ -802,7 +802,7 @@ Widens line-anchor coverage so demand-driven retrieval actually pays off. The **
 
 **Tags:** `line anchors` · `surgical context` · `javascript` · `member anchors` · `token budget` · `issue #223` · `PR #224`
 
-**Impact:** index-mode token reduction on real repos rises from ~4.6% to **32–42%** (axios 42.1%, fastify 41.1%, svelte 36.8%, vue-core 32.4%), now 100% anchored — with no `hit@5` regression.
+**Impact:** index-mode token reduction on real repos rises from ~4.6% to **32–42%** (axios 43.4%, fastify 41.1%, svelte 36.8%, vue-core 32.4%), now 100% anchored — with no `hit@5` regression.
 
 ---
 
@@ -844,11 +844,13 @@ Two milestones in one release. **`verify-ai-output` Reliable MVP** (#232) grows 
 
 Two defects were worse than truncation. A body-less `data class`/`case class` **swallowed the next type's body** — `(?:[^{]*)\{` matched newlines — so the first type was reported with the second's members while the second vanished entirely. Misattribution, not truncation: every symbol named is real, just bolted to the wrong owner, which is exactly what `verify` cannot flag. It was live on both committed fixtures, and `--diagnose-extractors` reported it as a pass. And Rust **lifetimes** (`&'db`, `<'_>`) read as char-literal openers to the mask, desynchronising it and dropping 208 signatures on rust-analyzer — every one lifetime-annotated.
 
-The honest part of this release is what it cost. Making Scala ~3× more complete pushed akka's context past its 25,600-token budget: **179 of 211 files omitted**, including the whole `akka-cluster` module, so published retrieval hit@5 fell **78.6% → 75.3%** — all of it from that one repo. Retrieval capability did not regress; the index still holds all 320 files and `sigmap ask` still finds them. The corpus scores the *budgeted context*, so a completeness gain can lower the published number while improving the product. [#743](https://github.com/manojmallick/sigmap/issues/743) tracks making the drop order module-aware rather than tuning the benchmark to flatter the result.
+The same release reshaped the token budget, because the extractor work exposed a defect in it. The budget spent itself strictly best-first across a repo, so one module could take all of it: on akka, `akka-stream` kept **all 128 surviving slots** while `akka-actor` (192 files) and `akka-cluster` (28 files) got **zero** — two of three configured source dirs rendered invisible. Completer extraction makes that strictly worse rather than better, since more signatures per file means the leading module exhausts the budget sooner, and in development it briefly pulled measured hit@5 down to 75.3% entirely from that one repo. The extraction was right; the drop order was wrong. A bounded per-module floor now runs before the global pass, so a module can be thinned but never erased, and a single-module repo is byte-identical to before. Equal round-robin and strictly proportional share were both implemented and measured first — the former cost rails and gin, the latter was worse than doing nothing — and both are recorded in the code so they are not re-attempted.
+
+Worth naming because it will recur: the retrieval corpus scores the **budgeted context file**, so a completeness gain can lower a published number while improving the product. That is a property of the measurement, not of the tool, and [#743](https://github.com/manojmallick/sigmap/issues/743) records it alongside the fix.
 
 **Tags:** `src/extractors/scan.js` · balanced parameter reads · `blankNestedTypeBodies` · lifetime masking · `#695` · `#696` · `#735` · `#738` · `#743` · PRs `#739`, `#740`, `#742`
 
-**Impact:** nine extractors migrated, adversarial defect ledger empty for all twelve corpus languages; akka types 836 → 2,545, okhttp 413 → 619, kotlinx-coroutines 450 → 670; abseil-cpp 5,535 → 6,465 signatures; 208 lifetime-annotated Rust signatures recovered; 179 integration tests (up from 176), 51 new assertions of which 37 fail against v8.51.5.
+**Impact:** nine extractors migrated, adversarial defect ledger empty for all twelve corpus languages; akka types 836 → 2,545, okhttp 413 → 619, kotlinx-coroutines 450 → 670; abseil-cpp 5,535 → 6,465 signatures; 208 lifetime-annotated Rust signatures recovered; no module can be erased by the token budget; every headline metric held at its pre-migration value — 96.1% token reduction, 78.6% hit@5, 61.0% task-success proxy, 43.4% prompt reduction; 180 integration tests (up from 176), 56 new assertions.
 
 ---
 

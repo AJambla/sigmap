@@ -1,6 +1,6 @@
 ---
 title: Benchmark overview
-description: Official v8.51.6 benchmark snapshot. 96.1% average token reduction across 21 repos, 75.3% retrieval hit@5, 42.1% fewer prompts, and R language support verified.
+description: Official v8.51.6 benchmark snapshot. 96.1% average token reduction across 21 repos, 78.6% retrieval hit@5, 43.4% fewer prompts, and R language support verified.
 head:
   - - meta
     - property: og:title
@@ -20,12 +20,12 @@ head:
 
 | Metric | Value |
 |---|---:|
-| Hit@5 (retrieval corpus, 105 tasks / 18 repos) | **75.3%** |
+| Hit@5 (retrieval corpus, 105 tasks / 18 repos) | **78.6%** |
 | Honest grep comparison (125 tasks / 19 repos) | **86.4%** vs 40.8% single-shot grep — **2.12× lift** |
 | Token reduction (21 repos) | **96.1%** |
 | Honest lift (vs grep agent) | **2.12×** |
-| Prompt reduction | **42.1%** (2.84 → 1.6) |
-| Task success proxy | **60.0%** |
+| Prompt reduction | **43.4%** (2.84 → 1.6) |
+| Task success proxy | **61.0%** |
 | Test discovery (impl→test) | **F1 98.0%** · hit@1 97.4% (28 repos) |
 | GPT-4o overflow (without → with) | **16/21 → 0/21** |
 :::
@@ -61,11 +61,11 @@ So this is a deliberate trade, not drift: more accurate Python grounding at slig
 | Retrieval benchmark repos | 18 (core languages) |
 | Total tasks | 90 |
 | Average token reduction (all 21) | **96.1%** |
-| Retrieval hit@5 (18 core) | **75.3%** |
-| Graph-boosted hit@5 | **75.3%** |
+| Retrieval hit@5 (18 core) | **78.6%** |
+| Graph-boosted hit@5 | **78.6%** |
 | Grep-agent baseline hit@5 (125 tasks, 19 repos) | 40.8% — **2.12× honest lift** |
 | Random baseline hit@5 (data only, no longer quoted) | 13.6% |
-| Prompt reduction | **42.1%** (2.84 → 1.6 prompts) |
+| Prompt reduction | **43.4%** (2.84 → 1.6 prompts) |
 | GPT-4o overflow repos without SigMap | **16 / 21** |
 | GPT-4o monthly input savings at 10 calls/day | **$9,953.02** |
 
@@ -81,7 +81,7 @@ So this is a deliberate trade, not drift: more accurate Python grounding at slig
   - dplyr: 93.4% reduction (145.1K → 9.5K tokens)
   - shiny: 96.1% reduction (264.6K → 10.0K tokens)
 - **New in v6.12.0:** demand-driven *Surgical Context* (`ask --mode index` + the `get_lines` MCP tool) cuts upfront `ask` context further on top of the figures above by emitting symbol pointers instead of bodies — see the [Surgical Context guide](/guide/surgical-context).
-- **Line anchors (v6.13.0):** extended to JavaScript and to class methods / interface members (TS & JS), raising index-mode token reduction on real repos from ~4.6% to 32–42% (axios 42.1%, fastify 41.1%, svelte 36.8%, vue-core 32.4%).
+- **Line anchors (v6.13.0):** extended to JavaScript and to class methods / interface members (TS & JS), raising index-mode token reduction on real repos from ~4.6% to 32–42% (axios 43.4%, fastify 41.1%, svelte 36.8%, vue-core 32.4%).
 
 ### 2. Retrieval quality
 
@@ -94,7 +94,7 @@ This is the best benchmark when the question is: *"Does SigMap actually put the 
 
 ### 3. Task outcomes
 
-- Correct: **65 / 105** (60.0%)
+- Correct: **65 / 105** (61.0%)
 - Partial: **17 / 90** (18.9%)
 - Wrong: **13 / 90** (14.4%)
 - Average prompts: **2.84 → 1.6**

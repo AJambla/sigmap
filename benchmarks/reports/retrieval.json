@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-28T00:15:26.709Z",
+  "generated": "2026-09-28T03:03:16.803Z",
   "repos": [
     {
       "repo": "express",
@@ -206,7 +206,7 @@
     {
       "repo": "gin",
       "fileCount": 107,
-      "sigCount": 79,
+      "sigCount": 75,
       "tasks": 8,
       "hitAt5": 1,
       "mrr": 0.938,
@@ -378,10 +378,10 @@
     {
       "repo": "rails",
       "fileCount": 1179,
-      "sigCount": 284,
+      "sigCount": 262,
       "tasks": 5,
       "hitAt5": 1,
-      "mrr": 0.767,
+      "mrr": 0.717,
       "randomBaseline": 0.004,
       "improvement": 235.8,
       "tiers": {
@@ -431,7 +431,7 @@
             "actionview/lib/action_view/renderer/streaming_template_renderer.rb"
           ],
           "top1": "actionview/lib/action_view/renderer/partial_renderer/collection_caching.rb",
-          "firstHitRank": 3,
+          "firstHitRank": 4,
           "tier": "partial"
         },
         {
@@ -441,8 +441,8 @@
             "actionview/lib/action_view/renderer/template_renderer.rb",
             "actionview/lib/action_view/template/handlers/erb.rb"
           ],
-          "top1": "actionview/lib/action_view/template/handlers/erb/erubi.rb",
-          "firstHitRank": 2,
+          "top1": "railties/lib/rails/templates/rails/mailers/email.html.erb",
+          "firstHitRank": 3,
           "tier": "partial"
         }
       ]
@@ -978,16 +978,16 @@
     {
       "repo": "akka",
       "fileCount": 211,
-      "sigCount": 128,
+      "sigCount": 125,
       "tasks": 5,
-      "hitAt5": 0.4,
-      "mrr": 0.3,
+      "hitAt5": 1,
+      "mrr": 0.633,
       "randomBaseline": 0.024,
-      "improvement": 16.9,
+      "improvement": 42.2,
       "tiers": {
-        "correct": 1,
-        "partial": 1,
-        "wrong": 3
+        "correct": 2,
+        "partial": 3,
+        "wrong": 0
       },
       "taskDetails": [
         {
@@ -997,9 +997,9 @@
             "akka-cluster/src/main/scala/akka/cluster/Cluster.scala",
             "akka-cluster/src/main/scala/akka/cluster/Gossip.scala"
           ],
-          "top1": "akka-stream/src/main/scala/akka/stream/scaladsl/Flow.scala",
-          "firstHitRank": null,
-          "tier": "wrong"
+          "top1": "akka-cluster/src/main/scala/akka/cluster/ClusterDaemon.scala",
+          "firstHitRank": 3,
+          "tier": "partial"
         },
         {
           "id": "akka-t002",
@@ -1008,9 +1008,9 @@
             "akka-cluster/src/main/scala/akka/cluster/ClusterEvent.scala",
             "akka-cluster/src/main/scala/akka/cluster/Member.scala"
           ],
-          "top1": "akka-stream/src/main/scala/akka/stream/scaladsl/Hub.scala",
-          "firstHitRank": null,
-          "tier": "wrong"
+          "top1": "akka-cluster/src/main/scala/akka/cluster/ClusterEvent.scala",
+          "firstHitRank": 1,
+          "tier": "correct"
         },
         {
           "id": "akka-t003",
@@ -1018,9 +1018,9 @@
           "expected": [
             "akka-cluster/src/main/scala/akka/cluster/ClusterSettings.scala"
           ],
-          "top1": "akka-stream/src/main/scala/akka/stream/SslTlsOptions.scala",
-          "firstHitRank": null,
-          "tier": "wrong"
+          "top1": "akka-cluster/src/main/scala/akka/cluster/routing/ClusterRouterConfig.scala",
+          "firstHitRank": 3,
+          "tier": "partial"
         },
         {
           "id": "akka-t004",

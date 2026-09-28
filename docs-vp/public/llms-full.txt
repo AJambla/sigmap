@@ -21,11 +21,11 @@ Cursor, GitHub Copilot, Aider, Windsurf, local LLMs, and MCP.
 
 | Metric | Without SigMap | With SigMap |
 |--------|----------------|-------------|
-| Retrieval hit@5 (retrieval corpus) | — | 75.3% |
+| Retrieval hit@5 (retrieval corpus) | — | 78.6% |
 | Honest corpus hit@5 (125 tasks) | 40.8% (single-shot grep) | 86.4% (2.12× lift) |
 | Token reduction | — | 96.1% average |
-| Task-success proxy (modeled) | — | 60.0% |
-| Prompts per task | 2.84 | 1.65 (42.1% fewer) |
+| Task-success proxy (modeled) | — | 61.0% |
+| Prompts per task | 2.84 | 1.61 (43.4% fewer) |
 | Supported languages | — | 36 |
 | MCP tools | — | 22 |
 | npm runtime dependencies | — | 0 |

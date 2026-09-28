@@ -20,11 +20,11 @@ head:
 
 | Metric | Value |
 |---|---:|
-| Hit@5 (retrieval corpus, 105 tasks / 18 repos) | **75.3%** |
+| Hit@5 (retrieval corpus, 105 tasks / 18 repos) | **78.6%** |
 | Honest grep comparison (125 tasks / 19 repos) | **86.4%** vs 40.8% single-shot grep — **2.12× lift** |
 | Honest lift (vs grep agent) | **2.12×** |
-| Prompt reduction | **42.1%** (2.84 → 1.6) |
-| Task success proxy | **60.0%** |
+| Prompt reduction | **43.4%** (2.84 → 1.6) |
+| Task success proxy | **61.0%** |
 | Overall token reduction | **96.1%** |
 | GPT-4o overflow (without → with) | **16/21 → 0/21** |
 :::
