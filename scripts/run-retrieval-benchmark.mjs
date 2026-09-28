@@ -285,6 +285,32 @@ if (JSON_OUT) {
   process.exit(0);
 }
 
+// `--compare` is a MACHINE contract consumed by `sigmap compare`, which does a
+// strict JSON.parse of this process's whole stdout. The payload used to be
+// emitted further down, AFTER the terminal table, so the parse always failed on
+// the leading box-drawing rule and `sigmap compare` exited 1 after making the
+// user wait ~90s for the full benchmark (#757). Emit it here, before any human
+// output, exactly as --json does. The history append below still runs for the
+// non-compare paths; for --compare it is written here first so the record is
+// not lost by exiting early.
+if (COMPARE) {
+  // The table's own totals are accumulated by the loop that PRINTS it, so they
+  // are not available this early. Derive the same task-weighted averages
+  // straight from `results` — identical arithmetic, no dependency on the
+  // rendering path.
+  const tasks   = results.reduce((n, r) => n + r.tasks, 0) || 1;
+  const hit     = results.reduce((n, r) => n + r.hitAt5 * r.tasks, 0) / tasks;
+  const rand    = results.reduce((n, r) => n + r.randomBaseline * r.tasks, 0) / tasks;
+  const sigTok  = results.reduce((n, r) => n + (r.sigCount || 0), 0);
+  const baseTok = results.reduce((n, r) => n + Math.round(r.fileCount * 4000), 0);
+  appendHistoryWith(hit, tasks);
+  process.stdout.write(JSON.stringify({
+    sigmap:   { hitAt5: hit,  tokens: Math.round(sigTok  / Math.max(results.length, 1)) },
+    baseline: { hitAt5: rand, tokens: Math.round(baseTok / Math.max(results.length, 1)) },
+  }) + '\n');
+  process.exit(0);
+}
+
 // Terminal table
 const W = { repo: 16, files: 7, sigs: 5, rand: 8, sigmap: 9, lift: 7, correct: 8, partial: 8, wrong: 7 };
 const pad = (s, w) => String(s).padEnd(w);
@@ -363,17 +389,8 @@ if (SAVE) {
   console.log(`[saved] ${outPath}`);
 }
 
-if (COMPARE) {
-  const sigTokens = results.reduce((s, r) => s + (r.sigCount || 0), 0);
-  const baseTokens = results.reduce((s, r) => s + Math.round(r.fileCount * 4000), 0);
-  process.stdout.write(JSON.stringify({
-    sigmap:   { hitAt5: avgHit,  tokens: Math.round(sigTokens  / Math.max(results.length, 1)) },
-    baseline: { hitAt5: avgRand, tokens: Math.round(baseTokens / Math.max(results.length, 1)) },
-  }) + '\n');
-}
-
 // Append to benchmark history
-{
+function appendHistoryWith(avgHitVal, totTasksVal) {
   const histPath = path.join(ROOT, '.context', 'benchmark-history.ndjson');
   try {
     fs.mkdirSync(path.dirname(histPath), { recursive: true });
@@ -383,10 +400,14 @@ if (COMPARE) {
       ts: new Date().toISOString(),
       type: 'retrieval',
       version,
-      hitAt5: Math.round(avgHit * 1000) / 1000,
-      hitAt5Pct: parseFloat((avgHit * 100).toFixed(1)),
+      hitAt5: Math.round(avgHitVal * 1000) / 1000,
+      hitAt5Pct: parseFloat((avgHitVal * 100).toFixed(1)),
       repos: results.length,
-      tasks: totTasks,
+      tasks: totTasksVal,
     }) + '\n', 'utf8');
   } catch (_) {}
 }
+
+// The human/table path records its run too — `--compare` already did so above
+// before exiting early, so this must not double-append.
+appendHistoryWith(avgHit, totTasks);
