@@ -198,9 +198,30 @@ test('gen-context.js: bench --submit text output contains SigMap header', () => 
   const res = runGC(['bench', '--submit'], fixtureDir);
   fs.rmSync(fixtureDir, { recursive: true, force: true });
 
-  assert.strictEqual(res.status, 0, `exit ${res.status}: ${res.stderr.slice(0, 200)}`);
+  // This fixture has no benchmark history, so there is no local metric to
+  // submit. Text mode now exits 1 for exactly that case (#764) — a green exit
+  // said "ready to paste" for a block carrying nothing measured. The block is
+  // still printed, which is what this test is actually about, so the header and
+  // version assertions below are unchanged.
+  assert.strictEqual(res.status, 1, `expected exit 1 with no local metric, got ${res.status}`);
   assert.ok(res.stdout.includes('SigMap') || res.stdout.includes('sigmap'), 'missing SigMap in output');
   assert.ok(/\d+\.\d+\.\d+/.test(res.stdout), 'missing version number in output');
+});
+
+test('gen-context.js: bench --submit --json stays exit 0 — the payload says local:null', () => {
+  // The JSON mode is a machine contract; it expresses "nothing measured"
+  // explicitly, so it must not also fail the process (#764).
+  const tmp = require('os').tmpdir();
+  const fixtureDir = path.join(tmp, 'sigmap-bench-json0-' + Date.now());
+  fs.mkdirSync(fixtureDir, { recursive: true });
+  fs.writeFileSync(path.join(fixtureDir, 'index.js'), 'function hello() {}\nmodule.exports = { hello };\n');
+  fs.writeFileSync(path.join(fixtureDir, 'gen-context.config.json'), JSON.stringify({ srcDirs: ['.'], adapters: ['copilot'] }));
+
+  const res = runGC(['bench', '--submit', '--json'], fixtureDir);
+  fs.rmSync(fixtureDir, { recursive: true, force: true });
+
+  assert.strictEqual(res.status, 0, 'json mode must stay exit 0');
+  assert.strictEqual(JSON.parse(res.stdout).local, null, 'json must state the missing local metric');
 });
 
 // ── Summary ───────────────────────────────────────────────────────────────────

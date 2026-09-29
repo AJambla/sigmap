@@ -160,7 +160,14 @@ test('sigmap share → exits 0 and prints shareable text', () => {
   });
   assert.strictEqual(r.status, 0, `exit ${r.status}\nstderr: ${r.stderr}`);
   assert.ok(r.stdout.includes('SigMap'), `missing SigMap in output: ${r.stdout}`);
-  assert.ok(r.stdout.includes('tokens'), `missing 'tokens' in output: ${r.stdout}`);
+  // Asserting `tokens` unconditionally only held because share INVENTED a
+  // token figure (97%) when no benchmark history existed (#763). That made
+  // this test environment-dependent: it passed on a working copy carrying a
+  // gitignored .context/benchmark-history.ndjson and would fail on a fresh
+  // clone. The contract is: report measured numbers, or say there are none.
+  assert.ok(/fewer tokens/.test(r.stdout) || /not benchmarked locally/.test(r.stdout),
+    `share must report measured numbers or state it has none: ${r.stdout}`);
+  assert.ok(!/6×|6x better/.test(r.stdout), 'unmeasured multiplier is back');
 });
 
 // ---------------------------------------------------------------------------

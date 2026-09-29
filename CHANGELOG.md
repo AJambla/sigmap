@@ -10,6 +10,17 @@ Format: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [8.52.1] — 2026-09-29
+
+### Fixed
+- **`sigmap share` printed a multiplier measured nowhere, and invented the user's numbers when none existed** (#763, PR #789) — the share text appended the string literal `6× better results` against a published lift of **2.12×**, an overstatement of roughly three times, in output whose entire purpose is to be pasted into a public post. Worse, `let reduction = 97, hitAt5 = 88` meant a repo that had never run a benchmark emitted *"97% fewer tokens · 88% retrieval accuracy"* as the **user's own measurements**. Every number is now traceable or absent: local figures carry `(this repo)`, the lift carries `(published)` and is read from the same `benchmarks/latest.json` that `compare` reads — so the two commands cannot advertise different multipliers — and a repo with no history says *"not benchmarked locally yet"* instead of substituting defaults. A measured `0` is also now used rather than discarded, since `if (tok.reduction)` treated a real zero as missing
+- **`sigmap bench --submit` rendered an unmeasured entry as a measured zero** (#764, PR #789) — `ret.hitAt5Pct || Math.round((ret.hitAt5 || 0) * 100)` collapses a **missing** field to `0`, which then passes the `!= null` render guard, so a history entry carrying no hit@5 printed `hit@5 : 0%` — indistinguishable from a genuine score of zero — inside a block the command explicitly asks users to paste into a public Discussion. Now `!= null` throughout: absent renders `not run`, a measured `0` still renders `0%`, and text mode exits non-zero when nothing local was measured so `bench --submit > block.txt && post` cannot publish an empty submission silently. The `--json` mode deliberately keeps exit 0 — it already states the condition as `local: null`, which a consumer can check, and it is a machine contract other tooling exits-0 against
+
+### Changed
+- **Three committed tests had grown to depend on the fabricated numbers** (PR #789) — the hardcoded 97/88 defaults made `share` look unconditionally rich, so a test asserted its output always contains `tokens`. That held only because the command invented a token figure when no benchmark history existed, which made the test **environment-dependent**: it passed on a working copy carrying a gitignored `.context/benchmark-history.ndjson` and failed on a fresh CI clone. It now asserts the contract that actually holds in both — report measured numbers, or state there are none — verified with the history file present and moved aside. The two `bench --submit` tests encoded the old exit-0 contract for a history-less fixture and were re-pointed at the corrected behaviour, keeping their real assertion that the block still prints
+
+---
+
 ## [8.52.0] — 2026-09-29
 
 ### Added

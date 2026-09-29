@@ -1,6 +1,6 @@
 ---
 title: Roadmap
-description: SigMap version history and roadmap. From v0.0 to v8.52.0, with recent releases completing the grounded-codegen plan — a realistic §9 ablation (real-symbol corpus, exact-signature grounding, --verbose), a Gemini (AI Studio) provider for the §9 ablation, the init Creation-workflow CLAUDE.md block, scaffold persistence, the LLM A/B hallucination ablation harness, the sigmap create orchestrator and its four guard stages (scaffold, verify-plan, verify-ai-output, review-pr), the conventions command with its full flag set (--conflicts, --inject, --report, --ci, --fix, --update), the grounding benchmark, read-time self-heal, live-index MCP write hooks, the get_callee_signatures MCP tool (exact callee signatures), realistic per-query savings, release-pipeline robustness (bundle integrity + version.json gates, standalone-bundle smoke test), the sigmap gain token-savings dashboard, supply-chain hardening (zero system-shell access), Squeeze input minimization with symbol enrichment, source-of-truth llms.txt, the verify-ai-output Hallucination Guard, and Memory tools (note, status, read_memory MCP tool).
+description: SigMap version history and roadmap. From v0.0 to v8.52.1, with recent releases completing the grounded-codegen plan — a realistic §9 ablation (real-symbol corpus, exact-signature grounding, --verbose), a Gemini (AI Studio) provider for the §9 ablation, the init Creation-workflow CLAUDE.md block, scaffold persistence, the LLM A/B hallucination ablation harness, the sigmap create orchestrator and its four guard stages (scaffold, verify-plan, verify-ai-output, review-pr), the conventions command with its full flag set (--conflicts, --inject, --report, --ci, --fix, --update), the grounding benchmark, read-time self-heal, live-index MCP write hooks, the get_callee_signatures MCP tool (exact callee signatures), realistic per-query savings, release-pipeline robustness (bundle integrity + version.json gates, standalone-bundle smoke test), the sigmap gain token-savings dashboard, supply-chain hardening (zero system-shell access), Squeeze input minimization with symbol enrichment, source-of-truth llms.txt, the verify-ai-output Hallucination Guard, and Memory tools (note, status, read_memory MCP tool).
 head:
   - - meta
     - property: og:title
@@ -835,6 +835,22 @@ Two milestones in one release. **`verify-ai-output` Reliable MVP** (#232) grows 
 **Tags:** `KNOWN_LIMITATIONS.md` · `extraction honesty` · `tier label` · `drift guard` · `G1` · `#520` · `PR #521`
 
 **Impact:** the credibility gap a skeptical reviewer finds first is closed in writing; 6 new guard checks (133 files); zero runtime changes.
+
+---
+
+### v8.52.1 — the numbers nobody measured ✓ (2026-09-29)
+
+**Patch release closing two issues as one defect.** The only two commands whose output exists to be *republished* — `share`, for a social post, and `bench --submit`, for a GitHub Discussion — both printed figures that were never measured.
+
+`share` appended the string literal `6× better results` against a published lift of **2.12×**, an overstatement of roughly three times, in text the user pastes publicly. Worse, `let reduction = 97, hitAt5 = 88` meant a repo that had never run a benchmark emitted *"97% fewer tokens · 88% retrieval accuracy"* as the **user's own measurements**. Local figures now carry `(this repo)` and the lift carries `(published)`, read from the same `latest.json` that `compare` reads, so the two commands cannot advertise different multipliers. A repo with no history says so.
+
+`bench --submit` collapsed a missing field to zero. `ret.hitAt5Pct || Math.round((ret.hitAt5 || 0) * 100)` turns *absent* into `0`, which then passes the `!= null` render guard — so an entry carrying no hit@5 printed `hit@5 : 0%`, indistinguishable from a genuine score of zero, inside a block the command explicitly asks users to publish. Absent now renders `not run`, a measured `0` still renders `0%`, and text mode exits non-zero when nothing local was measured. `--json` deliberately keeps exit 0: it already states the condition as `local: null`, which a consumer can check, and failing it would break a machine contract for a caller that can already tell.
+
+The interesting part was the tests. Three committed tests had grown to depend on the fabricated numbers. The hardcoded 97/88 defaults made `share`'s output look unconditionally rich, so a test asserted it always contains `tokens` — true only because the command invented a token figure when no history existed. That made the test **environment-dependent**: it passed on a working copy carrying a gitignored `.context/benchmark-history.ndjson` and failed on a fresh CI clone, which is exactly how it was caught. Fabricated data does not just mislead users; it quietly becomes load-bearing for the suite that is supposed to catch it.
+
+**Tags:** `share` · `bench --submit` · `latest.json` provenance · text-vs-json exit contract · `#763` · `#764` · PR `#789`
+
+**Impact:** no shipped command prints a number that cannot be traced to `latest.json` or `.context/benchmark-history.ndjson`; a measured zero and an unmeasured one are distinguishable everywhere they are published. 194 integration tests (up from 193), 10 new assertions each mutation-checked. Every published metric unmoved — 95.8% token reduction, 78.6% hit@5, 86.4% vs 40.8% honest grep pair, 61.0% task-success proxy.
 
 ---
 
