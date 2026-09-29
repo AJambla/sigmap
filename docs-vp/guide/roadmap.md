@@ -1,6 +1,6 @@
 ---
 title: Roadmap
-description: SigMap version history and roadmap. From v0.0 to v8.51.10, with recent releases completing the grounded-codegen plan — a realistic §9 ablation (real-symbol corpus, exact-signature grounding, --verbose), a Gemini (AI Studio) provider for the §9 ablation, the init Creation-workflow CLAUDE.md block, scaffold persistence, the LLM A/B hallucination ablation harness, the sigmap create orchestrator and its four guard stages (scaffold, verify-plan, verify-ai-output, review-pr), the conventions command with its full flag set (--conflicts, --inject, --report, --ci, --fix, --update), the grounding benchmark, read-time self-heal, live-index MCP write hooks, the get_callee_signatures MCP tool (exact callee signatures), realistic per-query savings, release-pipeline robustness (bundle integrity + version.json gates, standalone-bundle smoke test), the sigmap gain token-savings dashboard, supply-chain hardening (zero system-shell access), Squeeze input minimization with symbol enrichment, source-of-truth llms.txt, the verify-ai-output Hallucination Guard, and Memory tools (note, status, read_memory MCP tool).
+description: SigMap version history and roadmap. From v0.0 to v8.52.0, with recent releases completing the grounded-codegen plan — a realistic §9 ablation (real-symbol corpus, exact-signature grounding, --verbose), a Gemini (AI Studio) provider for the §9 ablation, the init Creation-workflow CLAUDE.md block, scaffold persistence, the LLM A/B hallucination ablation harness, the sigmap create orchestrator and its four guard stages (scaffold, verify-plan, verify-ai-output, review-pr), the conventions command with its full flag set (--conflicts, --inject, --report, --ci, --fix, --update), the grounding benchmark, read-time self-heal, live-index MCP write hooks, the get_callee_signatures MCP tool (exact callee signatures), realistic per-query savings, release-pipeline robustness (bundle integrity + version.json gates, standalone-bundle smoke test), the sigmap gain token-savings dashboard, supply-chain hardening (zero system-shell access), Squeeze input minimization with symbol enrichment, source-of-truth llms.txt, the verify-ai-output Hallucination Guard, and Memory tools (note, status, read_memory MCP tool).
 head:
   - - meta
     - property: og:title
@@ -835,6 +835,26 @@ Two milestones in one release. **`verify-ai-output` Reliable MVP** (#232) grows 
 **Tags:** `KNOWN_LIMITATIONS.md` · `extraction honesty` · `tier label` · `drift guard` · `G1` · `#520` · `PR #521`
 
 **Impact:** the credibility gap a skeptical reviewer finds first is closed in writing; 6 new guard checks (133 files); zero runtime changes.
+
+---
+
+### v8.52.0 — four answers to one question ✓ (2026-09-29)
+
+**Minor release: one coverage primitive with named populations.** Four commands printed a coverage percentage for one repo and no two agreed — `validate` 98% (175/179), `doctor` 100%, `--health` 100% (170/170), `--report` 54% (91/170). They were never in conflict about a fact. They measured **different populations** through the same primitive, and none of them said which.
+
+`doctor` was the case that made this a defect rather than a labelling gap. It fed `coverageScore` the output of `buildSigIndex` — the retrieval index, which deliberately holds more than the token budget admitted — and then printed *"of source files in context"*. So it claimed 100% in-context while the very run that produced that context reported 54%: two directly contradictory statements about one artifact on disk.
+
+Three populations are now named and carried on every figure. **`in-context`** is what survived the token budget — what the agent actually sees. **`indexed`** is what the retrieval index holds, budget or not. **`readable`** is what is readable on disk under `srcDirs`, an access check rather than a coverage claim. `formatCoverage()` renders `<population> <pct>% (<included>/<total> <noun>)` and throws on an unknown population, so a bare percentage cannot be printed by accident; `inContextFiles()` parses the `### <relpath>` sections of the generated context file rather than the index, which is what lets `doctor` measure the thing it names.
+
+`doctor` and `--report` now agree exactly. `validate` and `--health` still report different numbers, and that is correct — they answer different questions and now say so. Differing numbers were always fine; unlabelled ones were not.
+
+Worth noting for anyone upgrading: `doctor`'s coverage line will appear to **drop** from 100% to the real in-context figure. It is not a regression — it is the first time that line has measured what it claims.
+
+The same pass closed the last of the v8.48 CLI audit backlog (#656–#661), each re-verified individually rather than bulk-closed. That discipline earned its keep twice: four were genuinely fixed, and an initial check of mine on #656 produced a false reproduction — an exit code read without the `overBudget` flag printed beside it, in a run where the budget legitimately fit.
+
+**Tags:** `coverage-score.js` · `POPULATIONS` · `formatCoverage` · `inContextFiles` · `#762` · PR `#787`
+
+**Impact:** `doctor` and `--report` agree for the first time; every coverage figure carries a population, numerator and denominator. 193 integration tests (up from 192), 9 new assertions each mutation-checked in both directions. Every published metric unmoved — 95.8% token reduction, 78.6% hit@5, 86.4% vs 40.8% honest grep pair, 61.0% task-success proxy.
 
 ---
 

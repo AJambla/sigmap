@@ -1095,11 +1095,25 @@ sigmap doctor
 ✓ Signature index — 131 file(s) indexed
 ⚠ Index freshness — 1 source file(s) changed since last generate
     ↳ run: sigmap   (or: sigmap --watch to auto-refresh)
-✓ Coverage — 100% of source files in context (grade A)
+✓ Coverage — in-context 71% (54/76 scoped source files) grade B
 ✓ MCP wiring — registered in .claude/settings.json
 
 0 error(s), 1 warning(s).
 ```
+
+::: tip Coverage figures name their population (v8.52.0)
+Four commands report coverage and they measure different things, so each one says which:
+
+| population | meaning | surface |
+|---|---|---|
+| `in-context` | survived the token budget — what the agent actually sees | `doctor`, `--report` |
+| `indexed` | present in the retrieval index, budget or not | `validate` |
+| `readable` | readable on disk under `srcDirs` — an access check | `--health` |
+
+Different numbers are expected; an unlabelled one is a bug. Before v8.52.0 `doctor` fed the
+retrieval index to the coverage scorer and printed *"of source files in context"*, so it could
+claim 100% while the run that built that context reported 54%.
+:::
 
 Each line is `✓` (ok), `⚠` (warning), or `✗` (hard failure); every non-ok line carries a `↳` fix. `--json` emits the full result (`{ checks, ok, errors, warnings }`) for tooling. The command **exits 1** when a hard check fails (no context file, or invalid `gen-context.config.json`) and **0** otherwise — drop it into CI as a setup gate.
 
@@ -1191,7 +1205,7 @@ sigmap validate --query "loginUser validateToken"
 
 ```
 [sigmap] ⚠  stale index entries: 210 indexed file(s) are no longer in scope — re-run sigmap to refresh the index
-[sigmap] ✓ config valid  coverage: 98% (170/174 files)  — 4 not indexed, 210 stale
+[sigmap] ✓ config valid  coverage: indexed 98% (170/174 files)  — 4 not indexed, 210 stale
 [sigmap] ✓ query "login rate limit" → src/rate/limiter.js (score 8.42, confidence high)
 ```
 
@@ -1574,7 +1588,7 @@ sigmap bench --submit --json
  SigMap Community Benchmark Submission
 ────────────────────────────────────────────────────────
  SigMap version : 8.51.2
- Benchmark ID   : sigmap-v8.51-main
+ Benchmark ID   : sigmap-v8.52-main
  Submitted      : 2026-09-13
 ────────────────────────────────────────────────────────
  Canonical metrics (official release):
@@ -1900,7 +1914,7 @@ sigmap --report
   output tokens   : ~4,103
   budget limit    : 4000 (auto-scaled)
   reduction       : 93.7%
-  coverage        : A (97%)  — 76 of 76 code files included
+  coverage        : in-context 97% (76/76 scoped source files) grade A
                     (2 non-code files skipped — json, md, config)
   confidence      : HIGH
 
@@ -1934,7 +1948,7 @@ sigmap --health
 ```
 [sigmap] health:
   score           : 80/100 (grade B)
-  file access     : A (97%)  — 76 of 78 files accessible in srcDirs
+  file access     : readable 97% (76/78 files in srcDirs) grade A
   strategy        : full
   token reduction : 93.7%
   sig-cache       : 142 entries, 1.2 KB
