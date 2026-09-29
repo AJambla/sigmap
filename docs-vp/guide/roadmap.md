@@ -1,6 +1,6 @@
 ---
 title: Roadmap
-description: SigMap version history and roadmap. From v0.0 to v8.52.1, with recent releases completing the grounded-codegen plan — a realistic §9 ablation (real-symbol corpus, exact-signature grounding, --verbose), a Gemini (AI Studio) provider for the §9 ablation, the init Creation-workflow CLAUDE.md block, scaffold persistence, the LLM A/B hallucination ablation harness, the sigmap create orchestrator and its four guard stages (scaffold, verify-plan, verify-ai-output, review-pr), the conventions command with its full flag set (--conflicts, --inject, --report, --ci, --fix, --update), the grounding benchmark, read-time self-heal, live-index MCP write hooks, the get_callee_signatures MCP tool (exact callee signatures), realistic per-query savings, release-pipeline robustness (bundle integrity + version.json gates, standalone-bundle smoke test), the sigmap gain token-savings dashboard, supply-chain hardening (zero system-shell access), Squeeze input minimization with symbol enrichment, source-of-truth llms.txt, the verify-ai-output Hallucination Guard, and Memory tools (note, status, read_memory MCP tool).
+description: SigMap version history and roadmap. From v0.0 to v8.52.2, with recent releases completing the grounded-codegen plan — a realistic §9 ablation (real-symbol corpus, exact-signature grounding, --verbose), a Gemini (AI Studio) provider for the §9 ablation, the init Creation-workflow CLAUDE.md block, scaffold persistence, the LLM A/B hallucination ablation harness, the sigmap create orchestrator and its four guard stages (scaffold, verify-plan, verify-ai-output, review-pr), the conventions command with its full flag set (--conflicts, --inject, --report, --ci, --fix, --update), the grounding benchmark, read-time self-heal, live-index MCP write hooks, the get_callee_signatures MCP tool (exact callee signatures), realistic per-query savings, release-pipeline robustness (bundle integrity + version.json gates, standalone-bundle smoke test), the sigmap gain token-savings dashboard, supply-chain hardening (zero system-shell access), Squeeze input minimization with symbol enrichment, source-of-truth llms.txt, the verify-ai-output Hallucination Guard, and Memory tools (note, status, read_memory MCP tool).
 head:
   - - meta
     - property: og:title
@@ -835,6 +835,22 @@ Two milestones in one release. **`verify-ai-output` Reliable MVP** (#232) grows 
 **Tags:** `KNOWN_LIMITATIONS.md` · `extraction honesty` · `tier label` · `drift guard` · `G1` · `#520` · `PR #521`
 
 **Impact:** the credibility gap a skeptical reviewer finds first is closed in writing; 6 new guard checks (133 files); zero runtime changes.
+
+---
+
+### v8.52.2 — the check that only runs after the tag ✓ (2026-09-29)
+
+**Patch release restoring the binaries v8.52.1 failed to ship.** Every `Build` job in `Release Binaries` failed at *Smoke-test binary*, so nothing was uploaded and *Attach to GitHub Release* then died on a missing `dist/release/`. npm was unaffected — binaries are not part of the npm package — so `sigmap@8.52.1` published normally while its GitHub Release carried zero assets.
+
+The cause was self-inflicted and instructive. `scripts/verify-binary.mjs` test 9 runs `bench --submit` in an empty `TMPDIR` and treated a non-zero exit as failure. v8.52.1 had *deliberately* made that case exit 1: there is no local metric to submit, and a green exit previously said "ready to paste" for a block carrying nothing measured. The smoke test was simply the last holder of the old contract.
+
+What makes it worth a roadmap entry is not the one-line fix but **where** it hid. This was the fourth place depending on that exit code. Three were found and corrected while making the change; this one was missed because `release-binaries.yml` is `verify-binary.mjs`'s only caller, and it triggers on **tag push — never on pull requests**. Both the feature PR and the release PR passed every check while the failure was already guaranteed. A contract the test suite cannot see is a contract that breaks after the tag exists, which is the most expensive moment to find out. Running the smoke test against a single ubuntu build in PR CI is the structural fix and is tracked separately.
+
+The pattern is familiar from this series: v8.52.1 found that fabricated numbers had become load-bearing for the suite, and this release found that a corrected contract had a verifier outside the suite's reach. Both are the same failure in different clothing — a check that cannot observe the thing it certifies.
+
+**Tags:** `scripts/verify-binary.mjs` · `release-binaries.yml` · tag-only CI coverage · PR `#791`
+
+**Impact:** binaries build and attach again; the v8.52.1 GitHub Release remains without assets, so anyone needing a standalone binary should take v8.52.2. No product behaviour changed — the diff is twelve lines of release tooling. Every published metric unmoved.
 
 ---
 

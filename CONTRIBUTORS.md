@@ -38,6 +38,9 @@ To ensure proper attribution:
 
 We welcome contributions! See [Contributing](./docs/CONTRIBUTING.md) for guidelines.
 
+### Recent Contributors (v8.52.2)
+- **@manojmallick** — fix(ci): v8.52.1 published to npm but shipped no binaries — the binary smoke test asserted `bench --submit` exits 0 in a directory with no benchmark history, which #764 deliberately changed to exit 1. It was the fourth place depending on that contract and the only one PR CI cannot see, because `release-binaries.yml` triggers on tag push rather than on pull requests (PR #791)
+
 ### Recent Contributors (v8.52.1)
 - **@manojmallick** — fix(claims): the only two commands whose output exists to be republished both printed numbers measured nowhere — `share` appended a literal "6× better results" against a published 2.12× and emitted hardcoded 97/88 as the user's own figures on an unbenchmarked repo, and `bench --submit` rendered a missing hit@5 as "0%" in a block meant for a public Discussion. Every number is now traceable or explicitly absent (#763, #764, PR #789)
 
