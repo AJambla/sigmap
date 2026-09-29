@@ -38,6 +38,9 @@ To ensure proper attribution:
 
 We welcome contributions! See [Contributing](./docs/CONTRIBUTING.md) for guidelines.
 
+### Recent Contributors (v8.52.0)
+- **@manojmallick** — feat(coverage): four commands printed a coverage percentage for one repo and no two agreed, because each measured a different population through the same primitive and none said which. Three named populations — in-context, indexed, readable — now carry every figure with its numerator and denominator. `doctor` was a real defect rather than a labelling gap: it fed the retrieval index to `coverageScore` and printed "of source files in context", claiming 100% while the run that built that context reported 54% (#762, PR #787)
+
 ### Recent Contributors (v8.51.10)
 - **@manojmallick** — fix(compare): the command whose job is "SigMap vs a baseline" scored against random selection and reported a 4.9x lift while the project publishes 2.12x over a grep agent — and printed a token baseline derived from an assumed 4,000 tokens per file, never measured. Both now come from the published sources, and a test pins the pair to `latest.json` so command and project cannot drift apart (#760, PR #761)
 - **@manojmallick** — chore: closed the v8.48 CLI audit backlog (#656, #657, #658, #660, #661) by re-verifying each individually rather than bulk-closing, with the evidence recorded on every issue

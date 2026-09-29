@@ -1054,7 +1054,76 @@ __factories["./src/analysis/coverage-score"] = function(module, exports) {
     }
   }
 
-  module.exports = { coverageScore, CODE_EXTS };
+  /**
+   * Named populations (#762).
+   *
+   * Four surfaces printed a coverage percentage for one repo and no two agreed:
+   * `validate` 98% (175/179), `doctor` 100%, `--health` 100% (170/170) and
+   * `--report` 54% (91/170). They were not in conflict — they were measuring
+   * DIFFERENT populations through the same primitive, and none of them said
+   * which. `doctor` was the sharpest case: it fed `coverageScore` the retrieval
+   * index and then printed "of source files in context", contradicting the very
+   * run that built that context.
+   *
+   * Differing numbers are fine. Unlabelled ones are not. Every surface now names
+   * its population, so a reader can tell at a glance that 54% and 100% are
+   * answers to two different questions.
+   */
+  const POPULATIONS = {
+    // Survived the token budget — what the agent actually sees.
+    'in-context': { label: 'in-context', noun: 'scoped source files' },
+    // Present in the retrieval index, including anything stored outside the
+    // budgeted context file (sig-index, per-module splits, cold store).
+    indexed:      { label: 'indexed',    noun: 'files' },
+    // Readable on disk under srcDirs — an access check, not a coverage claim.
+    readable:     { label: 'readable',   noun: 'files in srcDirs' },
+  };
+
+  /**
+   * Render a coverage figure with its population, numerator and denominator.
+   * `indexed 98% (175/179 files)` — never a bare percentage.
+   */
+  function formatCoverage(cov, population, opts = {}) {
+    const pop = POPULATIONS[population];
+    if (!pop) throw new Error(`unknown coverage population: ${population}`);
+    const included = opts.included != null ? opts.included : cov.included;
+    const total    = opts.total    != null ? opts.total    : cov.total;
+    const grade    = opts.grade === false ? '' : ` grade ${cov.grade}`;
+    return `${pop.label} ${cov.score}% (${included}/${total} ${pop.noun})${grade}`;
+  }
+
+  /**
+   * The files actually present in the generated context file — the `in-context`
+   * population. Parsed from the `### <relpath>` section headings rather than the
+   * retrieval index, because the index deliberately holds more than the budget
+   * admitted, and conflating the two is what produced the contradiction above.
+   */
+  function inContextFiles(cwd) {
+    const fs   = require('fs');
+    const path = require('path');
+    const candidates = [
+      path.join(cwd, '.github', 'copilot-instructions.md'),
+      path.join(cwd, 'CLAUDE.md'),
+      path.join(cwd, 'AGENTS.md'),
+      path.join(cwd, 'GEMINI.md'),
+    ];
+    const out = new Set();
+    for (const file of candidates) {
+      let content;
+      try { content = fs.readFileSync(file, 'utf8'); } catch (_) { continue; }
+      const markerIdx = content.indexOf('## Auto-generated signatures');
+      if (markerIdx !== -1) content = content.slice(markerIdx);
+      for (const m of content.matchAll(/^### (.+)$/gm)) {
+        const rel = m[1].trim();
+        if (!rel || rel.includes(' ')) continue;
+        out.add(path.resolve(cwd, rel));
+      }
+      if (out.size) break; // first adapter output that carries sections wins
+    }
+    return [...out].map((filePath) => ({ filePath }));
+  }
+
+  module.exports = { coverageScore, formatCoverage, inContextFiles, POPULATIONS, CODE_EXTS };
   
 };
 
@@ -5299,12 +5368,16 @@ __factories["./src/doctor/diagnose"] = function(module, exports) {
     // 6. Coverage
     try {
       if (indexSize > 0) {
-        const { coverageScore } = __require('./src/analysis/coverage-score');
-        const { buildSigIndex } = __require('./src/retrieval/ranker');
-        const entries = [...buildSigIndex(cwd).keys()].map((rel) => ({ filePath: path.resolve(cwd, rel) }));
-        const cov = coverageScore(cwd, entries, config);
-        if (cov.score < 70) add('coverage', 'Coverage', 'warn', `${cov.score}% of source files in context (grade ${cov.grade})`, 'increase maxTokens or expand srcDirs in gen-context.config.json');
-        else add('coverage', 'Coverage', 'ok', `${cov.score}% of source files in context (grade ${cov.grade})`);
+        // #762: this fed `coverageScore` the RETRIEVAL INDEX and then printed
+        // "of source files in context" — so doctor claimed 100% in-context while
+        // the run that built that context reported 54%. The index deliberately
+        // holds more than the budget admitted. Measure what is actually in the
+        // context file, and name the population either way.
+        const { coverageScore, formatCoverage, inContextFiles } = __require('./src/analysis/coverage-score');
+        const cov = coverageScore(cwd, inContextFiles(cwd), config);
+        const line = formatCoverage(cov, 'in-context');
+        if (cov.score < 70) add('coverage', 'Coverage', 'warn', line, 'increase maxTokens or expand srcDirs in gen-context.config.json');
+        else add('coverage', 'Coverage', 'ok', line);
       }
     } catch (_) {}
 
@@ -20982,7 +21055,7 @@ __factories["./src/mcp/server"] = function(module, exports) {
 
   const SERVER_INFO = {
     name: 'sigmap',
-    version: '8.51.10',
+    version: '8.52.0',
     description: 'SigMap MCP server — code signatures on demand',
   };
 
@@ -27700,7 +27773,7 @@ function __tryGit(args, opts = {}) {
   catch (_) { return ''; }
 }
 
-const VERSION = '8.51.10';
+const VERSION = '8.52.0';
 const MARKER = '\n\n## Auto-generated signatures\n<!-- Updated by gen-context.js -->\n';
 
 function requireSourceOrBundled(key) {
@@ -29031,7 +29104,7 @@ function printReport(inputTokens, finalTokens, fileCount, droppedCount, asJson, 
       const skipNote = coverageResult.nonCodeSkipped > 0
         ? `  (${coverageResult.nonCodeSkipped} non-code files skipped — json, md, config)`
         : '';
-      console.log(`  coverage        : ${coverageResult.grade} (${coverageResult.score}%)  — ${coverageResult.included} of ${coverageResult.total} code files included`);
+      console.log(`  coverage        : ${__require('./src/analysis/coverage-score').formatCoverage(coverageResult, 'in-context')}`);
       if (skipNote) console.log(`                  ${skipNote}`);
       console.log(`  confidence      : ${coverageResult.confidence}`);
       if (coverageResult.perModule && coverageResult.perModule.size > 0) {
@@ -31798,7 +31871,16 @@ function main() {
           valNotIndexed > 0 ? `${valNotIndexed} not indexed` : null,
           valStale > 0 ? `${valStale} stale` : null,
         ].filter(Boolean).join(', ');
-        console.log(`[sigmap] ✓ config valid  coverage: ${coveragePct}% (${valCovered}/${valTotal} files)${residual ? `  — ${residual}` : ''}`);
+        // #762: `indexed` — how much of the in-scope set the retrieval index
+        // holds. Deliberately a different population from `--report`'s
+        // in-context figure; both now say which, so 98% and 54% read as
+        // answers to two questions rather than a contradiction.
+        const _cov = __require('./src/analysis/coverage-score');
+        const _line = _cov.formatCoverage(
+          { score: coveragePct, grade: '' }, 'indexed',
+          { included: valCovered, total: valTotal, grade: false }
+        );
+        console.log(`[sigmap] ✓ config valid  coverage: ${_line}${residual ? `  — ${residual}` : ''}`);
       } else {
         for (const iss of issues) console.error(`[sigmap] ✗ ${iss}`);
         process.exit(1);
@@ -33256,7 +33338,8 @@ function main() {
       console.log('[sigmap] health:');
       console.log(`  score           : ${result.score}/100 (grade ${result.grade})`);
       if (coverageResult) {
-        console.log(`  file access     : ${coverageResult.grade} (${coverageResult.score}%)  — ${coverageResult.included} of ${coverageResult.total} files accessible in srcDirs`);
+        // Labelled `readable`: this is a disk-access check, not a coverage claim (#762).
+        console.log(`  file access     : ${__require('./src/analysis/coverage-score').formatCoverage(coverageResult, 'readable')}`);
       }
       console.log(`  strategy        : ${result.strategy}`);
       console.log(`  token reduction : ${result.tokenReductionPct !== null ? result.tokenReductionPct + '%' : 'no history'}`);

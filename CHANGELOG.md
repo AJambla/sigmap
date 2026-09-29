@@ -10,6 +10,19 @@ Format: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [8.52.0] — 2026-09-29
+
+### Added
+- **One coverage primitive, with named populations on every surface** (#762, PR #787) — four commands printed a coverage percentage for one repo and no two agreed: `validate` 98% (175/179), `doctor` 100%, `--health` 100% (170/170), `--report` 54% (91/170). They were never in conflict about a fact — they measured **different populations** through the same primitive, and none of them said which. Three populations are now named and carried on every figure: **`in-context`** (survived the token budget — what the agent actually sees), **`indexed`** (present in the retrieval index, budget or not) and **`readable`** (readable on disk under `srcDirs` — an access check, not a coverage claim). `formatCoverage()` renders `<population> <pct>% (<included>/<total> <noun>)` and **throws on an unknown population**, so a bare percentage cannot be printed by accident; `inContextFiles()` parses the `### <relpath>` sections of the generated context file rather than the index. Differing numbers were always fine — unlabelled ones were not
+
+### Fixed
+- **`doctor` called the retrieval index "in context", contradicting the run that built it** (#762, PR #787) — it fed `coverageScore` the output of `buildSigIndex` and then printed *"100% of source files in context"*. The index deliberately holds more than the token budget admitted, so `doctor` claimed **100% in-context** while the very run that produced that context reported **54%** — two directly contradictory statements about one artifact on disk, and the reason this was a defect rather than a labelling gap. `doctor` now measures the context file and agrees with `--report` exactly: in-context 54% (91/170). `validate` (indexed 98%) and `--health` (readable 100%) still differ, correctly, and now say why
+
+### Changed
+- **Four command outputs changed shape** (PR #787) — `validate`, `doctor`, `--health` and `--report` each now print a population label with an explicit numerator and denominator. `doctor`'s figure in particular moves from 100% to the honest in-context number, which will read as a *drop* on first upgrade and is not one: it is the first time that line has measured what it claims. Nine assertions pin both halves — every figure names its population, and the two surfaces claiming the same population must produce identical numbers — each mutation-checked in both directions
+
+---
+
 ## [8.51.10] — 2026-09-29
 
 ### Fixed

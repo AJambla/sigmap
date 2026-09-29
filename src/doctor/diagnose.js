@@ -185,12 +185,16 @@ function diagnose(cwd, opts = {}) {
   // 6. Coverage
   try {
     if (indexSize > 0) {
-      const { coverageScore } = require('../analysis/coverage-score');
-      const { buildSigIndex } = require('../retrieval/ranker');
-      const entries = [...buildSigIndex(cwd).keys()].map((rel) => ({ filePath: path.resolve(cwd, rel) }));
-      const cov = coverageScore(cwd, entries, config);
-      if (cov.score < 70) add('coverage', 'Coverage', 'warn', `${cov.score}% of source files in context (grade ${cov.grade})`, 'increase maxTokens or expand srcDirs in gen-context.config.json');
-      else add('coverage', 'Coverage', 'ok', `${cov.score}% of source files in context (grade ${cov.grade})`);
+      // #762: this fed `coverageScore` the RETRIEVAL INDEX and then printed
+      // "of source files in context" — so doctor claimed 100% in-context while
+      // the run that built that context reported 54%. The index deliberately
+      // holds more than the budget admitted. Measure what is actually in the
+      // context file, and name the population either way.
+      const { coverageScore, formatCoverage, inContextFiles } = require('../analysis/coverage-score');
+      const cov = coverageScore(cwd, inContextFiles(cwd), config);
+      const line = formatCoverage(cov, 'in-context');
+      if (cov.score < 70) add('coverage', 'Coverage', 'warn', line, 'increase maxTokens or expand srcDirs in gen-context.config.json');
+      else add('coverage', 'Coverage', 'ok', line);
     }
   } catch (_) {}
 
