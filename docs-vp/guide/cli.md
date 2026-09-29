@@ -1439,7 +1439,7 @@ Profiles: `debug`, `architecture`, `review`, `default`.
 
 Human-readable CLI wrapper for the retrieval benchmark. It has **two modes**, chosen by whether the benchmark corpus is present.
 
-**In the SigMap source checkout** (where `scripts/run-retrieval-benchmark.mjs` and `benchmarks/tasks/` exist) it runs the full 21-repo comparison: SigMap vs a random baseline, with hit@5, token counts, and lift multiplier.
+**In the SigMap source checkout** (where `scripts/run-honest-benchmark.mjs` and `benchmarks/tasks/` exist) it runs the honest corpus live — 125 tasks across 19 repos — and reports SigMap against a single-shot grep agent.
 
 **Anywhere else** — including an npm-installed copy, where the runner and corpus are not published — it renders *your own* recorded numbers from `.context/benchmark-history.ndjson` instead. It never spawns the benchmark and never writes outside the current directory. Use `--run` to demand the live comparison; it exits 1 with an explanation when the corpus is unavailable rather than falling back.
 
@@ -1451,20 +1451,22 @@ sigmap compare --json
 
 ```
 ────────────────────────────────────────────
- SigMap vs Baseline
+ SigMap vs grep agent
 ────────────────────────────────────────────
- hit@5         78.1% vs 16.0%   (4.9× lift)
- Avg tokens    93 vs 1,289,556
+ hit@5         86.4% vs 40.8%   (2.12× lift)
+ Corpus        125 tasks · 19 repos (honest split)
+ Token cut     95.8% average (saved benchmark, 21 repos)
 ────────────────────────────────────────────
 ```
 
-::: warning The baseline here is the RANDOM baseline, not the grep agent
-`compare` scores against the random-selection baseline (~16%), which is the weaker
-comparison and yields a larger multiplier. The **published** headline — 86.4% vs
-**40.8%**, a 2.12× lift — is the [honest grep-agent corpus](/guide/retrieval-benchmark),
-measured by `npm run benchmark:honest` over 125 tasks. Quote that one. The random
-baseline is retained as data, not as a claim.
-:::
+The baseline is the [honest grep-agent corpus](/guide/retrieval-benchmark) — the same claim
+README, this site and `benchmarks/latest.json` publish, so the command cannot advertise a
+different number from the project. It previously scored against random selection and
+reported a 4.9× lift, and printed a token "baseline" derived from an assumed 4,000 tokens
+per file. The token row now carries the measured average, labelled as coming from the saved
+benchmark rather than from this run.
+
+Progress goes to stderr, so `sigmap compare --json` pipes cleanly into a parser.
 
 ---
 
