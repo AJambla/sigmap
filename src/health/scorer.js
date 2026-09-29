@@ -137,12 +137,19 @@ function score(cwd) {
   let p95TokenCount = 0;
   let overBudgetStreak = 0;
   try {
+    // #773: this read usage.ndjson, which `tracking: false` (the default)
+    // never writes — so health reported "no history / 0 runs" on a repo whose
+    // gain log held hundreds of generates. readRuns() is the one read path and
+    // covers both stores.
+    const { readRuns, summarizeRuns } = require('../tracking/usage-source');
     const { readLog, summarize } = require('../tracking/logger');
     const { percentile, overBudgetStreak: calcStreak } = require('../format/dashboard');
-    const entries = readLog(cwd);
-    const sum = summarize(entries);
-    if (sum.totalRuns > 0) tokenReductionPct = sum.avgReductionPct;
-    overBudgetRuns = sum.overBudgetRuns;
+    const entries = readRuns(cwd);
+    const sum = summarizeRuns(entries);
+    if (sum.totalRuns > 0 && sum.avgReductionPct !== null) tokenReductionPct = sum.avgReductionPct;
+    // overBudget is only recorded by the tracked store; absent means unknown,
+    // not zero, so it is read from there rather than inferred from gain.
+    overBudgetRuns = summarize(readLog(cwd)).overBudgetRuns;
     totalRuns = sum.totalRuns;
     const finals = entries.map((e) => Number(e.finalTokens)).filter(Number.isFinite);
     p50TokenCount = Math.round(percentile(finals, 50));
