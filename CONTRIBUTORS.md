@@ -38,6 +38,9 @@ To ensure proper attribution:
 
 We welcome contributions! See [Contributing](./docs/CONTRIBUTING.md) for guidelines.
 
+### Recent Contributors (v8.53.0)
+- **@manojmallick** — feat(usage): four commands published a token-reduction figure and no two were comparable, because `tracking` defaults to false so the store `--health`, `history` and the dashboard read is never written, while `recordUsage` writes a different one unconditionally. One read path now normalises both, and every figure names its population — 524 generate runs is not 2,047 operations is not a session window (#773, PR #793)
+
 ### Recent Contributors (v8.52.2)
 - **@manojmallick** — fix(ci): v8.52.1 published to npm but shipped no binaries — the binary smoke test asserted `bench --submit` exits 0 in a directory with no benchmark history, which #764 deliberately changed to exit 1. It was the fourth place depending on that contract and the only one PR CI cannot see, because `release-binaries.yml` triggers on tag push rather than on pull requests (PR #791)
 

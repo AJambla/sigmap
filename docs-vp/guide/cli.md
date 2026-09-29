@@ -1402,7 +1402,9 @@ Exit codes: `0` printed · `1` missing file, refused path, or a start past end-o
 
 ## history
 
-Display the last N usage log entries as a table with Unicode sparklines for token trend, retrieval hit@5, and token-reduction benchmark history. Requires `tracking: true` in `gen-context.config.json` (or `--track` on each run) for usage rows; benchmark rows appear automatically once any benchmark script has run.
+Display the last N recorded runs as a table with Unicode sparklines for token trend, retrieval hit@5, and token-reduction benchmark history.
+
+Since **v8.53.0** this reads the same source as `--health` and the dashboard, so runs appear without any opt-in: `tracking: true` (or `--track`) adds the richer per-run fields — file counts and over-budget flags — but is no longer required for rows to show at all. Previously `history` read only the tracked log, which `tracking: false` (the default) never writes, so it reported *"No usage log entries"* on repos with hundreds of recorded runs.
 
 ```bash
 sigmap history
@@ -1412,11 +1414,11 @@ sigmap history --json
 
 ```
 ──────────────────────────────────────────────────────────────
- sigmap history  (last 10 runs)
+ sigmap history  (last 10 of 524 runs · gain.ndjson)
 ──────────────────────────────────────────────────────────────
  Date                     Files  Tokens Reduction Budget?
  ──────────────────────── ───── ─────── ───────── ───────
- 2026-04-16 14:22:01         76    4103    -93.7%      no
+ 2026-09-29 21:04:01          —   14973     97.6%       —
  ...
 ──────────────────────────────────────────────────────────────
  Token trend: ▁▂▃▄▃▄▅▆▇█
@@ -1607,7 +1609,7 @@ sigmap bench --submit --json
  SigMap Community Benchmark Submission
 ────────────────────────────────────────────────────────
  SigMap version : 8.51.2
- Benchmark ID   : sigmap-v8.52-main
+ Benchmark ID   : sigmap-v8.53-main
  Submitted      : 2026-09-13
 ────────────────────────────────────────────────────────
  Canonical metrics (official release):
@@ -1977,11 +1979,22 @@ sigmap --health
   score           : 80/100 (grade B)
   file access     : readable 97% (76/78 files in srcDirs) grade A
   strategy        : full
-  token reduction : 93.7%
+  token reduction : 96.6% (mean of 524 generate run(s) · vs whole-file baseline)
   sig-cache       : 142 entries, 1.2 KB
   days since regen: 0
-  total runs      : 1
+  total runs      : 524 (generate runs; `gain` counts every operation)
 ```
+
+::: tip Reduction figures name their baseline and window (v8.53.0)
+`--health`, `gain`, `budget` and `history` all read one source, but they report
+different **populations** and each now says which: `--health` averages *generate
+runs*, `gain` counts *every operation* including `ask` queries, and `budget`
+windows to the current session. Differing numbers are expected; an unlabelled one
+is a bug.
+
+A field the source store never recorded renders as `—`, not `0` — `gain` does not
+capture per-run file counts or over-budget flags.
+:::
 
 Machine-readable:
 

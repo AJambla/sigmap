@@ -78,12 +78,12 @@ features:
 
 <div style="max-width:840px;margin:0 auto;padding:18px 24px 0;text-align:center">
 <div style="display:inline-flex;flex-wrap:wrap;gap:.5rem;justify-content:center;background:var(--vp-c-brand-soft,#ede9fe);border:1px solid rgba(124,106,247,.25);border-radius:999px;padding:.55rem .9rem;font-size:.9rem;color:var(--vp-c-text-1)">
-  <span><strong>Release:</strong> v8.52.2</span>
+  <span><strong>Release:</strong> v8.53.0</span>
   <span>·</span>
   <span><strong>New — the dependencies nobody could see:</strong> reported as <em>&quot;only npm projects write about the packages they use.&quot;</em> The dependency inventory looked at the repo <strong>root and nowhere else</strong>, so the normal shape of a Java build — an aggregator <code>pom.xml</code> whose <code>&lt;modules&gt;</code> hold the real dependencies — reported <strong>0 deps</strong>, every declared dependency invisible. Three <code>pom.xml</code> defects sat behind it: <code>&lt;parent&gt;</code> shadowed the project's own identity so every Spring Boot POM called itself <code>spring-boot-starter-parent</code>, <code>&lt;dependencyManagement&gt;</code> constraints were counted as real dependencies and leaked into <code>sbom</code>, and Maven scope collapsed so a <code>provided</code> compile-time dependency looked shipped. A new <code>## dependencies (declared)</code> section now names them for <strong>every ecosystem</strong>, not just the two whose versions are resolvable from disk. Shipping with it: nested types in Java, Swift and C# were under-reported or misattributed — Swift filed a nested type's methods under the <strong>enclosing</strong> type while never reporting the type itself — worth <strong>+42% signatures on akka</strong>. 36 languages, zero dependencies, offline, deterministic.</span>
 </div>
 <div style="margin-top:.4rem;display:inline-flex;flex-wrap:wrap;gap:.5rem;justify-content:center;background:var(--vp-c-default-soft,#f3f4f6);border:1px solid rgba(0,0,0,.08);border-radius:999px;padding:.55rem .9rem;font-size:.9rem;color:var(--vp-c-text-2)">
-  <span><strong>Benchmark:</strong> sigmap-v8.52-main</span>
+  <span><strong>Benchmark:</strong> sigmap-v8.53-main</span>
   <span>·</span>
   <span>78.6% hit@5 · 95.8% token reduction · 2026-09-29</span>
 </div>
@@ -177,7 +177,7 @@ See the full [end-to-end walkthrough](/guide/walkthrough) to watch this in actio
 | Overall token reduction | — | **95.8%** |
 | GPT-4o overflow repos | 14/21 | **0/21** |
 
-Latest saved benchmark run: **2026-09-29 (v8.52.2)**.
+Latest saved benchmark run: **2026-09-29 (v8.53.0)**.
 
 </div>
 

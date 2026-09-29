@@ -14926,7 +14926,8 @@ __factories["./src/format/dashboard"] = function(module, exports) {
   }
 
   function buildDashboardData(cwd, health) {
-    const entries = readLog(cwd);
+    // #773: one read path — usage.ndjson alone is empty whenever tracking is off.
+    const entries = __require('./src/tracking/usage-source').readRuns(cwd);
     const recent = entries.slice(-30);
     const tokenReductionTrend = recent.map((e) => toNumber(e.reductionPct)).filter((n) => n !== null);
     const hitAt5Trend = readBenchmarkTrend(cwd);
@@ -17759,12 +17760,19 @@ __factories["./src/health/scorer"] = function(module, exports) {
     let p95TokenCount = 0;
     let overBudgetStreak = 0;
     try {
+      // #773: this read usage.ndjson, which `tracking: false` (the default)
+      // never writes — so health reported "no history / 0 runs" on a repo whose
+      // gain log held hundreds of generates. readRuns() is the one read path and
+      // covers both stores.
+      const { readRuns, summarizeRuns } = __require('./src/tracking/usage-source');
       const { readLog, summarize } = __require('./src/tracking/logger');
       const { percentile, overBudgetStreak: calcStreak } = __require('./src/format/dashboard');
-      const entries = readLog(cwd);
-      const sum = summarize(entries);
-      if (sum.totalRuns > 0) tokenReductionPct = sum.avgReductionPct;
-      overBudgetRuns = sum.overBudgetRuns;
+      const entries = readRuns(cwd);
+      const sum = summarizeRuns(entries);
+      if (sum.totalRuns > 0 && sum.avgReductionPct !== null) tokenReductionPct = sum.avgReductionPct;
+      // overBudget is only recorded by the tracked store; absent means unknown,
+      // not zero, so it is read from there rather than inferred from gain.
+      overBudgetRuns = summarize(readLog(cwd)).overBudgetRuns;
       totalRuns = sum.totalRuns;
       const finals = entries.map((e) => Number(e.finalTokens)).filter(Number.isFinite);
       p50TokenCount = Math.round(percentile(finals, 50));
@@ -21055,7 +21063,7 @@ __factories["./src/mcp/server"] = function(module, exports) {
 
   const SERVER_INFO = {
     name: 'sigmap',
-    version: '8.52.2',
+    version: '8.53.0',
     description: 'SigMap MCP server — code signatures on demand',
   };
 
@@ -26022,6 +26030,132 @@ __factories["./src/tracking/pricing"] = function(module, exports) {
   
 };
 
+// ── ./src/tracking/usage-source ──
+__factories["./src/tracking/usage-source"] = function(module, exports) {
+  
+  /**
+   * One read path for run history (#773).
+   *
+   * Four surfaces published a token-reduction figure and no two were comparable:
+   *
+   *   --health   "no history", 0 runs      read usage.ndjson
+   *   gain       2,047 operations, 96.5%   read gain.ndjson
+   *   budget     142 ops, session window   read gain.ndjson, windowed
+   *   --report   97.6%                     this run only
+   *
+   * The cause was not arithmetic. `tracking` defaults to FALSE, so
+   * `.context/usage.ndjson` is never written — and that is the store `--health`,
+   * `history` and the dashboard read. Meanwhile `recordUsage` writes
+   * `.context/gain.ndjson` unconditionally. Two stores for one concept, and the
+   * three surfaces that looked empty were reading the one nobody fills.
+   *
+   * (`.context/usage.json` is NOT a third token store despite appearances — it is
+   * the star-nudge run counter and has nothing to do with tokens.)
+   *
+   * This module is the single read path. It normalises both stores into one
+   * record shape and reports which contributed, so a caller can label what it is
+   * showing rather than implying a population it does not have.
+   */
+
+  const fs = require('fs');
+  const path = require('path');
+
+  const USAGE_FILE = path.join('.context', 'usage.ndjson');
+  const GAIN_FILE  = path.join('.context', 'gain.ndjson');
+
+  function readNdjson(file) {
+    try {
+      if (!fs.existsSync(file)) return [];
+      return fs.readFileSync(file, 'utf8')
+        .split('\n')
+        .filter(Boolean)
+        .map((l) => { try { return JSON.parse(l); } catch (_) { return null; } })
+        .filter(Boolean);
+    } catch (_) { return []; }
+  }
+
+  /**
+   * Normalised run record. Only `generate` operations are runs — `gain` also
+   * records `ask` queries, which are a different population and must not be
+   * counted as runs (that conflation is how "2,047" and "525" both described
+   * the same log).
+   *
+   * @returns {{ts:string, version:string, rawTokens:number, finalTokens:number,
+   *            reductionPct:number, source:'usage'|'gain'}[]} oldest first
+   */
+  function readRuns(cwd) {
+    const out = [];
+
+    for (const e of readNdjson(path.join(cwd, USAGE_FILE))) {
+      if (!e || typeof e.rawTokens !== 'number') continue;
+      out.push({
+        ts: e.ts, version: e.version || 'unknown',
+        rawTokens: e.rawTokens, finalTokens: e.finalTokens || 0,
+        reductionPct: typeof e.reductionPct === 'number' ? e.reductionPct : 0,
+        // Only the tracked store records these. `null` means NOT RECORDED, not
+        // zero/false — rendering an unrecorded field as a measured value is the
+        // same defect #764 fixed in `bench --submit`.
+        fileCount: typeof e.fileCount === 'number' ? e.fileCount : null,
+        overBudget: typeof e.overBudget === 'boolean' ? e.overBudget : null,
+        source: 'usage',
+      });
+    }
+
+    for (const e of readNdjson(path.join(cwd, GAIN_FILE))) {
+      if (!e || e.op !== 'generate' || typeof e.baselineTokens !== 'number') continue;
+      out.push({
+        ts: e.ts, version: e.v || 'unknown',
+        rawTokens: e.baselineTokens, finalTokens: e.actualTokens || 0,
+        reductionPct: typeof e.savedPct === 'number' ? e.savedPct : 0,
+        fileCount: null,   // gain does not record it
+        overBudget: null,  // gain does not record it
+        source: 'gain',
+      });
+    }
+
+    // A run logged to both stores appears twice; the timestamps are written in
+    // the same call, so dedupe on the second.
+    const seen = new Set();
+    return out
+      .filter((r) => {
+        const key = String(r.ts).slice(0, 19);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .sort((a, b) => String(a.ts).localeCompare(String(b.ts)));
+  }
+
+  /** Which stores actually hold data, for labelling the window a figure covers. */
+  function describeSource(cwd) {
+    const tracked = readNdjson(path.join(cwd, USAGE_FILE)).length;
+    const gain = readNdjson(path.join(cwd, GAIN_FILE)).filter((e) => e && e.op === 'generate').length;
+    return {
+      tracked, gain,
+      total: readRuns(cwd).length,
+      stores: [tracked ? 'usage.ndjson' : null, gain ? 'gain.ndjson' : null].filter(Boolean),
+    };
+  }
+
+  /** Task-weighted reduction over the given runs, with the baseline named. */
+  function summarizeRuns(runs) {
+    if (!runs || runs.length === 0) {
+      return { totalRuns: 0, avgReductionPct: null, rawTokens: 0, finalTokens: 0 };
+    }
+    const rawTokens = runs.reduce((n, r) => n + (r.rawTokens || 0), 0);
+    const finalTokens = runs.reduce((n, r) => n + (r.finalTokens || 0), 0);
+    const avg = runs.reduce((n, r) => n + (r.reductionPct || 0), 0) / runs.length;
+    return {
+      totalRuns: runs.length,
+      avgReductionPct: parseFloat(avg.toFixed(1)),
+      rawTokens, finalTokens,
+    };
+  }
+
+  module.exports = { readRuns, describeSource, summarizeRuns, USAGE_FILE, GAIN_FILE };
+  
+};
+
 // ── ./src/util/git ──
 __factories["./src/util/git"] = function(module, exports) {
   
@@ -27773,7 +27907,7 @@ function __tryGit(args, opts = {}) {
   catch (_) { return ''; }
 }
 
-const VERSION = '8.52.2';
+const VERSION = '8.53.0';
 const MARKER = '\n\n## Auto-generated signatures\n<!-- Updated by gen-context.js -->\n';
 
 function requireSourceOrBundled(key) {
@@ -32016,8 +32150,12 @@ function main() {
 
   // v5.0: `sigmap history` — show last N usage log entries with sparkline
   if (args[0] === 'history') {
-    const { readLog } = requireSourceOrBundled('./src/tracking/logger');
-    const entries = readLog(cwd);
+    // #773: one read path. This read usage.ndjson alone, which `tracking: false`
+    // (the default) never writes — so `history` reported "No usage log entries"
+    // on a repo whose gain log held hundreds of generates.
+    const _usage = requireSourceOrBundled('./src/tracking/usage-source');
+    const entries = _usage.readRuns(cwd);
+    const _src = _usage.describeSource(cwd);
 
     const nIdx = args.indexOf('--last');
     const n    = nIdx >= 0 ? (parseInt(args[nIdx + 1], 10) || 10) : 10;
@@ -32042,20 +32180,26 @@ function main() {
 
     const bar = '─'.repeat(62);
     console.log(bar);
-    console.log(` sigmap history  (last ${Math.max(last.length, 1)} runs)`);
+    // `Math.max(…, 1)` printed "(last 1 runs)" for an EMPTY log (#773).
+    const _window = last.length === 0
+      ? 'no runs recorded'
+      : `last ${last.length} of ${entries.length} runs`;
+    console.log(` sigmap history  (${_window}${_src.stores.length ? ` · ${_src.stores.join(' + ')}` : ''})`);
     console.log(bar);
 
     if (last.length === 0) {
-      console.log(' No usage log entries. Enable tracking: true in config to start recording runs.');
+      console.log(' No runs recorded yet. Run `sigmap` once, or set tracking: true for the richer log.');
     } else {
       console.log(` ${'Date'.padEnd(24)} ${'Files'.padStart(5)} ${'Tokens'.padStart(7)} ${'Reduction'.padStart(9)} ${'Budget?'.padStart(7)}`);
       console.log(` ${'─'.repeat(24)} ${'─'.repeat(5)} ${'─'.repeat(7)} ${'─'.repeat(9)} ${'─'.repeat(7)}`);
       for (const e of last) {
         const date = (e.ts || '').slice(0, 19).replace('T', ' ');
-        const files = String(e.fileCount || 0).padStart(5);
+        // `—` where the source store does not record the field, rather than
+        // rendering it as 0/no — an unrecorded value must not read as measured.
+        const files = String(e.fileCount == null ? '—' : e.fileCount).padStart(5);
         const tok   = String(e.finalTokens || 0).padStart(7);
         const red   = `${e.reductionPct || 0}%`.padStart(9);
-        const over  = (e.overBudget ? '  ⚠ yes' : '     no').padStart(7);
+        const over  = (e.overBudget == null ? '       —' : (e.overBudget ? '  ⚠ yes' : '     no')).padStart(7);
         console.log(` ${date.padEnd(24)} ${files} ${tok} ${red} ${over}`);
       }
       console.log(bar);
@@ -33402,7 +33546,16 @@ function main() {
         console.log(`  file access     : ${__require('./src/analysis/coverage-score').formatCoverage(coverageResult, 'readable')}`);
       }
       console.log(`  strategy        : ${result.strategy}`);
-      console.log(`  token reduction : ${result.tokenReductionPct !== null ? result.tokenReductionPct + '%' : 'no history'}`);
+      // #773: name the baseline and the window. A bare percentage here was
+      // not comparable with `gain`, `budget` or `--report`, which measure
+      // different populations over different windows.
+      {
+        const _src = __require('./src/tracking/usage-source').describeSource(cwd);
+        const _red = result.tokenReductionPct !== null
+          ? `${result.tokenReductionPct}% (mean of ${_src.total} generate run(s) · vs whole-file baseline)`
+          : 'no runs recorded yet';
+        console.log(`  token reduction : ${_red}`);
+      }
       console.log(`  days since regen: ${result.daysSinceRegen !== null ? result.daysSinceRegen : 'context file not found'}`);
       if (result.strategyFreshnessDays !== null) {
         console.log(`  cold freshness  : ${result.strategyFreshnessDays} day(s)`);
@@ -33410,7 +33563,7 @@ function main() {
       if (cacheStats) {
         console.log(`  sig-cache       : ${cacheStats.entries} files cached  ${cacheStats.sizeKb}KB on disk`);
       }
-      console.log(`  total runs      : ${result.totalRuns}`);
+      console.log(`  total runs      : ${result.totalRuns} (generate runs; \`gain\` counts every operation)`);
       console.log(`  over-budget runs: ${result.overBudgetRuns}`);
       console.log(`  p50 token count : ${result.p50TokenCount}`);
       console.log(`  p95 token count : ${result.p95TokenCount}`);
