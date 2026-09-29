@@ -10,6 +10,21 @@ Format: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [8.53.0] — 2026-09-29
+
+### Added
+- **One read path for run history, with named populations** (#773, PR #793) — `src/tracking/usage-source.js` normalises both run stores into a single record shape, dedupes a run logged to both, and reports which stores contributed so a caller can label what it is showing. `--health`, `history` and the dashboard consume it; `gain` and `budget` already read the gain log directly. Populations stay distinct and now say so: **524 generate runs**, **2,047 operations** and a session window are different things — `gain` records `ask` queries alongside generates, which is how one log described itself as both 2,047 and 525. Same rule #762 established for coverage: differing numbers are fine, unlabelled ones are not
+
+### Fixed
+- **Three surfaces reported "no history" while the log held hundreds of runs** (#773, PR #793) — four commands published a token-reduction figure and no two were comparable. The cause was not arithmetic: `tracking` defaults to **false**, so `.context/usage.ndjson` is never written — and that is the store `--health`, `history` and the dashboard read, while `recordUsage` writes `.context/gain.ndjson` unconditionally. Three surfaces looked empty because they read the one store nobody fills. On this repo `--health` reported *"token reduction: no history, total runs: 0"* beside a gain log holding 525 generates. It now reports `96.6% (mean of 524 generate run(s) · vs whole-file baseline)` and `524 (generate runs; gain counts every operation)`, and `history` shows `last 10 of 524 runs · gain.ndjson` instead of *"No usage log entries"*
+- **`history` printed "(last 1 runs)" for an empty log** (#773, PR #793) — `Math.max(last.length, 1)` forced a floor of one, so a log with nothing in it reported a run that never happened. An empty log now says so
+- **`history` rendered unrecorded fields as measured values** (PR #793) — `gain` records no `fileCount` or `overBudget`, which the table printed as `0` and `no`. That is the **same defect #764 fixed in `bench --submit`**, surfacing in a different command: a field the source never recorded displayed as though it had been measured. Both now render `—`
+
+### Changed
+- **The issue's premise was corrected while fixing it** (#773) — #773 names `.context/usage.json` as a third token store. It is not: that file is the star-nudge run counter and has nothing to do with tokens. There were **two** token stores, not three, which changes what "one store" had to mean and is recorded here so the next reader does not go looking for a third
+
+---
+
 ## [8.52.2] — 2026-09-29
 
 ### Fixed

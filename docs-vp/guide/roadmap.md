@@ -1,6 +1,6 @@
 ---
 title: Roadmap
-description: SigMap version history and roadmap. From v0.0 to v8.52.2, with recent releases completing the grounded-codegen plan — a realistic §9 ablation (real-symbol corpus, exact-signature grounding, --verbose), a Gemini (AI Studio) provider for the §9 ablation, the init Creation-workflow CLAUDE.md block, scaffold persistence, the LLM A/B hallucination ablation harness, the sigmap create orchestrator and its four guard stages (scaffold, verify-plan, verify-ai-output, review-pr), the conventions command with its full flag set (--conflicts, --inject, --report, --ci, --fix, --update), the grounding benchmark, read-time self-heal, live-index MCP write hooks, the get_callee_signatures MCP tool (exact callee signatures), realistic per-query savings, release-pipeline robustness (bundle integrity + version.json gates, standalone-bundle smoke test), the sigmap gain token-savings dashboard, supply-chain hardening (zero system-shell access), Squeeze input minimization with symbol enrichment, source-of-truth llms.txt, the verify-ai-output Hallucination Guard, and Memory tools (note, status, read_memory MCP tool).
+description: SigMap version history and roadmap. From v0.0 to v8.53.0, with recent releases completing the grounded-codegen plan — a realistic §9 ablation (real-symbol corpus, exact-signature grounding, --verbose), a Gemini (AI Studio) provider for the §9 ablation, the init Creation-workflow CLAUDE.md block, scaffold persistence, the LLM A/B hallucination ablation harness, the sigmap create orchestrator and its four guard stages (scaffold, verify-plan, verify-ai-output, review-pr), the conventions command with its full flag set (--conflicts, --inject, --report, --ci, --fix, --update), the grounding benchmark, read-time self-heal, live-index MCP write hooks, the get_callee_signatures MCP tool (exact callee signatures), realistic per-query savings, release-pipeline robustness (bundle integrity + version.json gates, standalone-bundle smoke test), the sigmap gain token-savings dashboard, supply-chain hardening (zero system-shell access), Squeeze input minimization with symbol enrichment, source-of-truth llms.txt, the verify-ai-output Hallucination Guard, and Memory tools (note, status, read_memory MCP tool).
 head:
   - - meta
     - property: og:title
@@ -835,6 +835,24 @@ Two milestones in one release. **`verify-ai-output` Reliable MVP** (#232) grows 
 **Tags:** `KNOWN_LIMITATIONS.md` · `extraction honesty` · `tier label` · `drift guard` · `G1` · `#520` · `PR #521`
 
 **Impact:** the credibility gap a skeptical reviewer finds first is closed in writing; 6 new guard checks (133 files); zero runtime changes.
+
+---
+
+### v8.53.0 — reading the store nobody fills ✓ (2026-09-29)
+
+**Minor release closing the claim-hygiene cluster.** Four commands published a token-reduction figure and no two were comparable: `--health` said *"no history, 0 runs"*, `gain` said 2,047 operations at 96.5%, `budget` said 142 ops over a session window, `--report` said 97.6% for the current run.
+
+The cause was not arithmetic, and that is the point. `tracking` defaults to **false**, so `.context/usage.ndjson` is never written — and that is the store `--health`, `history` and the dashboard read. Meanwhile `recordUsage` writes `.context/gain.ndjson` unconditionally. Three surfaces looked empty because they read the one store nobody fills. On this repo, `--health` reported zero runs beside a gain log holding 525 generates.
+
+`src/tracking/usage-source.js` is now the single read path: it normalises both stores into one record shape, dedupes a run logged to both, and reports which stores contributed so a caller can label what it is showing. Populations stay distinct and now say so — 524 generate runs, 2,047 operations and a session window are different things, and `gain` records `ask` queries alongside generates, which is how one log described itself as both 2,047 and 525. That is the rule v8.52.0 set for coverage, applied to the second family of numbers.
+
+Two smaller defects went with it. `Math.max(last.length, 1)` made `history` report *"(last 1 runs)"* for an empty log — a run that never happened. And `gain` records no file count or over-budget flag, which the history table rendered as `0` and `no`: a field the source never captured, displayed as though it had been measured. That is the **same defect v8.52.1 fixed in `bench --submit`**, in a different command — the third appearance of the pattern in this series, which is a strong argument for a lint rather than a fourth one-off fix.
+
+The issue's own premise needed correcting while fixing it: #773 names `.context/usage.json` as a third token store. It is not — that file is the star-nudge run counter. There were two token stores, not three, and the record says so to save the next reader the search.
+
+**Tags:** `src/tracking/usage-source.js` · `readRuns` · `describeSource` · named populations · `#773` · PR `#793`
+
+**Impact:** `--health` reports 96.6% over 524 runs where it reported "no history"; `history` is non-empty wherever the gain log is; every reduction figure names its baseline and window. 195 integration tests (up from 194), 8 new assertions each mutation-checked. Every published metric unmoved — 95.8% token reduction, 78.6% hit@5, 86.4% vs 40.8% honest grep pair, 61.0% task-success proxy.
 
 ---
 
