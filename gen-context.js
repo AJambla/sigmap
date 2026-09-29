@@ -31479,8 +31479,14 @@ function main() {
 
   // v4.2: `sigmap share` — shareable one-liner with live benchmark numbers
   if (args[0] === 'share') {
+    // #763: every number here must be traceable. This previously defaulted to
+    // `reduction = 97, hitAt5 = 88` and emitted them as the USER'S OWN figures
+    // on a repo that had never run a benchmark, and appended the string literal
+    // `6× better results` — a claim measured nowhere, against a published lift
+    // of 2.12×. The text is pasted publicly, so an unmeasured number here is
+    // the most expensive kind.
     const histPath = path.join(cwd, '.context', 'benchmark-history.ndjson');
-    let reduction = 97, hitAt5 = 88;
+    let reduction = null, hitAt5 = null;
 
     if (fs.existsSync(histPath)) {
       try {
@@ -31488,14 +31494,35 @@ function main() {
           .map((l) => { try { return JSON.parse(l); } catch (_) { return null; } }).filter(Boolean);
         const tok = [...entries].reverse().find((e) => e.type === 'token-reduction');
         const ret = [...entries].reverse().find((e) => e.type === 'retrieval');
-        if (tok && tok.reduction) reduction = tok.reduction;
-        if (ret && ret.hitAt5)   hitAt5    = Math.round(ret.hitAt5 * 100);
+        // `!= null` rather than truthiness: a measured 0 is a real result.
+        if (tok && tok.reduction != null) reduction = tok.reduction;
+        if (ret && ret.hitAt5 != null)    hitAt5    = Math.round(ret.hitAt5 * 100);
       } catch (_) {}
     }
 
+    // The published lift comes from the same source `compare` reads, so the two
+    // commands cannot advertise different multipliers.
+    let lift = null;
+    try {
+      const latest = JSON.parse(fs.readFileSync(path.join(__dirname, 'benchmarks', 'latest.json'), 'utf8'));
+      if (latest && latest.honest && typeof latest.honest.lift === 'number') lift = latest.honest.lift;
+    } catch (_) {}
+
+    // Local figures are THIS repo's; the lift is SigMap's published claim. In a
+    // block the user pastes publicly they would otherwise read as one set of
+    // numbers, so the published one says so.
+    const local = [];
+    if (reduction != null) local.push(`${reduction}% fewer tokens`);
+    if (hitAt5 != null)    local.push(`${hitAt5}% retrieval accuracy`);
+
+    const parts = [];
+    if (local.length) parts.push(`${local.join(' · ')} (this repo)`);
+    else              parts.push('not benchmarked locally yet — run `sigmap compare`');
+    if (lift != null) parts.push(`${lift.toFixed(2)}× vs a grep agent (published)`);
+
     const shareText = [
       'Generated with SigMap — the deterministic, verifiable grounding layer for AI code work',
-      `${reduction}% fewer tokens · ${hitAt5}% retrieval accuracy · 6× better results`,
+      parts.join(' · '),
       'https://sigmap.io',
     ].join('\n');
 
@@ -31598,9 +31625,21 @@ function main() {
         const ret = [...entries].reverse().find((e) => e.type === 'retrieval');
         const tok = [...entries].reverse().find((e) => e.type === 'token-reduction');
         if (ret || tok) {
+          // #764: `||` collapsed a MISSING field to 0, and 0 then passed the
+          // `!= null` render guard — so an entry that was never measured
+          // printed `hit@5 : 0%` in a block the command asks users to paste
+          // into a public Discussion, indistinguishable from a real score of
+          // zero. Use `!= null` so absent stays absent and a measured 0 stays 0.
+          const pickPct = (obj, pctKey, fracKey) => {
+            if (!obj) return null;
+            if (obj[pctKey] != null) return obj[pctKey];
+            if (obj[fracKey] != null) return Math.round(obj[fracKey] * 100);
+            return null;
+          };
           localMetrics = {
-            hitAt5Pct:       ret ? (ret.hitAt5Pct || Math.round((ret.hitAt5 || 0) * 100)) : null,
-            reductionPct:    tok ? (tok.reduction || tok.avgReductionPct || null) : null,
+            hitAt5Pct:       pickPct(ret, 'hitAt5Pct', 'hitAt5'),
+            reductionPct:    tok ? (tok.reduction != null ? tok.reduction
+                                    : (tok.avgReductionPct != null ? tok.avgReductionPct : null)) : null,
             runDate:         (ret || tok).ts ? new Date((ret || tok).ts).toISOString().slice(0, 10) : null,
           };
         }
@@ -31635,8 +31674,11 @@ function main() {
       ];
       if (localMetrics) {
         lines.push(bar, ' Local run metrics (this repo):');
-        if (localMetrics.hitAt5Pct != null)    lines.push(` hit@5          : ${localMetrics.hitAt5Pct}%`);
-        if (localMetrics.reductionPct != null)  lines.push(` token reduction: ${localMetrics.reductionPct}%`);
+        // Render `not run` rather than omitting the row: a silently missing
+        // line reads as "this repo has no such metric", which is the same
+        // ambiguity in a different shape.
+        lines.push(` hit@5          : ${localMetrics.hitAt5Pct != null ? localMetrics.hitAt5Pct + '%' : 'not run'}`);
+        lines.push(` token reduction: ${localMetrics.reductionPct != null ? localMetrics.reductionPct + '%' : 'not run'}`);
         if (localMetrics.runDate)               lines.push(` run date       : ${localMetrics.runDate}`);
       } else {
         lines.push(bar, ' Local run metrics: none yet — run node scripts/run-retrieval-benchmark.mjs');
@@ -31646,6 +31688,24 @@ function main() {
       lines.push(' https://github.com/manojmallick/sigmap/discussions');
       lines.push(bar);
       console.log(lines.join('\n'));
+    }
+    // #764: `--submit` asks the user to publish a local result. With nothing
+    // measured, a green exit says "this block is ready to paste" when it
+    // carries no local number — so `sigmap bench --submit > block.txt && post`
+    // publishes an empty submission silently.
+    //
+    // Scoped to TEXT mode deliberately. The `--json` payload already states the
+    // condition explicitly as `local: null`, which a consumer can check, and
+    // that mode is a machine contract other tooling exits-0 against. Failing it
+    // would break a caller that can already tell, to guard a risk it does not
+    // have. The block is still printed either way — the canonical release
+    // figures in it are real.
+    const hasLocal = !!(localMetrics &&
+      (localMetrics.hitAt5Pct != null || localMetrics.reductionPct != null));
+    if (!hasLocal && !args.includes('--json')) {
+      console.error('[sigmap] no local benchmark metric to submit — run `sigmap compare` or');
+      console.error('         node scripts/run-retrieval-benchmark.mjs first.');
+      process.exit(1);
     }
     process.exit(0);
   }
