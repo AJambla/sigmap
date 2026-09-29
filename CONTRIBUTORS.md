@@ -38,6 +38,9 @@ To ensure proper attribution:
 
 We welcome contributions! See [Contributing](./docs/CONTRIBUTING.md) for guidelines.
 
+### Recent Contributors (v8.52.1)
+- **@manojmallick** — fix(claims): the only two commands whose output exists to be republished both printed numbers measured nowhere — `share` appended a literal "6× better results" against a published 2.12× and emitted hardcoded 97/88 as the user's own figures on an unbenchmarked repo, and `bench --submit` rendered a missing hit@5 as "0%" in a block meant for a public Discussion. Every number is now traceable or explicitly absent (#763, #764, PR #789)
+
 ### Recent Contributors (v8.52.0)
 - **@manojmallick** — feat(coverage): four commands printed a coverage percentage for one repo and no two agreed, because each measured a different population through the same primitive and none said which. Three named populations — in-context, indexed, readable — now carry every figure with its numerator and denominator. `doctor` was a real defect rather than a labelling gap: it fed the retrieval index to `coverageScore` and printed "of source files in context", claiming 100% while the run that built that context reported 54% (#762, PR #787)
 

@@ -1494,10 +1494,29 @@ sigmap share
 
 ```
 Generated with SigMap — the deterministic, verifiable grounding layer for AI code work
-95.8% fewer tokens · 78.6% retrieval hit@5 · 43.4% fewer prompts
+95.8% fewer tokens · 78% retrieval accuracy (this repo) · 2.12× vs a grep agent (published)
 https://sigmap.io
 [sigmap] Copied to clipboard.
 ```
+
+On a repo that has never been benchmarked there are no local numbers to print, and
+`share` says so rather than substituting any:
+
+```
+Generated with SigMap — the deterministic, verifiable grounding layer for AI code work
+not benchmarked locally yet — run `sigmap compare` · 2.12× vs a grep agent (published)
+https://sigmap.io
+```
+
+::: warning Every number here is traceable (v8.52.1)
+Local figures are labelled `(this repo)` and come from `.context/benchmark-history.ndjson`;
+the lift is labelled `(published)` and is read from `benchmarks/latest.json` — the same source
+[`compare`](#compare) reads, so the two commands cannot advertise different multipliers.
+
+Before v8.52.1 this line ended with the literal `6× better results`, measured nowhere and
+roughly three times the published 2.12×, and a repo with no history emitted a hardcoded
+`97% fewer tokens · 88% retrieval accuracy` as if those were its own measurements.
+:::
 
 ---
 
@@ -1603,6 +1622,14 @@ sigmap bench --submit --json
 ```
 
 When local benchmark history exists (`.context/benchmark-history.ndjson`), the local `hit@5` and token-reduction numbers are appended automatically.
+
+A history entry that carries no value for a metric renders **`not run`**, never `0%` — a
+measured zero and an unmeasured one have to stay distinguishable in a block intended for
+publication. Text mode **exits 1** when no local metric could be produced, so
+`sigmap bench --submit > block.txt && post` cannot publish an empty submission on a green
+exit; the block is still printed, because the canonical release figures in it are real.
+`--json` keeps exit 0 — it states the same condition as `"local": null`, which a consumer can
+check, and it is a machine contract other tooling relies on (v8.52.1).
 
 JSON output (`--json`) returns a machine-readable object:
 

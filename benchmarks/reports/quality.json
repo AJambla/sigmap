@@ -1,6 +1,6 @@
 {
-  "version": "8.52.0",
-  "timestamp": "2026-09-29T18:45:51.535Z",
+  "version": "8.52.1",
+  "timestamp": "2026-09-29T20:06:09.148Z",
   "assumptions": {
     "callsPerDay": 10,
     "models": [
@@ -141,7 +141,7 @@
     {
       "repo": "gin",
       "language": "Go",
-      "rawTokens": 222308,
+      "rawTokens": 222307,
       "finalTokens": 11620,
       "groundedSymbols": 638,
       "estimatedRawSymbols": 1112,
@@ -160,33 +160,33 @@
       "costRows": [
         {
           "model": "GPT-4o",
-          "rawDayRegular": 5.5577,
+          "rawDayRegular": 5.557675,
           "sigDayRegular": 0.2905,
-          "savedDayRegular": 5.2672,
-          "rawDayCached": 2.77885,
+          "savedDayRegular": 5.267175,
+          "rawDayCached": 2.7788375,
           "sigDayCached": 0.14525,
-          "savedDayCached": 2.6336,
-          "savedMonthRegular": 158.016
+          "savedDayCached": 2.6335875,
+          "savedMonthRegular": 158.01525
         },
         {
           "model": "Claude Sonnet",
-          "rawDayRegular": 6.66924,
+          "rawDayRegular": 6.66921,
           "sigDayRegular": 0.3486,
-          "savedDayRegular": 6.32064,
-          "rawDayCached": 0.666924,
+          "savedDayRegular": 6.320609999999999,
+          "rawDayCached": 0.6669210000000001,
           "sigDayCached": 0.03486,
-          "savedDayCached": 0.632064,
-          "savedMonthRegular": 189.6192
+          "savedDayCached": 0.6320610000000001,
+          "savedMonthRegular": 189.61829999999998
         },
         {
           "model": "Claude Haiku",
-          "rawDayRegular": 2.22308,
+          "rawDayRegular": 2.22307,
           "sigDayRegular": 0.1162,
-          "savedDayRegular": 2.10688,
-          "rawDayCached": 0.222308,
+          "savedDayRegular": 2.10687,
+          "rawDayCached": 0.22230700000000003,
           "sigDayCached": 0.01162,
-          "savedDayCached": 0.21068800000000001,
-          "savedMonthRegular": 63.206399999999995
+          "savedDayCached": 0.21068700000000004,
+          "savedMonthRegular": 63.20609999999999
         }
       ]
     },
