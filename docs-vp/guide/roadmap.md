@@ -1,6 +1,6 @@
 ---
 title: Roadmap
-description: SigMap version history and roadmap. From v0.0 to v8.51.8, with recent releases completing the grounded-codegen plan — a realistic §9 ablation (real-symbol corpus, exact-signature grounding, --verbose), a Gemini (AI Studio) provider for the §9 ablation, the init Creation-workflow CLAUDE.md block, scaffold persistence, the LLM A/B hallucination ablation harness, the sigmap create orchestrator and its four guard stages (scaffold, verify-plan, verify-ai-output, review-pr), the conventions command with its full flag set (--conflicts, --inject, --report, --ci, --fix, --update), the grounding benchmark, read-time self-heal, live-index MCP write hooks, the get_callee_signatures MCP tool (exact callee signatures), realistic per-query savings, release-pipeline robustness (bundle integrity + version.json gates, standalone-bundle smoke test), the sigmap gain token-savings dashboard, supply-chain hardening (zero system-shell access), Squeeze input minimization with symbol enrichment, source-of-truth llms.txt, the verify-ai-output Hallucination Guard, and Memory tools (note, status, read_memory MCP tool).
+description: SigMap version history and roadmap. From v0.0 to v8.51.9, with recent releases completing the grounded-codegen plan — a realistic §9 ablation (real-symbol corpus, exact-signature grounding, --verbose), a Gemini (AI Studio) provider for the §9 ablation, the init Creation-workflow CLAUDE.md block, scaffold persistence, the LLM A/B hallucination ablation harness, the sigmap create orchestrator and its four guard stages (scaffold, verify-plan, verify-ai-output, review-pr), the conventions command with its full flag set (--conflicts, --inject, --report, --ci, --fix, --update), the grounding benchmark, read-time self-heal, live-index MCP write hooks, the get_callee_signatures MCP tool (exact callee signatures), realistic per-query savings, release-pipeline robustness (bundle integrity + version.json gates, standalone-bundle smoke test), the sigmap gain token-savings dashboard, supply-chain hardening (zero system-shell access), Squeeze input minimization with symbol enrichment, source-of-truth llms.txt, the verify-ai-output Hallucination Guard, and Memory tools (note, status, read_memory MCP tool).
 head:
   - - meta
     - property: og:title
@@ -835,6 +835,24 @@ Two milestones in one release. **`verify-ai-output` Reliable MVP** (#232) grows 
 **Tags:** `KNOWN_LIMITATIONS.md` · `extraction honesty` · `tier label` · `drift guard` · `G1` · `#520` · `PR #521`
 
 **Impact:** the credibility gap a skeptical reviewer finds first is closed in writing; 6 new guard checks (133 files); zero runtime changes.
+
+---
+
+### v8.51.9 — the command that never worked ✓ (2026-09-28)
+
+**Patch release from a full-surface audit.** Every CLI command was run one by one against a fixture repo — 97 invocations, **93 green** — and every benchmark and gate script was executed, **20 of 20 passing**. One genuine defect surfaced.
+
+`sigmap compare` failed for every user, inside and outside the source checkout, and made them wait about ninety seconds first. It spawns `run-retrieval-benchmark.mjs --compare` and does a strict `JSON.parse` of that process's entire stdout — but the payload was emitted at the bottom of the script, *after* the terminal table. So stdout was a box-drawn results table followed by valid JSON, the parse died on the leading rule, and the command exited 1 having just run the full eighteen-repo retrieval benchmark. Both halves were correct; only their order was wrong, and `--json` had always got it right by emitting and exiting before any human output.
+
+The first fix broke it differently, which is worth recording. Moving the block above the table made it read `avgHit` and `avgRand` — locals accumulated by the loop that *prints* that table — so a boundary parse error became a runtime `ReferenceError`. It now derives the same task-weighted averages straight from `results`, and a test pins that it never reaches for those locals again. Exiting early must also not silently stop recording the run, so the benchmark-history append became a parameterised function called on both paths.
+
+The other three non-green commands were not defects but correct refusals reported from the wrong directory: `--diagnose-extractors` needs SigMap's own fixture corpus and passes 36/36 from the repo root, and `scaffold` declines below its confidence floor in a repo with no naming convention while proposing correctly at 100% consistency when one exists. Worth stating because a refusal that exits non-zero looks identical to a failure in a smoke test, and the distinction is the whole value of the command.
+
+The audit also found the CLI reference documenting output `compare` has never produced — the honest grep pair rather than the random baseline it actually scores against. The example now shows real output, with the discrepancy called out rather than quietly corrected: `compare` reports a 4.9× lift over random selection, while the published claim remains 2.12× over a grep agent.
+
+**Tags:** `run-retrieval-benchmark --compare` · `appendHistoryWith` · consumer shape-check · `#757` · PR `#758`
+
+**Impact:** `sigmap compare` works for the first time in the releases this audit covers; 20/20 benchmark and gate scripts pass with **no published metric moved** — 95.8% token reduction, 78.6% hit@5, 86.4% vs 40.8% honest grep pair, test-discovery F1 98.0%. 192 integration tests (up from 191), 6 new assertions, mutation-checked.
 
 ---
 

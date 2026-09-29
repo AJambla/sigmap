@@ -20982,7 +20982,7 @@ __factories["./src/mcp/server"] = function(module, exports) {
 
   const SERVER_INFO = {
     name: 'sigmap',
-    version: '8.51.8',
+    version: '8.51.9',
     description: 'SigMap MCP server — code signatures on demand',
   };
 
@@ -27700,7 +27700,7 @@ function __tryGit(args, opts = {}) {
   catch (_) { return ''; }
 }
 
-const VERSION = '8.51.8';
+const VERSION = '8.51.9';
 const MARKER = '\n\n## Auto-generated signatures\n<!-- Updated by gen-context.js -->\n';
 
 function requireSourceOrBundled(key) {
@@ -31349,8 +31349,18 @@ function main() {
       );
     } catch (e) { raw = (e && e.stdout) ? e.stdout : ''; }
 
+    // Strict parse first; then fall back to the last JSON-looking line. The
+    // producer is supposed to emit the payload and nothing else, but it once
+    // emitted it AFTER the terminal table and this command exited 1 for every
+    // user, after a ~90s wait (#757). Degrade instead of failing outright.
     let results = null;
     try { results = JSON.parse(raw); } catch (_) {}
+    if (!results) {
+      const line = String(raw).trim().split('\n').reverse()
+        .find((l) => l.trim().startsWith('{') && l.trim().endsWith('}'));
+      if (line) { try { results = JSON.parse(line); } catch (_) {} }
+    }
+    if (results && !(results.sigmap && results.baseline)) results = null;
 
     if (!results) {
       console.error('[sigmap] Could not parse benchmark output.');
