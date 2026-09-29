@@ -102,4 +102,74 @@ function _walk(dir, excludeSet, out) {
   }
 }
 
-module.exports = { coverageScore, CODE_EXTS };
+/**
+ * Named populations (#762).
+ *
+ * Four surfaces printed a coverage percentage for one repo and no two agreed:
+ * `validate` 98% (175/179), `doctor` 100%, `--health` 100% (170/170) and
+ * `--report` 54% (91/170). They were not in conflict — they were measuring
+ * DIFFERENT populations through the same primitive, and none of them said
+ * which. `doctor` was the sharpest case: it fed `coverageScore` the retrieval
+ * index and then printed "of source files in context", contradicting the very
+ * run that built that context.
+ *
+ * Differing numbers are fine. Unlabelled ones are not. Every surface now names
+ * its population, so a reader can tell at a glance that 54% and 100% are
+ * answers to two different questions.
+ */
+const POPULATIONS = {
+  // Survived the token budget — what the agent actually sees.
+  'in-context': { label: 'in-context', noun: 'scoped source files' },
+  // Present in the retrieval index, including anything stored outside the
+  // budgeted context file (sig-index, per-module splits, cold store).
+  indexed:      { label: 'indexed',    noun: 'files' },
+  // Readable on disk under srcDirs — an access check, not a coverage claim.
+  readable:     { label: 'readable',   noun: 'files in srcDirs' },
+};
+
+/**
+ * Render a coverage figure with its population, numerator and denominator.
+ * `indexed 98% (175/179 files)` — never a bare percentage.
+ */
+function formatCoverage(cov, population, opts = {}) {
+  const pop = POPULATIONS[population];
+  if (!pop) throw new Error(`unknown coverage population: ${population}`);
+  const included = opts.included != null ? opts.included : cov.included;
+  const total    = opts.total    != null ? opts.total    : cov.total;
+  const grade    = opts.grade === false ? '' : ` grade ${cov.grade}`;
+  return `${pop.label} ${cov.score}% (${included}/${total} ${pop.noun})${grade}`;
+}
+
+/**
+ * The files actually present in the generated context file — the `in-context`
+ * population. Parsed from the `### <relpath>` section headings rather than the
+ * retrieval index, because the index deliberately holds more than the budget
+ * admitted, and conflating the two is what produced the contradiction above.
+ */
+function inContextFiles(cwd) {
+  const fs   = require('fs');
+  const path = require('path');
+  const candidates = [
+    path.join(cwd, '.github', 'copilot-instructions.md'),
+    path.join(cwd, 'CLAUDE.md'),
+    path.join(cwd, 'AGENTS.md'),
+    path.join(cwd, 'GEMINI.md'),
+  ];
+  const out = new Set();
+  for (const file of candidates) {
+    let content;
+    try { content = fs.readFileSync(file, 'utf8'); } catch (_) { continue; }
+    const markerIdx = content.indexOf('## Auto-generated signatures');
+    if (markerIdx !== -1) content = content.slice(markerIdx);
+    for (const m of content.matchAll(/^### (.+)$/gm)) {
+      const rel = m[1].trim();
+      if (!rel || rel.includes(' ')) continue;
+      out.add(path.resolve(cwd, rel));
+    }
+    if (out.size) break; // first adapter output that carries sections wins
+  }
+  return [...out].map((filePath) => ({ filePath }));
+}
+
+module.exports = { coverageScore, formatCoverage, inContextFiles, POPULATIONS, CODE_EXTS };
+
