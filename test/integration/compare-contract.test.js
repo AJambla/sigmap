@@ -77,19 +77,27 @@ test('the compare consumer tolerates a stray line on stdout', () => {
   // Hardening: a future stray line should degrade, not fail the command.
   assert.ok(/reverse\(\)[\s\S]{0,120}startsWith\('\{'\)/.test(gen),
     'compare should fall back to the last JSON-looking line');
-  assert.ok(/results\.sigmap && results\.baseline/.test(gen),
+  assert.ok(/sum\.sigmap && sum\.grepBaseline/.test(gen),
     'compare should validate the payload shape, not just that it parsed');
 });
 
 test('the consumer and producer agree on the payload shape', () => {
-  // producer keys
-  const block = src.slice(src.indexOf('if (COMPARE) {'));
-  const producerHas = /sigmap:\s*\{\s*hitAt5/.test(block) && /baseline:\s*\{\s*hitAt5/.test(block);
-  assert.ok(producerHas, 'producer no longer emits {sigmap,baseline}.hitAt5');
-  // consumer reads
-  assert.ok(/results\.sigmap\.hitAt5/.test(gen) && /results\.baseline\.hitAt5/.test(gen),
-    'consumer no longer reads {sigmap,baseline}.hitAt5');
-  assert.ok(/results\.sigmap\.tokens/.test(gen), 'consumer no longer reads sigmap.tokens');
+  // Since #760 the producer is run-honest-benchmark.mjs --json, whose payload
+  // is {summary:{sigmap:{hitAt5}, grepBaseline:{hitAt5}, lift, tasks, repos}}.
+  const honest = fs.readFileSync(path.join(ROOT, 'scripts', 'run-honest-benchmark.mjs'), 'utf8');
+  assert.ok(/grepBaseline/.test(honest), 'producer no longer emits grepBaseline');
+  assert.ok(/sum\.sigmap\.hitAt5/.test(gen) && /sum\.grepBaseline\.hitAt5/.test(gen),
+    'consumer no longer reads the honest summary pair');
+  assert.ok(/sum\.lift/.test(gen), 'consumer no longer reads the published lift');
+});
+
+test("the retrieval benchmark's own --compare contract is still intact", () => {
+  // compare no longer uses it, but --compare remains a supported machine mode
+  // of run-retrieval-benchmark.mjs and must keep emitting before the table (#757).
+  const iCompare = src.indexOf('if (COMPARE) {');
+  const iTable = src.indexOf('// Terminal table');
+  assert.ok(iCompare !== -1 && iCompare < iTable,
+    'run-retrieval-benchmark --compare regressed behind the table again');
 });
 
 test('--compare aggregates do not depend on the table-rendering loop', () => {
@@ -101,6 +109,54 @@ test('--compare aggregates do not depend on the table-rendering loop', () => {
     'the COMPARE block reads table-loop locals that are not initialised yet');
   assert.ok(/results\.reduce/.test(body),
     'the COMPARE block should derive its own aggregates from results');
+});
+
+// ── #760: compare must publish the SAME claim as every other surface ───────
+
+test('compare scores against the grep agent, not random selection', () => {
+  // It reported 4.9x over random while README/docs/latest.json published 2.12x
+  // over a grep agent. The honest corpus exists precisely because the random
+  // baseline overstates — this command had never been switched to it.
+  assert.ok(/run-honest-benchmark\.mjs/.test(gen),
+    'compare must spawn the honest benchmark, which is the published claim');
+  assert.ok(!/\[benchScript, '--compare'\]/.test(gen),
+    'compare still spawns the retrieval benchmark random-baseline path');
+  assert.ok(/grepBaseline/.test(gen), 'compare must read the grep baseline');
+  assert.ok(/SigMap vs grep agent/.test(gen),
+    'the output must name the baseline, so it cannot be mistaken for another comparison');
+});
+
+test("compare's lift agrees with the published latest.json", () => {
+  // The whole point: one number, one source. If these drift the command is
+  // advertising something the project does not claim.
+  const latest = JSON.parse(fs.readFileSync(path.join(ROOT, 'benchmarks', 'latest.json'), 'utf8'));
+  const h = latest.honest;
+  assert.ok(h, 'latest.json has no honest block');
+  const derived = h.sigmap_hit_at_5 / h.grep_baseline_hit_at_5;
+  assert.ok(Math.abs(derived - h.lift) < 0.02,
+    `latest.json is internally inconsistent: ${h.sigmap_hit_at_5}/${h.grep_baseline_hit_at_5} = ${derived.toFixed(2)} but lift says ${h.lift}`);
+  // and the README publishes the same pair
+  const readme = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8');
+  const pctS = (h.sigmap_hit_at_5 * 100).toFixed(1);
+  const pctG = (h.grep_baseline_hit_at_5 * 100).toFixed(1);
+  assert.ok(readme.includes(pctS) && readme.includes(pctG),
+    `README should publish the same honest pair (${pctS}% vs ${pctG}%)`);
+});
+
+test('no token figure is derived from an assumed per-file constant', () => {
+  // `fileCount * 4000` was rendered next to a real signature count as though
+  // both were observed. 4,000 tokens per file was never measured.
+  assert.ok(!/Avg tokens/.test(gen),
+    'compare still prints the invented fileCount*4000 token baseline');
+  assert.ok(/saved benchmark/.test(gen),
+    'a stored figure must be labelled as stored, not presented as measured by this run');
+});
+
+test('progress output goes to stderr so --json stays pipeable', () => {
+  // console.log for progress meant `compare --json` emitted a human line ahead
+  // of its payload — the same defect as #757, one level up.
+  assert.ok(/console\.error\('\[sigmap\] Running comparison benchmark/.test(gen),
+    'compare progress must go to stderr, not stdout');
 });
 
 console.log(`\n  compare-contract: ${pass} passed, ${fail} failed`);

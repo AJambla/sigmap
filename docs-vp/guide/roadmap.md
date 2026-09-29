@@ -1,6 +1,6 @@
 ---
 title: Roadmap
-description: SigMap version history and roadmap. From v0.0 to v8.51.9, with recent releases completing the grounded-codegen plan — a realistic §9 ablation (real-symbol corpus, exact-signature grounding, --verbose), a Gemini (AI Studio) provider for the §9 ablation, the init Creation-workflow CLAUDE.md block, scaffold persistence, the LLM A/B hallucination ablation harness, the sigmap create orchestrator and its four guard stages (scaffold, verify-plan, verify-ai-output, review-pr), the conventions command with its full flag set (--conflicts, --inject, --report, --ci, --fix, --update), the grounding benchmark, read-time self-heal, live-index MCP write hooks, the get_callee_signatures MCP tool (exact callee signatures), realistic per-query savings, release-pipeline robustness (bundle integrity + version.json gates, standalone-bundle smoke test), the sigmap gain token-savings dashboard, supply-chain hardening (zero system-shell access), Squeeze input minimization with symbol enrichment, source-of-truth llms.txt, the verify-ai-output Hallucination Guard, and Memory tools (note, status, read_memory MCP tool).
+description: SigMap version history and roadmap. From v0.0 to v8.51.10, with recent releases completing the grounded-codegen plan — a realistic §9 ablation (real-symbol corpus, exact-signature grounding, --verbose), a Gemini (AI Studio) provider for the §9 ablation, the init Creation-workflow CLAUDE.md block, scaffold persistence, the LLM A/B hallucination ablation harness, the sigmap create orchestrator and its four guard stages (scaffold, verify-plan, verify-ai-output, review-pr), the conventions command with its full flag set (--conflicts, --inject, --report, --ci, --fix, --update), the grounding benchmark, read-time self-heal, live-index MCP write hooks, the get_callee_signatures MCP tool (exact callee signatures), realistic per-query savings, release-pipeline robustness (bundle integrity + version.json gates, standalone-bundle smoke test), the sigmap gain token-savings dashboard, supply-chain hardening (zero system-shell access), Squeeze input minimization with symbol enrichment, source-of-truth llms.txt, the verify-ai-output Hallucination Guard, and Memory tools (note, status, read_memory MCP tool).
 head:
   - - meta
     - property: og:title
@@ -835,6 +835,24 @@ Two milestones in one release. **`verify-ai-output` Reliable MVP** (#232) grows 
 **Tags:** `KNOWN_LIMITATIONS.md` · `extraction honesty` · `tier label` · `drift guard` · `G1` · `#520` · `PR #521`
 
 **Impact:** the credibility gap a skeptical reviewer finds first is closed in writing; 6 new guard checks (133 files); zero runtime changes.
+
+---
+
+### v8.51.10 — the command that oversold itself ✓ (2026-09-29)
+
+**Patch release closing a claim-hygiene defect and the v8.48 audit backlog.**
+
+`sigmap compare` — the command whose entire job is *"SigMap vs a baseline"* — published two numbers that disagreed with everything else SigMap publishes. It scored against random selection (~16%) and reported a **4.9× lift**, while README, this site, `version.json` and `benchmarks/latest.json` all publish the honest corpus: 86.4% vs 40.8% against a single-shot grep agent, a **2.12× lift**. The honest corpus exists *precisely because* the random baseline overstates — v8.19 introduced it to stop quoting random-selection lift, and this command was never switched over. It now runs the honest benchmark, which is both the published claim and faster: ~38s against the ~90s retrieval run it replaces.
+
+The second number was worse than inconsistent. `Avg tokens 93 vs 1,289,556` derived its baseline from `fileCount × 4000` — four thousand tokens per file, assumed, never measured — and rendered it beside a real signature count as though both were observed. It now carries the measured 95.8% average, labelled as coming from the saved benchmark rather than from the current run.
+
+Fixing it surfaced a third defect of the same family as the one closed in v8.51.9: `compare --json` had never been pipeable, because the progress line used `console.log` and put a human string on stdout ahead of the payload. Diagnostics on the machine channel, one level up from where the last release found it. A regression test now pins the command's hit@5 pair to `latest.json` *and* to the figures README publishes, so the command and the project cannot drift apart again.
+
+The same pass closed the v8.48 CLI audit backlog — #656, #657, #658, #660 and #661 — by re-verifying each individually rather than bulk-closing, with the evidence recorded on every issue. That discipline earned its keep twice over: four were genuinely fixed, and the fifth (#656) was too, but only after an initial check of mine reported a false reproduction. I had read an exit code without the `overBudget` flag printed beside it, in a run where the budget legitimately fit; the correction is on the issue.
+
+**Tags:** `run-honest-benchmark --json` · grep-agent baseline · stderr diagnostics · `latest.json` agreement test · `#760` · PR `#761`
+
+**Impact:** `compare` now reports the same claim as every other surface — 86.4% vs 40.8%, 2.12× — where it previously advertised 4.9×; no invented token figure remains in any shipped output. 192 integration tests, 11 assertions on the compare contract, each mutation-checked. Every published metric unmoved: 95.8% token reduction, 78.6% hit@5, 61.0% task-success proxy, 43.4% prompt reduction.
 
 ---
 
