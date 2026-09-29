@@ -185,15 +185,23 @@ try {
 // ── Test 9: bench --submit ────────────────────────────────────────────────────
 
 console.log('\n[9] bench --submit (v5.9 community benchmarks)');
-try {
-  const out = run(binary, ['bench', '--submit'], TMPDIR);
+{
+  // TMPDIR has no .context/benchmark-history.ndjson, so there is no local
+  // metric to submit. Since v8.52.1 text mode exits 1 for exactly that case
+  // (#764) — a green exit previously said "ready to paste" for a block
+  // carrying nothing measured. The block is still printed, which is what this
+  // smoke test is about, so assert on the OUTPUT and accept the non-zero exit.
+  let out = '';
+  try {
+    out = run(binary, ['bench', '--submit'], TMPDIR);
+  } catch (e) {
+    out = (e && (e.stdout || e.message)) ? String(e.stdout || e.message) : '';
+  }
   if (out.includes('SigMap') || out.includes('sigmap')) {
     pass('bench --submit produced output');
   } else {
     fail('bench --submit output missing expected content', new Error(`output: ${out.slice(0, 200)}`));
   }
-} catch (e) {
-  fail('bench --submit exited non-zero', e);
 }
 
 // ── Test 10: bench --submit --json ───────────────────────────────────────────
