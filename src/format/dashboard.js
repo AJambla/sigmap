@@ -405,7 +405,8 @@ function tokenReductionPanelHtml(tr) {
 }
 
 function buildDashboardData(cwd, health) {
-  const entries = readLog(cwd);
+  // #773: one read path — usage.ndjson alone is empty whenever tracking is off.
+  const entries = require('../tracking/usage-source').readRuns(cwd);
   const recent = entries.slice(-30);
   const tokenReductionTrend = recent.map((e) => toNumber(e.reductionPct)).filter((n) => n !== null);
   const hitAt5Trend = readBenchmarkTrend(cwd);
