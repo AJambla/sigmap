@@ -10,6 +10,19 @@ Format: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [8.51.10] — 2026-09-29
+
+### Fixed
+- **`sigmap compare` advertised a bigger lift than the project publishes** (#760, PR #761) — the command whose entire job is *"SigMap vs a baseline"* scored against `randomBaseline` (~16%) and reported a **4.9× lift**, while README, `docs-vp/`, `version.json` and `benchmarks/latest.json` all publish the honest corpus: **86.4% vs 40.8%** against a single-shot grep agent, a **2.12× lift**. The honest corpus exists *precisely because* the random baseline overstates — v8.19 introduced it to stop quoting random-selection lift, and this command was never switched over. Same failure class as #697 (counts drifting across surfaces) and #743 (the measurement certifying its own bug). `compare` now spawns `run-honest-benchmark.mjs --json`, which already emits pure JSON and runs in **~38s against the ~90s** retrieval run it replaces, so the fix is also faster. The output names the baseline (`SigMap vs grep agent`, corpus size) so no reader can mistake which comparison they are looking at
+- **The token row beside it was fabricated** (#760, PR #761) — `Avg tokens 93 vs 1,289,556` derived its baseline from `fileCount * 4000`: four thousand tokens per file, **assumed, never measured**, and rendered next to a real signature count as though both were observed. It now reports the measured **95.8% average reduction** from `latest.json`, explicitly labelled as coming from the saved benchmark rather than from this run
+- **`compare --json` has never been pipeable** (PR #761) — the progress line used `console.log`, putting a human string on stdout ahead of the machine payload. That is the same defect as #757 one level up: diagnostics on the machine channel. Moved to stderr, so the JSON mode now pipes cleanly into a parser
+
+### Changed
+- **`compare`'s claim is now pinned to `latest.json` by test** (PR #761) — a regression test asserts the command's hit@5 pair agrees with the published SSOT *and* that README carries the same two figures, so the command and the project cannot drift apart again. Eleven assertions, each mutation-checked: reverting to the random baseline, or putting progress back on stdout, fails exactly one test
+- **The v8.48 CLI audit backlog is closed** — #656, #657, #658, #660 and #661 were each re-verified individually rather than bulk-closed, with the evidence recorded on every issue: weight decay converges 1.5 → 1.138 toward 1.0 (#657); `displayPath` restores original casing so `--impact` renders `src/MyService.js` (#658); `validate` coverage is bounded by construction with stale index entries counted separately (#660); zero implemented subcommands are missing from `--help` (#661); and the `--report --json` over-budget gate fires correctly — `overBudget: true` exits 1 in both JSON and text mode, `exitWithCode()` having replaced the `process.exit(0)` that clobbered it, with three dedicated cases in `test/integration/audit-criticals.test.js` (#656)
+
+---
+
 ## [8.51.9] — 2026-09-28
 
 ### Fixed

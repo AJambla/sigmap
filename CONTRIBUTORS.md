@@ -38,6 +38,10 @@ To ensure proper attribution:
 
 We welcome contributions! See [Contributing](./docs/CONTRIBUTING.md) for guidelines.
 
+### Recent Contributors (v8.51.10)
+- **@manojmallick** — fix(compare): the command whose job is "SigMap vs a baseline" scored against random selection and reported a 4.9x lift while the project publishes 2.12x over a grep agent — and printed a token baseline derived from an assumed 4,000 tokens per file, never measured. Both now come from the published sources, and a test pins the pair to `latest.json` so command and project cannot drift apart (#760, PR #761)
+- **@manojmallick** — chore: closed the v8.48 CLI audit backlog (#656, #657, #658, #660, #661) by re-verifying each individually rather than bulk-closing, with the evidence recorded on every issue
+
 ### Recent Contributors (v8.51.9)
 - **@manojmallick** — fix(compare): `sigmap compare` failed for every user and made them wait ~90s first — the `--compare` payload was emitted after the terminal table, so the consumer's strict `JSON.parse` of the whole stdout died on the leading box rule. Both halves were correct; only their order was wrong. Found by smoke-testing the entire CLI surface, 93 of 97 commands green, this the only genuine defect (#757, PR #758)
 

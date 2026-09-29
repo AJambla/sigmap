@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-28T18:04:58.060Z",
+  "generated": "2026-09-29T17:28:39.126Z",
   "methodology": {
     "corpus": "benchmarks/tasks/*.jsonl",
     "scorer": "src/eval/scorer.js hitAtK/reciprocalRank, k=5",
