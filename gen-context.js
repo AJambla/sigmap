@@ -31267,7 +31267,12 @@ function main() {
     // outside a checkout the old unconditional spawn burned ~30-60s and then
     // died on `Could not parse benchmark output`. Probe for both before
     // spawning anything, and fall back to the user's own recorded history.
-    const benchScript = path.join(__dirname, 'scripts', 'run-retrieval-benchmark.mjs');
+    // #760: compare now scores against the GREP AGENT, not random selection.
+    // The honest corpus is what README, docs-vp and latest.json all publish
+    // (86.4% vs 40.8%, 2.12x); the random baseline overstates, which is the
+    // whole reason the honest corpus was introduced. This command was still
+    // quoting 4.9x over random and disagreeing with every other surface.
+    const benchScript = path.join(__dirname, 'scripts', 'run-honest-benchmark.mjs');
     const benchCorpus = path.join(__dirname, 'benchmarks', 'tasks');
     const hasCorpus = fs.existsSync(benchScript) && fs.existsSync(benchCorpus);
     const forceRun = args.includes('--run');
@@ -31337,15 +31342,18 @@ function main() {
     }
 
     const { execFileSync } = require('child_process');
-    console.log('[sigmap] Running comparison benchmark (this may take ~30s)...\n');
+    // Progress goes to STDERR. This was console.log, so `compare --json` emitted
+    // a human line ahead of its payload and could never be piped into a parser —
+    // the same defect as #757, one level up: diagnostics on the machine channel.
+    console.error('[sigmap] Running comparison benchmark (this may take ~40s)...\n');
 
     let raw = '';
     try {
       // Shell-free: run the node binary directly with the script path as an argv.
       raw = execFileSync(
         process.execPath,
-        [benchScript, '--compare'],
-        { cwd, timeout: 90_000, encoding: 'utf8' }
+        [benchScript, '--json'],
+        { cwd, timeout: 180_000, encoding: 'utf8' }
       );
     } catch (e) { raw = (e && e.stdout) ? e.stdout : ''; }
 
@@ -31360,7 +31368,8 @@ function main() {
         .find((l) => l.trim().startsWith('{') && l.trim().endsWith('}'));
       if (line) { try { results = JSON.parse(line); } catch (_) {} }
     }
-    if (results && !(results.sigmap && results.baseline)) results = null;
+    const sum = results && results.summary;
+    if (!(sum && sum.sigmap && sum.grepBaseline)) results = null;
 
     if (!results) {
       console.error('[sigmap] Could not parse benchmark output.');
@@ -31371,14 +31380,24 @@ function main() {
     if (args.includes('--json')) {
       process.stdout.write(JSON.stringify(results, null, 2) + '\n');
     } else {
-      const pct  = (v) => `${(v * 100).toFixed(1)}%`;
-      const lift = (a, b) => (b > 0 ? (a / b).toFixed(1) : '∞');
+      const pct = (v) => `${(v * 100).toFixed(1)}%`;
+      // The old token row was `fileCount * 4000` — an assumed 4k-per-file
+      // constant rendered beside a real signature count as if both were
+      // observed. Report the MEASURED reduction from the saved benchmark
+      // instead, and label it as saved rather than measured by this run.
+      let tokenLine = null;
+      try {
+        const latest = JSON.parse(fs.readFileSync(path.join(__dirname, 'benchmarks', 'latest.json'), 'utf8'));
+        const red = latest && latest.metrics && latest.metrics.overall_token_reduction_pct;
+        if (typeof red === 'number') tokenLine = ` Token cut     ${red.toFixed(1)}% average (saved benchmark, 21 repos)`;
+      } catch (_) {}
       console.log([
         bar,
-        ' SigMap vs Baseline',
+        ' SigMap vs grep agent',
         bar,
-        ` hit@5         ${pct(results.sigmap.hitAt5)} vs ${pct(results.baseline.hitAt5)}   (${lift(results.sigmap.hitAt5, results.baseline.hitAt5)}× lift)`,
-        ` Avg tokens    ${results.sigmap.tokens.toLocaleString()} vs ${results.baseline.tokens.toLocaleString()}`,
+        ` hit@5         ${pct(sum.sigmap.hitAt5)} vs ${pct(sum.grepBaseline.hitAt5)}   (${Number(sum.lift).toFixed(2)}× lift)`,
+        ` Corpus        ${sum.tasks} tasks · ${sum.repos} repos (honest split)`,
+        ...(tokenLine ? [tokenLine] : []),
         bar,
       ].join('\n'));
     }
