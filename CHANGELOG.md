@@ -10,6 +10,16 @@ Format: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [8.52.2] — 2026-09-29
+
+### Fixed
+- **v8.52.1 published to npm but shipped no binaries** (PR #791) — every `Build` job in `Release Binaries` failed at *Smoke-test binary*, so nothing was uploaded and *Attach to GitHub Release* then died on a missing `dist/release/`. `scripts/verify-binary.mjs` test 9 runs `bench --submit` in an empty `TMPDIR` and treated a non-zero exit as failure — but since v8.52.1 that case exits 1 **deliberately** (#764): there is no local metric to submit, and a green exit previously said "ready to paste" for a block carrying nothing measured. Test 9 now asserts what it is actually about — that the submission block is still printed — and accepts the non-zero exit, capturing stdout from the thrown error the way the other exit-tolerant checks do. **The v8.52.1 GitHub Release remains without binary assets**; npm `sigmap@8.52.1` was unaffected, since binaries are not part of the npm package. Users needing a standalone binary should take v8.52.2
+
+### Changed
+- **A behaviour change reached a tag while PR CI was fully green** (PR #791) — this was the *fourth* place depending on the old `bench --submit` exit contract. Three were found and fixed while doing #764; this one was missed because `release-binaries.yml` is `verify-binary.mjs`'s only caller and it triggers on **tag push, never on pull requests**. Both #789 and #790 passed every check while the failure was already guaranteed. The smoke test only runs after the tag exists, which is the worst moment to learn a CLI contract moved — running it against a single ubuntu build in PR CI is the structural fix and is tracked separately
+
+---
+
 ## [8.52.1] — 2026-09-29
 
 ### Fixed
