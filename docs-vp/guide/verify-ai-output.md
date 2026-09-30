@@ -28,6 +28,14 @@ Node/Python builtins, scoped packages, and language globals are allow-listed to
 keep precision high. Python bare imports are intentionally **not** flagged
 (stdlib is unbounded offline).
 
+Since **v8.54.1** the globals allowlist lives in `src/verify/globals.js` as
+grouped data — 184 names across ECMAScript, Web/Node platform, Node module
+scope, test-runner and Python built-ins. It replaced a hand-maintained inline
+literal that stopped at `encodeURIComponent`, so `structuredClone(obj)` — a Node
+and browser global since Node 17 — was reported as fabricated at `high`
+confidence (#777). A missing global is now a one-line addition to the right
+group.
+
 ### Arity checks (v8.28.0)
 
 Because the balanced scanner made JS/TS (v8.27) and Go (v8.46) parameter
@@ -74,6 +82,26 @@ heuristic suggestion (labeled as such — it's a Levenshtein guess, not a fact):
   L14  [Fake npm script]  npm script not in package.json: buidl
          ↳ Did you mean `build`?
 ```
+
+### Where suggestions may come from (v8.54.1, #777)
+
+Applying a suggestion is a code edit, so a bad one is worse than none. Until
+v8.54.1 the candidate pool was the whole signature index, which produced
+suggestions that would have corrupted the answer they claimed to correct —
+`structuredClone()` was answered with `structuralFixture()` from a test file,
+and `debounce()` with `resource()` from `test/fixtures/main.tf`.
+
+Two rules now bound the pool:
+
+- **Source files only.** Test and fixture paths are excluded, as are languages
+  whose top-level names are not callable — Terraform resources, SQL tables,
+  GraphQL fields, `.proto` messages, CSS selectors. The broader `CODE_EXTS` set
+  used for coverage is deliberately *not* reused here, because it includes
+  `.tf`, `.sql`, `.graphql` and `.css`.
+- **A similarity floor.** Only the high and medium confidence band survives
+  (normalized edit distance ≤ 0.34). `debounce` → `drone` was passing the old
+  0.5 ceiling; it is now dropped, and the flag carries no suggestion at all.
+  `loadConfg` → `loadConfig()` and `scanx` → `scan()` are unaffected.
 
 ## Output modes
 

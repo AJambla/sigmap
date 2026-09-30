@@ -10,6 +10,22 @@ Format: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [8.54.1] — 2026-09-30
+
+### Fixed
+- **`redact` missed the credentials an AI-tooling repo actually holds** (#771, #798, PR #799) — five of seven shapes passed through untouched: Slack tokens, Slack webhooks, OpenAI project and legacy keys, Anthropic keys. The cause was a single character. `sk_live_`/`sk_test_` (Stripe, **underscore**) was covered; `sk-` (OpenAI/Anthropic, **hyphen**) was not, so the command whose whole job is keeping secrets out of an AI context file let the three most common modern API-key formats through. Five patterns added, anchored with `\b` so `sk-` cannot match inside `risk-`, and ordered so the hyphenated forms are never misreported as each other
+- **`verify` reported standard globals as hallucinations** (#777, #798, PR #799) — the allowlist was an inline literal that stopped at `encodeURIComponent`, so `structuredClone()` — a Node and browser global since Node 17 — was flagged as fabricated at **`high` confidence**. Globals now live in `src/verify/globals.js` as grouped data (184 names across es/web/node/test/python) rather than a hand-maintained literal, so a missing one is a one-line addition to the right group
+- **`verify`'s suggestions were worse than its findings** (#777, #798, PR #799) — `buildSymbolCandidates` walked the entire signature index, so `structuredClone()` was answered with `structuralFixture()` from a test file and `debounce()` with `resource()` from `test/fixtures/main.tf`. Applying either would corrupt the answer it claims to correct. The suggestion pool now excludes test and fixture paths and declarative languages — `CODE_EXTS` is deliberately **not** reused, because it includes `.tf`, `.sql`, `.graphql` and `.css`, whose top-level names are resources, tables and selectors, not callables. A 0.34 similarity floor drops the rest (`debounce` → `drone` was surviving the default 0.5 ratio); the high/medium band that makes the feature useful is untouched, so `buildEvidencPack` → `buildEvidencePack()` and `scanx` → `scan()` still resolve. No suggestion beats a wrong one
+- **`explain` reported a file that does not exist as an exclusion** (#772, #798, PR #799) — a missing path fell through to the "no signatures" branch and printed `EXCLUDED — no extractable signatures`, advising the user to *"check that the file contains function/class definitions"*, at **exit 0**. It now reports `NOT FOUND`, names the path, and exits **1**. The MCP `explain_file` handler already checked existence; only the CLI path did not. **Note for scripts:** `sigmap explain <missing-file>` changes from exit 0 to exit 1
+
+### Added
+- **`explain` has a test file** (#785, #798, PR #799) — it previously had none, which is how #772 shipped. `test/integration/explain.test.js` covers every status the handler can emit — `not-found`, `.contextignore`, not-in-srcDirs, no-signatures, included — in both human and `--json` form
+
+### Changed
+- **Two claims in the source issues were stale and are recorded rather than "fixed"** (#798) — #785's *"5 of 11 redact patterns unasserted"* was already solved: `redact.test.js` carries a table-driven `PATTERNS` gate, which is exactly why adding #771's patterns failed the suite until samples existed. And #777's *"consult the installed-lib index"* was already implemented (`hallucination-guard.js:208`) — `debounce` flags in this repo only because SigMap declares zero dependencies, verified by a fixture repo declaring `lodash` where `verify` already reported `✓`. One acceptance criterion in #798 ("the five-line answer produces 0 findings") was wrong as written and was corrected on the issue instead of being met by weakening the guard: a symbol from an undeclared library **should** flag
+
+---
+
 ## [8.54.0] — 2026-09-30
 
 ### Changed

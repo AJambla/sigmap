@@ -78,9 +78,9 @@ features:
 
 <div style="max-width:840px;margin:0 auto;padding:18px 24px 0;text-align:center">
 <div style="display:inline-flex;flex-wrap:wrap;gap:.5rem;justify-content:center;background:var(--vp-c-brand-soft,#ede9fe);border:1px solid rgba(124,106,247,.25);border-radius:999px;padding:.55rem .9rem;font-size:.9rem;color:var(--vp-c-text-1)">
-  <span><strong>Release:</strong> v8.54.0</span>
+  <span><strong>Release:</strong> v8.54.1</span>
   <span>·</span>
-  <span><strong>New — the judge was scoring English:</strong> <code>sigmap judge</code> was the last grounding surface whose <em>verdict</em> rested on raw word-overlap. An answer whose every claim was grounded <strong>failed at 0.212</strong> simply for containing ordinary prose, and <code>buildEvidencePack</code> scored <strong>0.750</strong> where <code>build evidence pack</code> — the same fact — scored <strong>0.333</strong>. The judge now shares the ranker's tokenizer and drops ordinary-English vocabulary from both sides: the prose case passes at <strong>0.643</strong>, and both identifier forms score identically. Hedging phrases like <em>&quot;typically,&quot;</em> used to fail a grounded answer with exit 1 <em>at high confidence</em> — they are now <strong>warnings</strong> that never flip a verdict. &quot;Nothing to judge&quot; got its own <code>inconclusive</code> verdict and exit code, so CI can tell a truncated model output from a wrong one. And <code>judge</code> finally reads <strong>stdin</strong>, defaults its own <code>--context</code>, warns when that context is <strong>older than the sources it describes</strong>, and prints the per-claim table it previously hid in <code>--json</code>. 36 languages, zero dependencies, offline, deterministic.</span>
+  <span><strong>New — the guards were wrong in both directions:</strong> <code>redact</code> exists so secrets never reach an AI context file; <code>verify</code> exists to flag hallucinations. One was letting real secrets through and the other was inventing them. <code>redact</code> missed <strong>five of seven</strong> credential shapes, and the cause was a single character — <code>sk_live_</code> (Stripe) uses an <strong>underscore</strong> while OpenAI and Anthropic use a <strong>hyphen</strong>, so <code>sk-</code> had never been covered. Slack tokens, Slack webhooks, and OpenAI and Anthropic keys now redact. Meanwhile <code>verify</code> reported <code>structuredClone()</code> — a Node and browser global since Node 17 — as fabricated at <strong>high confidence</strong>, then suggested <code>structuralFixture()</code> <em>from a test file</em> as the replacement: a correction that would corrupt the answer it claims to fix. Globals are now grouped data (184 names), the suggestion pool has lost its test, fixture and declarative-language sources, and a similarity floor drops the rest — because no suggestion beats a wrong one. <code>explain</code> stopped reporting a missing file as <code>EXCLUDED — no extractable signatures</code> at exit 0, and gained the test file whose absence let that ship. 36 languages, zero dependencies, offline, deterministic.</span>
 </div>
 <div style="margin-top:.4rem;display:inline-flex;flex-wrap:wrap;gap:.5rem;justify-content:center;background:var(--vp-c-default-soft,#f3f4f6);border:1px solid rgba(0,0,0,.08);border-radius:999px;padding:.55rem .9rem;font-size:.9rem;color:var(--vp-c-text-2)">
   <span><strong>Benchmark:</strong> sigmap-v8.54-main</span>
@@ -177,7 +177,7 @@ See the full [end-to-end walkthrough](/guide/walkthrough) to watch this in actio
 | Overall token reduction | — | **95.8%** |
 | GPT-4o overflow repos | 14/21 | **0/21** |
 
-Latest saved benchmark run: **2026-09-30 (v8.54.0)**.
+Latest saved benchmark run: **2026-09-30 (v8.54.1)**.
 
 </div>
 

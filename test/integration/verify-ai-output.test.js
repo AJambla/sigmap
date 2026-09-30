@@ -31,6 +31,7 @@ const ROOT = path.resolve(__dirname, '../..');
 const SCRIPT = path.join(ROOT, 'gen-context.js');
 const parsers = require(path.join(ROOT, 'src', 'verify', 'parsers'));
 const { verify, isTestPath } = require(path.join(ROOT, 'src', 'verify', 'hallucination-guard'));
+const guard = require(path.join(ROOT, 'src', 'verify', 'hallucination-guard'));
 const closest = require(path.join(ROOT, 'src', 'verify', 'closest-match'));
 const report = require(path.join(ROOT, 'src', 'format', 'verify-report'));
 
@@ -263,6 +264,95 @@ test('closestMatch finds nearest and skips far/short targets', () => {
   assert.strictEqual(closest.closestMatch('loadConfg', cands).name, 'loadConfig');
   assert.strictEqual(closest.closestMatch('xy', cands), null, 'too short');
   assert.strictEqual(closest.closestMatch('totallyDifferentNameHere', cands), null, 'too far');
+});
+
+// ── #777: stop inventing hallucinations ──────────────────────────────────────
+
+const globals = require(path.join(ROOT, 'src', 'verify', 'globals'));
+
+// The inline allowlist stopped at `encodeURIComponent`, so `structuredClone`
+// — a Node and browser global since Node 17 — was reported as a hallucination.
+test('#777 modern ES/Web globals are in the allowlist', () => {
+  const required = [
+    'structuredClone', 'queueMicrotask', 'AbortController', 'URL',
+    'URLSearchParams', 'TextEncoder', 'TextDecoder', 'clearInterval',
+    'setImmediate', 'globalThis', 'Intl', 'BigInt', 'Proxy', 'Reflect',
+    'atob', 'btoa', 'crypto', 'performance',
+  ];
+  const missing = required.filter((n) => !globals.LANG_GLOBALS.has(n));
+  assert.deepStrictEqual(missing, [], `globals missing from the allowlist: ${missing}`);
+});
+
+test('#777 globals are grouped data, not one flat literal', () => {
+  for (const key of ['es', 'web', 'node', 'test', 'python']) {
+    assert.ok(Array.isArray(globals.GROUPS[key]) && globals.GROUPS[key].length > 0,
+      `group "${key}" missing or empty`);
+  }
+  // Every grouped entry must reach the flattened set the guard checks.
+  for (const [key, group] of Object.entries(globals.GROUPS)) {
+    for (const name of group) {
+      assert.ok(globals.LANG_GLOBALS.has(name), `${key}:${name} absent from LANG_GLOBALS`);
+    }
+  }
+});
+
+// The reported answer: standard globals and test-runner names, none of which
+// are repo symbols. Only the lodash call may legitimately flag here, because
+// this repo declares zero dependencies.
+test('#777 standard globals and runner names produce no fake-symbol findings', () => {
+  const answer = 'Use `JSON.parse(raw)` and `Object.assign({}, a, b)`, then `describe()` / `it()` in tests.\n'
+    + 'In the browser call `fetch(url)` and `structuredClone(obj)`.\n';
+  const res = guard.verify(answer, ROOT);
+  const symbols = res.issues.filter((i) => i.type === 'fake-symbol').map((i) => i.value);
+  assert.deepStrictEqual(symbols, [], `expected no fake symbols, got ${JSON.stringify(symbols)}`);
+});
+
+test('#777 no suggestion is sourced from a test, fixture or non-code file', () => {
+  const { buildSymbolSet } = guard;
+  const { symbolCandidates } = buildSymbolSet(ROOT);
+  assert.ok(symbolCandidates.length > 0, 'expected a non-empty candidate pool');
+  const bad = symbolCandidates.filter((c) => !closest.isSuggestibleFile(c.file));
+  assert.deepStrictEqual(bad.slice(0, 5), [], `non-suggestible candidates leaked: ${JSON.stringify(bad.slice(0, 5))}`);
+  // The two concrete sources named in the report.
+  assert.strictEqual(closest.isSuggestibleFile('test/fixtures/main.tf'), false);
+  assert.strictEqual(closest.isSuggestibleFile('test/integration/features/judge.test.js'), false);
+  assert.strictEqual(closest.isSuggestibleFile('src/evidence/pack.js'), true);
+});
+
+test('#777 declarative languages cannot source a suggestion', () => {
+  for (const f of ['infra/main.tf', 'db/schema.sql', 'api/types.graphql', 'proto/a.proto', 'ui/app.css']) {
+    assert.strictEqual(closest.isSuggestibleFile(f), false, `${f} must not be suggestible`);
+  }
+});
+
+// A genuinely fake symbol must still flag, and still get a useful suggestion.
+test('#777 a genuine typo still flags with a sensible suggestion', () => {
+  const res = guard.verify('Call `buildEvidencPack(q, cwd)` please.', ROOT);
+  const hit = res.issues.find((i) => i.type === 'fake-symbol' && i.value === 'buildEvidencPack');
+  assert.ok(hit, `expected buildEvidencPack to flag: ${JSON.stringify(res.issues)}`);
+  assert.ok(hit.suggestion && hit.suggestion.includes('buildEvidencePack'),
+    `expected a buildEvidencePack suggestion, got: ${hit.suggestion}`);
+});
+
+// The similarity floor: no suggestion beats a wrong one.
+test('#777 low-similarity matches are dropped rather than suggested', () => {
+  const cands = [{ name: 'drone', file: 'src/extractors/pipeline.js', line: 697 }];
+  assert.strictEqual(closest.closestMatch('debounce', cands, { minLen: 4, maxRatio: 0.34 }), null,
+    'debounce → drone is a low-confidence match and must be dropped');
+  // The high/medium band the guard relies on still resolves.
+  const good = [{ name: 'buildEvidencePack', file: 'src/evidence/pack.js', line: 207 }];
+  assert.ok(closest.closestMatch('buildEvidencPack', good, { minLen: 4, maxRatio: 0.34 }));
+});
+
+test('#777 buildSymbolCandidates keeps an unfiltered pool available', () => {
+  const idx = new Map([
+    ['src/a.js', ['function realOne(p)  :1-2']],
+    ['test/fixtures/main.tf', ['resource(x)  :3-4']],
+  ]);
+  const filtered = closest.buildSymbolCandidates(idx).map((c) => c.name);
+  assert.deepStrictEqual(filtered, ['realOne'], `filtered pool wrong: ${filtered}`);
+  const all = closest.buildSymbolCandidates(idx, { includeAll: true }).map((c) => c.name);
+  assert.ok(all.includes('resource'), `includeAll should keep everything: ${all}`);
 });
 
 test('buildSymbolCandidates parses name + anchor line from sig index', () => {

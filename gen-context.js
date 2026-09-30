@@ -21324,7 +21324,7 @@ __factories["./src/mcp/server"] = function(module, exports) {
 
   const SERVER_INFO = {
     name: 'sigmap',
-    version: '8.54.0',
+    version: '8.54.1',
     description: 'SigMap MCP server — code signatures on demand',
   };
 
@@ -24658,6 +24658,33 @@ __factories["./src/security/patterns"] = function(module, exports) {
       name: 'Stripe Key',
       regex: /sk_(live|test)_[0-9a-zA-Z]{24,}/,
     },
+    // The `sk-` family (#771). `sk_live_`/`sk_test_` above uses an UNDERSCORE;
+    // OpenAI and Anthropic use a HYPHEN, so the Stripe pattern never covered
+    // them and five of seven credential shapes passed through untouched. The
+    // leading `\b` matters: without it `sk-` matches inside `risk-…`.
+    // Anthropic and the OpenAI project form come first — both contain hyphens
+    // after `sk-`, so the legacy alphanumeric-only pattern cannot claim them,
+    // but ordering keeps the reported name right if either format widens.
+    {
+      name: 'Anthropic API Key',
+      regex: /\bsk-ant-[A-Za-z0-9_-]{20,}/,
+    },
+    {
+      name: 'OpenAI API Key',
+      regex: /\bsk-proj-[A-Za-z0-9_-]{20,}/,
+    },
+    {
+      name: 'OpenAI API Key (legacy)',
+      regex: /\bsk-[A-Za-z0-9]{32,}/,
+    },
+    {
+      name: 'Slack Token',
+      regex: /\bxox[baprs]-[A-Za-z0-9-]{10,}/,
+    },
+    {
+      name: 'Slack Webhook',
+      regex: /https:\/\/hooks\.slack\.com\/services\/T[A-Za-z0-9]+\/B[A-Za-z0-9]+\/[A-Za-z0-9]+/,
+    },
     {
       name: 'Twilio Key',
       regex: /SK[0-9a-fA-F]{32}/,
@@ -26805,14 +26832,62 @@ __factories["./src/verify/closest-match"] = function(module, exports) {
   }
 
   /**
+   * File extensions whose symbols are worth suggesting.
+   *
+   * A "did you mean?" for a *called function* only makes sense when the
+   * candidate is itself a callable definition. `CODE_EXTS` (used for coverage)
+   * is deliberately NOT reused here: it includes `.tf`, `.sql`, `.graphql`,
+   * `.proto` and `.css`, whose top-level names are resources, tables, schema
+   * fields and selectors. That is how `debounce()` came to be answered with
+   * "did you mean `resource()` in test/fixtures/main.tf?" (#777).
+   */
+  const SUGGESTIBLE_EXTS = new Set([
+    '.js', '.jsx', '.mjs', '.cjs', '.ts', '.tsx', '.py', '.go', '.rs',
+    '.java', '.kt', '.scala', '.swift', '.rb', '.php', '.cs', '.dart',
+    '.c', '.cpp', '.h', '.hpp', '.lua', '.ex', '.exs', '.r', '.jl',
+    '.sh', '.bash', '.zsh', '.ps1', '.vue', '.svelte',
+  ]);
+
+  /**
+   * Test and fixture paths, which must never source a suggestion (#777).
+   *
+   * Applying a suggestion is a code edit, so a name that only exists in a test
+   * or a fixture would corrupt the answer it claims to correct — `structuredClone`
+   * was answered with `structuralFixture()` from a test file.
+   */
+  const NON_SUGGESTIBLE_PATH_RE = new RegExp([
+    '(?:^|/)(?:tests?|spec|specs|__tests__|__mocks__|__fixtures__|fixtures?|mocks?|e2e|benchmarks?)/',
+    '\\.(?:test|spec)\\.[mc]?[jt]sx?$',
+    '(?:^|/)test_[^/]+\\.py$',
+    '_test\\.(?:py|go)$',
+    '(?:Test|Tests|Spec|Specs)\\.(?:java|kt|scala|cs|swift)$',
+  ].join('|'), 'i');
+
+  /** Whether a file may source a closest-match suggestion. */
+  function isSuggestibleFile(file) {
+    const f = String(file).replace(/\\/g, '/');
+    if (NON_SUGGESTIBLE_PATH_RE.test(f)) return false;
+    const dot = f.lastIndexOf('.');
+    if (dot < 0) return false;
+    return SUGGESTIBLE_EXTS.has(f.slice(dot).toLowerCase());
+  }
+
+  /**
    * Build `[{ name, file, line }]` symbol candidates from a SigMap signature
    * index (`Map<file, string[]>` whose entries may carry a `:start-end` anchor).
+   *
+   * Files that cannot source a useful suggestion are skipped by default; pass
+   * `{ includeAll: true }` for the unfiltered pool.
    */
-  function buildSymbolCandidates(sigIndex) {
+  function buildSymbolCandidates(sigIndex, opts = {}) {
     const out = [];
     const seen = new Set();
     if (!sigIndex) return out;
+    // `includeAll` keeps the unfiltered pool available for callers that want it;
+    // suggestions default to the filtered pool.
+    const keep = opts.includeAll ? () => true : isSuggestibleFile;
     for (const [file, sigs] of sigIndex) {
+      if (!keep(file)) continue;
       for (const sig of sigs) {
         const s = String(sig);
         const lineM = s.match(/:(\d+)(?:-\d+)?\s*$/);
@@ -26847,9 +26922,102 @@ __factories["./src/verify/closest-match"] = function(module, exports) {
     levenshtein,
     closestMatch,
     buildSymbolCandidates,
+    isSuggestibleFile,
+    SUGGESTIBLE_EXTS,
     suggestionConfidence,
     formatSuggestion,
   };
+  
+};
+
+// ── ./src/verify/globals ──
+__factories["./src/verify/globals"] = function(module, exports) {
+  
+  /**
+   * Language globals the Hallucination Guard must never flag (#777).
+   *
+   * `fake-symbol` asks "is this name defined in the repo?" — a question that is
+   * only meaningful for names the *language* does not already define. The guard
+   * previously carried a hand-maintained inline list that stopped at
+   * `encodeURIComponent`, so `structuredClone(obj)` — a Node and browser global
+   * since Node 17 — was reported as a hallucination at `high` confidence, with a
+   * suggested replacement drawn from a test fixture.
+   *
+   * Kept as grouped data rather than one literal so a missing global is a
+   * one-line addition to the right group, and so the groups can be asserted
+   * individually in tests.
+   *
+   * Zero dependencies, deterministic.
+   */
+
+  /** ECMAScript built-ins available in every JS runtime. */
+  const ES_GLOBALS = [
+    'Object', 'Array', 'String', 'Number', 'Boolean', 'Symbol', 'BigInt',
+    'Math', 'JSON', 'Date', 'RegExp', 'Error', 'TypeError', 'RangeError',
+    'SyntaxError', 'ReferenceError', 'EvalError', 'URIError', 'AggregateError',
+    'Promise', 'Map', 'Set', 'WeakMap', 'WeakSet', 'WeakRef', 'Proxy', 'Reflect',
+    'Function', 'Intl', 'globalThis', 'eval', 'parseInt', 'parseFloat',
+    'isNaN', 'isFinite', 'encodeURIComponent', 'decodeURIComponent',
+    'encodeURI', 'decodeURI', 'structuredClone', 'queueMicrotask',
+    'ArrayBuffer', 'SharedArrayBuffer', 'DataView', 'Atomics',
+    'Int8Array', 'Uint8Array', 'Uint8ClampedArray', 'Int16Array', 'Uint16Array',
+    'Int32Array', 'Uint32Array', 'Float32Array', 'Float64Array',
+    'BigInt64Array', 'BigUint64Array', 'Generator', 'AsyncGenerator',
+  ];
+
+  /** Web/Node platform globals — available in browsers, Node, or both. */
+  const WEB_GLOBALS = [
+    'console', 'fetch', 'Request', 'Response', 'Headers', 'FormData',
+    'URL', 'URLSearchParams', 'AbortController', 'AbortSignal',
+    'TextEncoder', 'TextDecoder', 'Blob', 'File', 'FileReader',
+    'ReadableStream', 'WritableStream', 'TransformStream',
+    'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval',
+    'setImmediate', 'clearImmediate', 'atob', 'btoa',
+    'crypto', 'performance', 'structuredClone', 'EventTarget', 'Event',
+    'CustomEvent', 'MessageChannel', 'MessagePort', 'BroadcastChannel',
+    'WebSocket', 'Worker', 'navigator', 'location', 'document', 'window',
+    'localStorage', 'sessionStorage', 'alert', 'requestAnimationFrame',
+    'cancelAnimationFrame', 'IntersectionObserver', 'ResizeObserver',
+    'MutationObserver', 'DOMParser', 'XMLHttpRequest',
+  ];
+
+  /** Node module-scope identifiers and globals. */
+  const NODE_GLOBALS = [
+    'require', 'module', 'exports', '__dirname', '__filename',
+    'process', 'Buffer', 'global',
+  ];
+
+  /** Test-runner globals — present via the runner, never defined in the repo. */
+  const TEST_GLOBALS = [
+    'describe', 'it', 'test', 'expect', 'beforeEach', 'afterEach',
+    'beforeAll', 'afterAll', 'before', 'after', 'jest', 'vi', 'suite',
+  ];
+
+  /** Python built-ins. */
+  const PY_GLOBALS = [
+    'print', 'len', 'range', 'str', 'int', 'float', 'dict', 'list', 'tuple',
+    'set', 'frozenset', 'bool', 'bytes', 'bytearray', 'open', 'enumerate',
+    'zip', 'map', 'filter', 'sorted', 'reversed', 'sum', 'min', 'max', 'abs',
+    'round', 'pow', 'divmod', 'isinstance', 'issubclass', 'super', 'type',
+    'getattr', 'setattr', 'hasattr', 'delattr', 'repr', 'hash', 'id', 'iter',
+    'next', 'any', 'all', 'callable', 'format', 'vars', 'dir', 'input',
+    'staticmethod', 'classmethod', 'property', 'slice', 'complex', 'ord', 'chr',
+  ];
+
+  const GROUPS = {
+    es: ES_GLOBALS,
+    web: WEB_GLOBALS,
+    node: NODE_GLOBALS,
+    test: TEST_GLOBALS,
+    python: PY_GLOBALS,
+  };
+
+  /** Every global, flattened — the set the guard checks against. */
+  const LANG_GLOBALS = new Set(
+    Object.values(GROUPS).reduce((acc, g) => acc.concat(g), [])
+  );
+
+  module.exports = { LANG_GLOBALS, GROUPS, ES_GLOBALS, WEB_GLOBALS, NODE_GLOBALS, TEST_GLOBALS, PY_GLOBALS };
   
 };
 
@@ -26900,19 +27068,10 @@ __factories["./src/verify/hallucination-guard"] = function(module, exports) {
     'copy', 'hashlib', 'threading', 'string', 'csv', 'glob', 'shutil', 'tempfile',
   ]);
 
-  const LANG_GLOBALS = new Set([
-    // JS
-    'console', 'require', 'module', 'exports', 'process', 'Object', 'Array',
-    'String', 'Number', 'Boolean', 'Math', 'JSON', 'Date', 'Promise', 'Map',
-    'Set', 'WeakMap', 'WeakSet', 'RegExp', 'Error', 'Symbol', 'parseInt',
-    'parseFloat', 'isNaN', 'setTimeout', 'setInterval', 'clearTimeout', 'fetch',
-    'Buffer', 'Function', 'eval', 'encodeURIComponent', 'decodeURIComponent',
-    // Python
-    'print', 'len', 'range', 'str', 'int', 'float', 'dict', 'list', 'tuple',
-    'set', 'bool', 'open', 'enumerate', 'zip', 'map', 'filter', 'sorted',
-    'sum', 'min', 'max', 'abs', 'isinstance', 'super', 'type', 'getattr',
-    'setattr', 'hasattr',
-  ]);
+  // Language globals live in ./globals as grouped data (#777). The inline list
+  // this replaced stopped at `encodeURIComponent`, so `structuredClone` — a Node
+  // and browser global since Node 17 — was reported as a hallucination.
+  const { LANG_GLOBALS } = __require('./src/verify/globals');
 
   const REL_EXTS = ['', '.js', '.ts', '.tsx', '.jsx', '.mjs', '.cjs', '.json', '.py', '.r', '.R', '.vue'];
   const REL_INDEX = ['index.js', 'index.ts', 'index.tsx', 'index.jsx', '__init__.py'];
@@ -27156,7 +27315,12 @@ __factories["./src/verify/hallucination-guard"] = function(module, exports) {
       for (const { name, line } of parsers.extractSymbols(answerText)) {
         if (symbolSet.has(name)) continue;
         if (LANG_GLOBALS.has(name) || NODE_BUILTINS.has(name) || PY_BUILTINS.has(name)) continue;
-        const match = closestMatch(name, symbolCandidates, { minLen: 4 });
+        // Similarity floor (#777): the default 0.5 ratio let `low`-confidence
+        // matches through, so `debounce()` was answered with `drone()` — a
+        // suggestion that would corrupt the answer if applied. 0.34 keeps the
+        // high/medium band (`buildEvidencPack` → `buildEvidencePack`, `scanx` →
+        // `scan`) and drops the rest, since no suggestion beats a wrong one.
+        const match = closestMatch(name, symbolCandidates, { minLen: 4, maxRatio: 0.34 });
         add({
           type: 'fake-symbol',
           value: name,
@@ -28168,7 +28332,7 @@ function __tryGit(args, opts = {}) {
   catch (_) { return ''; }
 }
 
-const VERSION = '8.54.0';
+const VERSION = '8.54.1';
 const MARKER = '\n\n## Auto-generated signatures\n<!-- Updated by gen-context.js -->\n';
 
 function requireSourceOrBundled(key) {
@@ -33740,6 +33904,22 @@ function main() {
     const absPath = path.resolve(cwd, target);
     const rel     = path.relative(cwd, absPath);
     const jsonOut = args.includes('--json');
+
+    // 0. The file has to exist (#772). Without this, a missing path fell
+    // through to the "no signatures" branch and was reported as EXCLUDED with
+    // `Fix: check that the file contains function/class definitions` — advice
+    // that cannot help, at exit 0. The MCP `explain_file` handler already
+    // checks existence; the CLI path did not.
+    if (!fs.existsSync(absPath)) {
+      if (jsonOut) {
+        process.stdout.write(JSON.stringify({ status: 'not-found', reason: 'file does not exist on disk', path: rel, fix: 'check the path — nothing at this location to explain' }) + '\n');
+      } else {
+        console.log(`[sigmap] ${rel} — NOT FOUND`);
+        console.log(`  Reason: no such file on disk`);
+        console.log(`  Fix:    check the path — nothing at this location to explain`);
+      }
+      process.exit(1);
+    }
 
     // 1. Check .contextignore
     const ignorePatterns = loadIgnorePatterns(cwd);
