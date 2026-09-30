@@ -54,6 +54,13 @@ const SAMPLES = {
   'SSH Private Key': ['-----BEGIN', 'RSA PRIVATE', 'KEY-----'].join(' '),
   'Stripe Key': 'sk_' + 'live_' + AL.slice(0, 24),
   'Twilio Key': `sid ${'S' + 'K'}0123456789abcdef0123456789abcdef done`,
+  // The `sk-` / Slack family (#771). Assembled like the rest so no
+  // secret-shaped literal is committed.
+  'Anthropic API Key': `key ${'sk' + '-ant-'}api03-${AL}${AL.slice(0, 6)} end`,
+  'OpenAI API Key': `key ${'sk' + '-proj-'}${AL}${AL.toUpperCase().slice(0, 6)} end`,
+  'OpenAI API Key (legacy)': `key ${'sk' + '-'}${AL}${AL.toUpperCase().slice(0, 8)} end`,
+  'Slack Token': `bot ${'xo' + 'xb-'}2345678901-2345678901234-${AL.slice(0, 12)} end`,
+  'Slack Webhook': `hook ${'https://hooks.' + 'slack.com'}/services/T00000000/B00000000/${AL.toUpperCase().slice(0, 20)} end`,
   'Generic Secret': `password = ${'"correct-horse-battery"'}`,
 };
 
@@ -128,6 +135,65 @@ test('short, empty and non-secret lines stay untouched', () => {
     assert.strictEqual(r.text, line, `expected untouched: ${line}`);
     assert.strictEqual(r.redacted, false, `expected no redaction: ${line}`);
   }
+});
+
+// ── #771: the credential shapes an AI-tooling repo actually contains ────────
+
+// The reported reproduction: five of these seven passed through untouched.
+test('#771 every credential shape in the report is redacted', () => {
+  const lines = [
+    `slack_bot ${'xo' + 'xb-'}2345678901-2345678901234-${AL.slice(0, 12)}`,
+    `slack_webhook ${'https://hooks.' + 'slack.com'}/services/T00000000/B00000000/${AL.toUpperCase().slice(0, 20)}`,
+    `openai ${'sk' + '-proj-'}${AL}${AL.toUpperCase().slice(0, 6)}`,
+    `openai_legacy ${'sk' + '-'}${AL}${AL.toUpperCase().slice(0, 8)}`,
+    `anthropic ${'sk' + '-ant-'}api03-${AL}${AL.slice(0, 6)}`,
+    `aws ${'AK' + 'IA'}IOSFODNN7EXAMPLE`,
+    'github ' + 'gh' + 'p_' + AL + '0123456789',
+  ];
+  const r = redactText(lines.join('\n'));
+  assert.strictEqual(r.findings.length, 7,
+    `expected all 7 lines redacted, got ${r.findings.length}: ${JSON.stringify(r.counts)}`);
+  for (const line of r.text.split('\n')) {
+    assert.ok(line.includes('[REDACTED:'), `line passed through unmasked: ${line}`);
+  }
+});
+
+// `sk_live_` (underscore) was covered while `sk-` (hyphen) was not — the exact
+// gap that let OpenAI and Anthropic keys through.
+test('#771 sk- family is distinct from the sk_ Stripe pattern', () => {
+  const stripe = redactText('sk_' + 'live_' + AL.slice(0, 24));
+  assert.strictEqual(stripe.findings[0].pattern, 'Stripe Key', JSON.stringify(stripe.findings));
+  const anthropic = redactText(`${'sk' + '-ant-'}api03-${AL}${AL.slice(0, 6)}`);
+  assert.strictEqual(anthropic.findings[0].pattern, 'Anthropic API Key', JSON.stringify(anthropic.findings));
+  const openai = redactText(`${'sk' + '-proj-'}${AL}${AL.toUpperCase().slice(0, 6)}`);
+  assert.strictEqual(openai.findings[0].pattern, 'OpenAI API Key', JSON.stringify(openai.findings));
+});
+
+// A leading \b keeps `sk-` from matching inside an ordinary hyphenated word.
+test('#771 sk- does not match inside a word like risk-', () => {
+  for (const word of ['risk-', 'task-', 'desk-', 'brisk-']) {
+    const r = redactText(`the ${word}${AL}${AL.toUpperCase().slice(0, 8)} assessment`);
+    assert.strictEqual(r.redacted, false, `false positive on "${word}": ${r.text}`);
+  }
+});
+
+// Regression #668/#680: the unquoted textOnly form must keep working.
+test('#771 textOnly generic-secret behaviour is unchanged', () => {
+  assert.strictEqual(redactText('password=SuperSecret123!').text, '[REDACTED:Generic Secret]');
+  assert.strictEqual(redactText('api_key: SuperSecret123').text, '[REDACTED:Generic Secret]');
+  assert.strictEqual(redactText('password: PasswordHasher').redacted, true);
+  assert.strictEqual(redactText('function hello(name) { return name; }').redacted, false);
+});
+
+// #785's standing gate, asserted explicitly: a pattern with no fixture fails.
+test('#785 every PATTERNS entry has a sample, and a new one without it fails', () => {
+  for (const p of PATTERNS) {
+    assert.ok(SAMPLES[p.name], `pattern "${p.name}" has no sample — the gate must fail here`);
+  }
+  const withUnsampled = PATTERNS.concat([{ name: 'Imaginary Future Key', regex: /zzz/ }]);
+  const missing = withUnsampled.filter((p) => !SAMPLES[p.name]).map((p) => p.name);
+  assert.deepStrictEqual(missing, ['Imaginary Future Key'],
+    'an unsampled pattern must be detectable by the same rule the gate uses');
 });
 
 test('CLI redact <file>: stdout redacted, stderr summary', () => {
