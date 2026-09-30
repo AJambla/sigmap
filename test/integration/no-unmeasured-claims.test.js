@@ -71,7 +71,9 @@ test('share: no unmeasured multiplier', () => {
   const dir = repo(null);
   try {
     const { out } = run(dir, ['share']);
-    assert.ok(!/6×|6x better/.test(out),
+    // The lookbehind keeps a MEASURED lift whose digits happen to end in 6
+    // (`2.16×`) from matching; the target is the standalone literal.
+    assert.ok(!/(?<![\d.])6×|6x better/.test(out),
       'the literal "6× better results" is measured nowhere and overstates the published lift ~3×');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

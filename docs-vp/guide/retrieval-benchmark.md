@@ -1,13 +1,13 @@
 ---
 title: Retrieval benchmark
-description: Latest saved retrieval benchmark for SigMap v8.54.2. 78.6% hit@5 across 105 tasks on 18 repos; the honest grep comparison scores 86.4% vs 40.8% (2.12× lift) on its own 125-task corpus.
+description: Latest saved retrieval benchmark for SigMap v8.55.0. 78.6% hit@5 across 105 tasks on 18 repos; the honest grep comparison scores 88.0% vs 40.8% (2.16× lift) on its own 125-task corpus.
 head:
   - - meta
     - property: og:title
       content: "SigMap retrieval benchmark — 78.6% hit@5"
   - - meta
     - property: og:description
-      content: "Latest saved run: 78.6% hit@5 over 105 tasks on 18 repos; honest grep comparison 86.4% vs 40.8% (2.12x lift, 125 tasks, 19 repos)."
+      content: "Latest saved run: 78.6% hit@5 over 105 tasks on 18 repos; honest grep comparison 88.0% vs 40.8% (2.16x lift, 125 tasks, 19 repos)."
   - - meta
     - property: og:url
       content: "https://sigmap.io/guide/retrieval-benchmark"
@@ -15,22 +15,22 @@ head:
 
 # Retrieval benchmark
 
-::: info Official v8.54.2 benchmark snapshot
-**Benchmark ID:** sigmap-v8.54-main &nbsp;·&nbsp; **Date:** 2026-09-30 (with R language)
+::: info Official v8.55.0 benchmark snapshot
+**Benchmark ID:** sigmap-v8.55-main &nbsp;·&nbsp; **Date:** 2026-09-30 (with R language)
 
 | Metric | Value |
 |---|---:|
 | Hit@5 (retrieval corpus, 105 tasks / 18 repos) | **78.6%** |
-| Honest grep comparison (125 tasks / 19 repos) | **86.4%** vs 40.8% single-shot grep — **2.12× lift** |
+| Honest grep comparison (125 tasks / 19 repos) | **88.0%** vs 40.8% single-shot grep — **2.16× lift** |
 | Graph-boosted hit@5 | **78.6%** |
-| Honest lift (vs grep agent) | **2.12×** |
+| Honest lift (vs grep agent) | **2.16×** |
 | Prompt reduction | **43.4%** (2.84 → 1.6) |
 | Task success proxy | **61.0%** |
 | Overall token reduction | **95.8%** |
 | GPT-4o overflow (without → with) | **16/21 → 0/21** |
 :::
 
-Latest saved run: **2026-09-30 (v8.54.2)**
+Latest saved run: **2026-09-30 (v8.55.0)**
 
 The task set, baselines, and the hit@5 definition are documented in [benchmark methodology](/guide/methodology).
 
@@ -58,9 +58,9 @@ This benchmark isolates that first question: *did the right file appear in conte
 
 | Metric | Without SigMap | With SigMap |
 |---|:---:|:---:|
-| Average hit@5 (honest corpus, 125 tasks) | 40.8% | **86.4%** |
+| Average hit@5 (honest corpus, 125 tasks) | 40.8% | **88.0%** |
 | Graph-boosted hit@5 | — | **78.6%** |
-| Honest lift (vs single-shot grep, `benchmark:honest`) | — | **2.12x** |
+| Honest lift (vs single-shot grep, `benchmark:honest`) | — | **2.16x** |
 | Random-selection hit@5 (data only, no longer quoted) | 13.6% | — |
 | Correct (rank 1) | ~1% | **61.0%** |
 | Partial (ranks 2–5) | ~13% | **17.1%** |
@@ -87,16 +87,30 @@ leak**). `benchmark:honest` reports both splits, plus per-repo-size buckets
 
 | Slice | Tasks | SigMap hit@5 | Grep baseline |
 |---|---:|:---:|:---:|
-| Easy split | 110 | **76.4%** | 43.6% |
-| **Hard split** | 15 | **33.3%** | **53.3%** |
-| Small repos | 13 | 84.6% | 69.2% |
-| Medium repos | 52 | 44.2% | 46.2% |
-| Large repos | 60 | 91.7% | 38.3% |
+| Easy split | 110 | **91.8%** | 39.1% |
+| **Hard split** | 15 | **60.0%** | **53.3%** |
+| Small repos | 13 | 100.0% | 61.5% |
+| Medium repos | 52 | 80.8% | 46.2% |
+| Large repos | 60 | 91.7% | 31.7% |
 
-The hard split is published deliberately: with filename leakage removed, the
-single-shot grep baseline currently **beats** SigMap. That is the measured
-vocabulary-mismatch ceiling — the number repo-mined query expansion (planned
-for v9.0) exists to move. When it moves, this table is the proof.
+The hard split is published deliberately: it is the measured vocabulary-mismatch
+ceiling, the number repo-mined query expansion (planned for v9.0) exists to move.
+
+**It moved in v8.55.0 — by exactly one task, which is the honest way to state
+it.** The hard split holds 15 tasks, so **one task is 6.7pp**. Measured against a
+pristine `v8.54.2` worktree over the same cached corpus, SigMap went 53.3% → 60.0%
+and grep stayed at 53.3%: a corpus this small cannot distinguish "SigMap now beats
+grep on vocabulary-mismatch queries" from "one task changed rank". Read it as the
+tie being broken by a single task, not as a win.
+
+The whole-corpus movement is larger and better supported: **80.0% → 88.0%
+(+8.0pp)** over 125 tasks against that same `v8.54.2` control, lifting the
+published multiplier from 1.89× to 2.16×. Demoting test files, mocks, CI and docs
+is exactly the change a *"which file implements X"* corpus should reward, since
+those are the files that name a behaviour most often without implementing it. Note
+also that the previously published 86.4% did not reproduce at v8.54.2 either — the
+control measured 80.0% — which is the same provenance problem
+[#707](https://github.com/manojmallick/sigmap/issues/707) exists to close.
 
 ## The CI retrieval gate (v8.51.6)
 
@@ -108,9 +122,9 @@ happen to share an adjective.
 
 | Corpus | Tasks | hit@5 | Gated on | What it measures |
 |---|---:|:---:|---|---|
-| `hard` | 90 | **75.6%** | 70% floor | Leak-free tasks over **SigMap's own source** |
+| `hard` | 90 | **72.2%** | 70% floor | Leak-free tasks over **SigMap's own source** |
 | `mined` | 23 | **60.9%** | no-regress | Commit subjects + the files that commit touched |
-| `jvm` | 61 | **16.4%** | no-regress | Mined from `spring-petclinic` (32) + `akka` (29) |
+| `jvm` | 61 | **29.5%** | no-regress | Mined from `spring-petclinic` (32) + `akka` (29) |
 | `easy` | 20 | 90.0% | reference only | Leaky by construction; published for contrast |
 
 Every corpus is asserted leak-free: no query shares a stemmed token with its
@@ -125,9 +139,25 @@ containing one two-assertion test file and no source change scored 75.6% →
 74.4% and failed the gate. Enforcing `hard` against the previous run therefore
 fails honest work and, worse, trains you to ignore the gate.
 
-It is now held to its **70% floor** instead (currently 68/90 tasks pass, 1 task
-= 1.1pp, five tasks of headroom). The floor, the leak assertions, and
+It is now held to its **70% floor** instead (currently 65/90 tasks pass, 1 task
+= 1.1pp, two tasks of headroom). The floor, the leak assertions, and
 `--no-regress` on `mined` and `jvm` are the enforced checks.
+
+::: warning The committed `hard` baseline does not reproduce (v8.55.0)
+`benchmarks/retrieval-baseline.json` records `hard = 75.6%`, and that figure does
+not reproduce on `develop` today — a **pristine worktree with no changes applied**
+measures 72.2%. This is the drift the floor exists to tolerate, and it is
+disclosed here rather than silently re-recorded: refreshing a baseline as a side
+effect of an unrelated change is how a stale number becomes a published one. It
+is re-recorded deliberately with the number-provenance work
+([#707](https://github.com/manojmallick/sigmap/issues/707),
+[#811](https://github.com/manojmallick/sigmap/issues/811)).
+
+The same episode is why `jvm` matters more than `hard`: ranking weights changed in
+v8.55.0 and `hard` could not falsify them, because it scores SigMap against the
+repository the change was made in. A labelled third-party corpus
+([#810](https://github.com/manojmallick/sigmap/issues/810)) does not exist yet.
+:::
 
 ### Why the JVM corpus exists
 
@@ -143,9 +173,13 @@ document-length normalisation drops it from rank 5 to rank 6. A fix excluding
 markers from the scored term space did not move the number, so it was reverted
 rather than left in as unexplained complexity.
 
-At 16.4%, `jvm` is the least flattering number SigMap publishes. It is here for
-the same reason the hard split is: it is the one that moves when the
-vocabulary-mismatch problem gets solved.
+At 29.5%, `jvm` is still the least flattering number SigMap publishes. It is here
+for the same reason the hard split is: it is the one that moves when the
+vocabulary-mismatch problem gets solved — and in v8.55.0 it moved, from **21.3%
+to 29.5% (+8.2pp)**, when the ranker stopped ignoring Go and JVM test-file
+conventions. Its own design is what makes that credible: `jvm` scores against
+repositories the change was not made in, so unlike `hard` it could not have
+absorbed the change as corpus drift.
 
 ## Per-repo results
 
