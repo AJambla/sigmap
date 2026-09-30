@@ -44,6 +44,7 @@ If you are new to the product, start with the workflow pages first:
 | Command / Flag | Description |
 |----------------|-------------|
 | `ask "<query>"` | Unified intent→rank→cost→risk pipeline in one command |
+| `ask "<query>" --top <n>` | How many files to select (default 5) |
 | `ask "<query>" --followup` | Reuse previous session context for follow-up queries (session carry-forward) |
 | `ask "<query>" --package <name>` | Scope retrieval to a specific monorepo workspace package |
 | `ask "<query>" --global` | Disable package scoping; search entire repo (monorepo override) |
@@ -156,6 +157,7 @@ Unified pipeline: intent detection → ranked mini-context → coverage check �
 ```bash
 sigmap ask "fix the login bug"
 sigmap ask "explain the rank function" --json
+sigmap ask "how are secrets redacted" --top 12
 ```
 
 ```
@@ -163,6 +165,8 @@ sigmap ask "explain the rank function" --json
  sigmap ask  "fix the login bug"
  Intent    : debug
  Context   : 1,823 tokens  →  .context/query-context.md
+ Selected  : 5 of 441 file(s) (--top 5) · cutoff score 6.121
+ Hash      : sha256:66de57f5b3a8
  Coverage  : 97%
  Risk      : LOW
  Cost      : $0.0005/query  (was $0.032 · saved 98%)
@@ -170,6 +174,18 @@ sigmap ask "explain the rank function" --json
 ```
 
 With `--json` the output is a machine-readable object with `intent`, `coverage`, `cost`, `riskLevel`, and `rankedFiles`.
+
+### ask --top &lt;n&gt; (fixed in v8.54.2)
+
+How many files to select; default **5**. An invalid value — zero, negative, fractional or non-numeric — is an **error**, not a silent fall back to the default.
+
+Until v8.54.2 this flag was documented in `--help` and parsed correctly by [`--query`](#query) and [`evidence`](#evidence), while `ask` itself hardcoded `topK: 5` and ignored it (#775). `--top 2` and `--top 20` produced context files differing only in their `Generated:` timestamp.
+
+### Selection, cutoff and context hash (v8.54.2)
+
+`ask` reports tokens, coverage and cost — but it used to say nothing about **which** files it chose or where the cut fell, and emitted no hash, so a result could not be audited or reproduced from its own output. It now prints the selected count, the score at the cutoff, and a short sha256 of the emitted context. The `Generated:` timestamp line is excluded from the hash, so the same query over the same repo hashes identically.
+
+`--json` carries the same as `topK`, `selectedFiles`, `cutoffScore` and `contextHash`.
 
 **Input minimization (v7.0.0).** When the query is a pasted blob — a stack trace, CI log, or JSON payload — `ask` classifies it and, on an interactive terminal, offers to minimize it before ranking (dedupe frames, strip vendor noise, collapse repeated array items, and enrich the top stack frame with its real signature). It only prompts when the reduction clears `--squeeze-threshold` (default 30%). Non-interactive (piped/CI) usage is never blocked: `--squeeze` auto-accepts, `--no-squeeze` disables it entirely. See [`squeeze`](#squeeze) below.
 
@@ -1120,6 +1136,32 @@ sigmap note --json        # machine-readable
 | `--json` | Emit `{ added }` (on append) or `{ notes }` (on list) |
 
 The same log is surfaced to agents through the [`read_memory` MCP tool](/guide/mcp). See the [Memory & notes guide](/guide/memory).
+
+### Notes reach retrieval (v8.54.2)
+
+Until v8.54.2 the notes log was **write-only** (#776). Every reader in the shipped tree was `note` listing its own notes, [`status`](#status) counting them, or the `read_memory` MCP tool — never `ask`, `--query`, the ranker, `plan` or `evidence`. A note saying *"the redaction logic lives in `src/security/patterns.js`"* could not influence a query about redaction, which is the one thing a decision log exists for.
+
+A note now participates in retrieval when it is **relevant to the query**:
+
+- notes are scored against the query with the ranker's own tokenizer;
+- a relevant note **boosts the files whose paths it names**, so a file the lexical ranker missed can rise into the selection;
+- matching notes render into `.context/query-context.md` under a `## Notes` heading, and are summarised in `ask` output, so the agent consuming the context sees the human's answer first.
+
+```
+ Notes     : 1 matching (redaction logic for Slack tokens lives in src/sec…)
+```
+
+Three properties keep it from becoming noise:
+
+| Property | Behaviour |
+|---|---|
+| **Gated** | Only notes clearing a relevance floor participate — notes never leak into unrelated queries |
+| **Bounded** | The most recent notes are considered, branch-scoped as the store already is |
+| **Inert when unused** | With no notes present, output is byte-identical to before — so a repo that never ran `note` is unaffected |
+
+The boost is **additive and scaled to the query's own top score**, not a multiplier and not a constant. A multiplier cannot lift a zero-scoring file, and zero is exactly the case a note is most valuable in: the ranker found no lexical overlap and a human already knew the answer. Scores span roughly 4–30 depending on query and repo, so an absolute constant would be decisive on one query and invisible on another.
+
+The ranking core is untouched — the boost is applied by `ask` after ranking, never inside `rank()`, so retrieval benchmarks are unaffected (`validate:retrieval` mined **+0.0pp**).
 
 ---
 
