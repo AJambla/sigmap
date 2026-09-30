@@ -78,9 +78,9 @@ features:
 
 <div style="max-width:840px;margin:0 auto;padding:18px 24px 0;text-align:center">
 <div style="display:inline-flex;flex-wrap:wrap;gap:.5rem;justify-content:center;background:var(--vp-c-brand-soft,#ede9fe);border:1px solid rgba(124,106,247,.25);border-radius:999px;padding:.55rem .9rem;font-size:.9rem;color:var(--vp-c-text-1)">
-  <span><strong>Release:</strong> v8.54.1</span>
+  <span><strong>Release:</strong> v8.54.2</span>
   <span>·</span>
-  <span><strong>New — the guards were wrong in both directions:</strong> <code>redact</code> exists so secrets never reach an AI context file; <code>verify</code> exists to flag hallucinations. One was letting real secrets through and the other was inventing them. <code>redact</code> missed <strong>five of seven</strong> credential shapes, and the cause was a single character — <code>sk_live_</code> (Stripe) uses an <strong>underscore</strong> while OpenAI and Anthropic use a <strong>hyphen</strong>, so <code>sk-</code> had never been covered. Slack tokens, Slack webhooks, and OpenAI and Anthropic keys now redact. Meanwhile <code>verify</code> reported <code>structuredClone()</code> — a Node and browser global since Node 17 — as fabricated at <strong>high confidence</strong>, then suggested <code>structuralFixture()</code> <em>from a test file</em> as the replacement: a correction that would corrupt the answer it claims to fix. Globals are now grouped data (184 names), the suggestion pool has lost its test, fixture and declarative-language sources, and a similarity floor drops the rest — because no suggestion beats a wrong one. <code>explain</code> stopped reporting a missing file as <code>EXCLUDED — no extractable signatures</code> at exit 0, and gained the test file whose absence let that ship. 36 languages, zero dependencies, offline, deterministic.</span>
+  <span><strong>New — honouring what you actually said:</strong> three commands took your input and silently ignored it. <code>ask --top &lt;n&gt;</code> was documented in <code>--help</code> and parsed correctly by two <em>other</em> commands, while <code>ask</code> hardcoded 5 — <code>--top 2</code> and <code>--top 20</code> returned context files differing only by a timestamp. A pinned <code>maxTokens</code> was replaced by auto-scaling with the explanation printed only under <code>--report</code>; reproducing that turned up the mirror-image defect, where a project that had pinned <strong>nothing</strong> was told <em>&quot;your maxTokens:6000 config was overridden&quot;</em> — 6000 being SigMap's own default. And <code>sigmap note</code> was <strong>write-only</strong>: a note saying <em>&quot;the redaction logic lives in src/security/patterns.js&quot;</em> could not influence a query about redaction, the one thing a decision log is for. Relevant notes now boost the files they name and lead the emitted context — gated so they never leak into unrelated queries, and inert when you have none. <code>ask</code> also reports which files it chose, where the cut fell, and a hash of what it emitted, so a result is reproducible from its own output. 36 languages, zero dependencies, offline, deterministic.</span>
 </div>
 <div style="margin-top:.4rem;display:inline-flex;flex-wrap:wrap;gap:.5rem;justify-content:center;background:var(--vp-c-default-soft,#f3f4f6);border:1px solid rgba(0,0,0,.08);border-radius:999px;padding:.55rem .9rem;font-size:.9rem;color:var(--vp-c-text-2)">
   <span><strong>Benchmark:</strong> sigmap-v8.54-main</span>
@@ -177,7 +177,7 @@ See the full [end-to-end walkthrough](/guide/walkthrough) to watch this in actio
 | Overall token reduction | — | **95.8%** |
 | GPT-4o overflow repos | 14/21 | **0/21** |
 
-Latest saved benchmark run: **2026-09-30 (v8.54.1)**.
+Latest saved benchmark run: **2026-09-30 (v8.54.2)**.
 
 </div>
 

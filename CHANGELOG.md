@@ -10,6 +10,23 @@ Format: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [8.54.2] — 2026-09-30
+
+### Fixed
+- **`ask --top <n>` was documented and ignored** (#775, #801, PR #802) — `--help` advertised it, `--query` and `evidence` both parsed it correctly, and `ask` hardcoded `topK: 5`. `sigmap ask "…" --top 2` and `--top 20` produced context files differing only in their `Generated:` timestamp. Now parsed and used; an invalid value **errors** rather than silently falling back to 5, because doing something other than what the flag said is the defect being fixed
+- **A pinned `maxTokens` was silently overridden** (#783, #801, PR #802) — `autoMaxTokens` defaults to true and replaces the configured budget, but the notice explaining that lived inside the `--report` renderer. On the default run — where almost everyone sees it — the user's `500` simply vanished, leaving the word `auto-scaled` in the coverage line as its only trace. The notice now prints once, on every path
+- **…and that notice was wrong in the other direction too** (#783, PR #802) — with no pinned value at all, `--report` still announced *"your maxTokens:6000 config was overridden"*. `6000` is SigMap's own default, not the user's config: the check compared the **merged** `config.maxTokens`, and `loadConfig` recorded no provenance, so "the user set this" was unknowable. `loadConfig` now records `_userKeys` (the merge loops already skip `_`-prefixed keys, so it cannot collide or be re-merged) and the notice speaks only about a value the project actually set
+
+### Added
+- **Notes reach retrieval — `sigmap note` is no longer write-only** (#776, #801, PR #802) — every `readNotes` call site in the shipped tree was the `note` command listing its own notes, `status` counting them, or the MCP `read_memory` tool. Never `ask`, `--query`, `rank()`, `plan` or `evidence`, so a note saying *"the redaction logic lives in src/patterns.js"* could not influence a query about redaction — the one thing a decision log exists for. New `src/session/note-relevance.js` scores notes against the query with the ranker's own tokenizer, boosts the files a relevant note names, and renders matching notes into `.context/query-context.md` under a `## Notes` heading. Relevance-gated and bounded, so notes never leak into unrelated queries, and **inert when no notes exist** — a repo that never ran `note` produces byte-identical output
+- **`ask` reports what it selected** (#775, PR #802) — the summary gave tokens, coverage and cost but never which files were chosen or where the cut fell, so a result could not be audited or reproduced from its own output. It now prints the selected file count, the score at the cutoff, and a sha256 of the emitted context (the `Generated:` line excluded, so the same query over the same repo hashes identically). `--json` carries `topK`, `selectedFiles`, `cutoffScore`, `contextHash` and any matching `notes`
+
+### Changed
+- **The note boost is additive and scaled to the query's own top score** (#776, PR #802) — recorded because both halves were settled by measurement, not intuition. A *multiplier* cannot lift a zero-scoring file, and zero is exactly when a note is most valuable: the ranker found no lexical overlap and a human already knew the answer. A fixed *constant* fails differently — observed scores span roughly 4–30 across queries, so any absolute number is decisive on one query and invisible on another. Separately, `rank()` slices to `topK` before returning, so boosting its result could never lift a noted file **into** the selection; `ask` now ranks a wider pool when a relevant note exists, boosts, then slices
+- **The ranking core is untouched** (#776, PR #802) — `applyNoteBoost` is reachable only from the `ask` handler; `rank()` and every benchmark script never import it. `npm run validate:retrieval` passes with **mined +0.0pp**, the corpus nobody tuned against
+
+---
+
 ## [8.54.1] — 2026-09-30
 
 ### Fixed

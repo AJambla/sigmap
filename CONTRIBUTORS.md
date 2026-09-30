@@ -38,6 +38,9 @@ To ensure proper attribution:
 
 We welcome contributions! See [Contributing](./docs/CONTRIBUTING.md) for guidelines.
 
+### Recent Contributors (v8.54.2)
+- **@manojmallick** — fix(input): three commands took input from the user and silently discarded it. `ask --top <n>` was documented in `--help` and parsed by two other commands while `ask` hardcoded 5, so `--top 2` and `--top 20` differed only by a timestamp. A pinned `maxTokens` was replaced by auto-scaling with the explanation printed only under `--report` — and that notice was wrong the other way too, announcing SigMap's own 6000 default as "your config" when nothing was pinned, because `loadConfig` tracked no provenance. And `sigmap note` wrote to a store nothing in the retrieval path ever read, so a note naming a file could not influence a query about that file. Notes now boost what they name and render into the emitted context, relevance-gated and inert when absent (#801, #775, #783, #776, PR #802)
+
 ### Recent Contributors (v8.54.1)
 - **@manojmallick** — fix(guard): the two guard commands were wrong in opposite directions. `redact` let five of seven credential shapes through — the cause was one character, `sk_live_` (underscore) covered while `sk-` (hyphen, OpenAI/Anthropic) was not — and `verify` reported `structuredClone()` as fabricated at high confidence, then suggested `structuralFixture()` from a test file as the replacement. Globals became grouped data, the suggestion pool lost its test/fixture/declarative sources and gained a similarity floor, and `explain` stopped reporting a missing file as `EXCLUDED — no extractable signatures` at exit 0. `explain` also gained the test file whose absence let that ship (#798, #771, #777, #772, #785, PR #799)
 

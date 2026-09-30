@@ -145,11 +145,11 @@ The base file is a plain `gen-context.config.json` without an `extends` key itse
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `autoMaxTokens` | `boolean` | `true` | Auto-scale the token budget based on repo size. Set `false` to use a fixed `maxTokens`. |
+| `autoMaxTokens` | `boolean` | `true` | Auto-scale the token budget based on repo size. Set `false` to use your pinned `maxTokens` — see [the interaction](#maxtokens-vs-automaxtokens) below. |
 | `coverageTarget` | `number` | `0.80` | Target fraction of source files to include (0.0–1.0). Default: 80%. |
 | `modelContextLimit` | `number` | `128000` | Model context window size in tokens. Hard cap = `modelContextLimit × maxTokensHeadroom`. |
 | `maxTokensHeadroom` | `number` | `0.20` | Fraction of the model context reserved for SigMap output. Default 0.20 = 25 600-token cap for 128K models. |
-| `maxTokens` | `number` | `6000` | Used only when `autoMaxTokens: false`, or as a minimum floor. |
+| `maxTokens` | `number` | `6000` | Used only when `autoMaxTokens: false`, or as a minimum floor. Pinning it while `autoMaxTokens` is on now prints a notice — see [the interaction](#maxtokens-vs-automaxtokens). |
 
 **Formula:** `effective = clamp(ceil(totalSigTokens × coverageTarget), 4000, floor(modelContextLimit × maxTokensHeadroom))`
 
@@ -161,6 +161,23 @@ To pin a fixed budget (v4.0 behaviour):
 ```json
 { "autoMaxTokens": false, "maxTokens": 6000 }
 ```
+
+### `maxTokens` vs `autoMaxTokens`
+
+`autoMaxTokens` is **on by default**, and when it is on it overrides a pinned `maxTokens`. That is intended — but until **v8.54.2** it happened in silence (#783). Setting `{"maxTokens": 500}` and running `sigmap` left no trace beyond the word `auto-scaled` in the coverage line; the explanation existed only inside the `--report` renderer, which is not the path most people run.
+
+Since v8.54.2 the notice prints once, on **every** path:
+
+```
+[sigmap] note: autoMaxTokens is active — your maxTokens:500 config was overridden by auto-scaled budget (4000)
+  to use your value, set "autoMaxTokens": false in gen-context.config.json
+```
+
+The same fix removed a false positive in the other direction. The old check compared the **merged** `maxTokens`, so a project that had never configured a budget was told *"your maxTokens:6000 config was overridden"* — `6000` being SigMap's own default. The loader now records which keys the project actually set, and the notice speaks only about a pinned value.
+
+- **Nothing pinned** → budget auto-scales, **no notice** — nothing of yours was overridden.
+- **A pinned budget, auto-scaling on** (the default) → budget auto-scales, and the **notice prints**, naming your value.
+- **A pinned budget with `autoMaxTokens` set to `false`** → your value is the ceiling, **no notice**.
 
 ## Source scanning
 

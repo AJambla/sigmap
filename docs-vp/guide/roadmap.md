@@ -1,13 +1,13 @@
 ---
 title: Roadmap
-description: SigMap version history and roadmap. From v0.0 to v8.54.1, with recent releases completing the grounded-codegen plan — a realistic §9 ablation (real-symbol corpus, exact-signature grounding, --verbose), a Gemini (AI Studio) provider for the §9 ablation, the init Creation-workflow CLAUDE.md block, scaffold persistence, the LLM A/B hallucination ablation harness, the sigmap create orchestrator and its four guard stages (scaffold, verify-plan, verify-ai-output, review-pr), the conventions command with its full flag set (--conflicts, --inject, --report, --ci, --fix, --update), the grounding benchmark, read-time self-heal, live-index MCP write hooks, the get_callee_signatures MCP tool (exact callee signatures), realistic per-query savings, release-pipeline robustness (bundle integrity + version.json gates, standalone-bundle smoke test), the sigmap gain token-savings dashboard, supply-chain hardening (zero system-shell access), Squeeze input minimization with symbol enrichment, source-of-truth llms.txt, the verify-ai-output Hallucination Guard, and Memory tools (note, status, read_memory MCP tool).
+description: SigMap version history and roadmap. From v0.0 to v8.54.2, with recent releases completing the grounded-codegen plan — a realistic §9 ablation (real-symbol corpus, exact-signature grounding, --verbose), a Gemini (AI Studio) provider for the §9 ablation, the init Creation-workflow CLAUDE.md block, scaffold persistence, the LLM A/B hallucination ablation harness, the sigmap create orchestrator and its four guard stages (scaffold, verify-plan, verify-ai-output, review-pr), the conventions command with its full flag set (--conflicts, --inject, --report, --ci, --fix, --update), the grounding benchmark, read-time self-heal, live-index MCP write hooks, the get_callee_signatures MCP tool (exact callee signatures), realistic per-query savings, release-pipeline robustness (bundle integrity + version.json gates, standalone-bundle smoke test), the sigmap gain token-savings dashboard, supply-chain hardening (zero system-shell access), Squeeze input minimization with symbol enrichment, source-of-truth llms.txt, the verify-ai-output Hallucination Guard, and Memory tools (note, status, read_memory MCP tool).
 head:
   - - meta
     - property: og:title
       content: "SigMap Roadmap — version history and upcoming features"
   - - meta
     - property: og:description
-      content: "213 versions shipped. See what changed in each release and what is coming next."
+      content: "214 versions shipped. See what changed in each release and what is coming next."
   - - meta
     - property: og:url
       content: "https://sigmap.io/guide/roadmap"
@@ -20,7 +20,7 @@ head:
 ---
 # Roadmap
 
-Two hundred thirteen versions shipped. MIT open source from day one.
+Two hundred fourteen versions shipped. MIT open source from day one.
 
 **Stats:** 95.8% overall token reduction · 78.6% retrieval hit@5 · 2.12× measured lift vs single-shot grep (86.4% vs 40.8%, honest corpus) · 98.0% test-discovery F1 · installed-library grounding (JS/TS + Python) · method-level call-graph (JS/TS, Python, Java, Go, Rust, Kotlin, Scala) · 22 MCP tools · 36 languages · 17-language source resolver · 0 npm deps
 
@@ -835,6 +835,26 @@ Two milestones in one release. **`verify-ai-output` Reliable MVP** (#232) grows 
 **Tags:** `KNOWN_LIMITATIONS.md` · `extraction honesty` · `tier label` · `drift guard` · `G1` · `#520` · `PR #521`
 
 **Impact:** the credibility gap a skeptical reviewer finds first is closed in writing; 6 new guard checks (133 files); zero runtime changes.
+
+---
+
+### v8.54.2 — honouring what the user said ✓ (2026-09-30)
+
+**Patch release closing the discarded-input cluster.** Three commands took input from the user and silently did not use it. None of them announced it, which is the *silent wrongness* class the roadmap ranks first: a wrong answer delivered confidently costs more than a missing feature.
+
+`ask --top <n>` was documented in `--help` and parsed correctly by `--query` and `evidence`, while `ask` itself hardcoded `topK: 5`. `--top 2` and `--top 20` produced context files that differed only in their `Generated:` timestamp. It is now honoured, and an invalid value errors rather than quietly falling back — doing something other than what the flag said is the defect. `ask` also stopped being unauditable: it now reports the selected file count, the score at the cutoff, and a sha256 of the emitted context, so a result can be reproduced from its own output.
+
+A pinned `maxTokens` was replaced by auto-scaling with the explanation printed only inside the `--report` renderer, so on a default run the user's `500` simply vanished. Reproducing that turned up a second defect pointing the other way: with nothing pinned at all, `--report` still announced *"your maxTokens:6000 config was overridden"* — `6000` being SigMap's own default. The check compared the merged value, and the loader recorded no provenance, so "the user set this" was unknowable. `loadConfig` now records which keys the project actually set, and the notice prints on every path while speaking only about a pinned value.
+
+`sigmap note` was write-only. Every reader in the shipped tree was `note` listing its own notes, `status` counting them, or the `read_memory` MCP tool — never `ask`, the ranker, `plan` or `evidence`. A note naming a file had no effect on a query about exactly that file, which is the one thing a decision log is for. Relevant notes now boost the files they name and render into the emitted context under `## Notes`, gated so they never leak into unrelated queries and inert when no notes exist.
+
+Two design points were settled by measurement rather than intuition, and are recorded because both alternatives look reasonable on paper. The note boost is **additive and scaled to the query's own top score**: a multiplier cannot lift a zero-scoring file, and zero is precisely when a note is most valuable — the ranker found no lexical overlap and a human already knew the answer — while a fixed constant fails differently, since scores span roughly 4–30 across queries. And `rank()` slices to `topK` before returning, so boosting its result could never lift a noted file *into* the selection; `ask` ranks a wider pool first, boosts, then slices.
+
+The ranking core is untouched: the boost is reachable only from the `ask` handler, never from `rank()` or any benchmark script, and `validate:retrieval` passed with **mined +0.0pp** — the corpus nobody tuned against.
+
+**Tags:** `ask --top`, context hash, cutoff score, `maxTokens` provenance, `_userKeys`, `note-relevance.js`, additive note boost, discarded-input cluster
+
+**Impact:** a documented flag stops lying · a pinned budget announces itself (and stops claiming defaults as "your config") · notes become a retrieval signal · 20 new tests (191 integration, was 190) · retrieval gate mined +0.0pp · 0 npm deps
 
 ---
 
