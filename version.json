@@ -1,11 +1,11 @@
 {
-  "version": "8.54.2",
+  "version": "8.55.0",
   "benchmark_date": "2026-09-30",
-  "benchmark_id": "sigmap-v8.54-main",
+  "benchmark_id": "sigmap-v8.55-main",
   "languages": 36,
   "extractors": 50,
   "mcp_tools": 22,
-  "tests": 197,
+  "tests": 198,
   "metrics": {
     "hit_at_5": 0.786,
     "baseline_hit_at_5": 0.136,
@@ -17,7 +17,7 @@
     "prompt_reduction_pct": 43.4,
     "graph_boosted_hit_at_5": 0.786,
     "grep_baseline_hit_at_5": 0.408,
-    "grep_lift": 2.12
+    "grep_lift": 2.16
   },
   "ablation": {
     "benchmark_id": "sigmap-v7.24-ablation",

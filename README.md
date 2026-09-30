@@ -6,6 +6,8 @@
 
 **SigMap is the deterministic, verifiable grounding layer for AI code work.**
 
+<a href="https://trendshift.io/repositories/27224?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-27224" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/27224/daily?language=JavaScript" alt="manojmallick%2Fsigmap | Trendshift" width="250" height="55"/></a>
+
 [![npm version](https://img.shields.io/npm/v/sigmap?color=7c6af7&label=latest&logo=npm)](https://www.npmjs.com/package/sigmap)
 [![npm downloads](https://img.shields.io/npm/dt/sigmap?color=22c55e&label=downloads&logo=npm)](https://www.npmjs.com/package/sigmap)
 [![CI](https://github.com/manojmallick/sigmap/actions/workflows/ci.yml/badge.svg)](https://github.com/manojmallick/sigmap/actions/workflows/ci.yml)
@@ -60,7 +62,7 @@ That map is exactly what agentic grep is worst at: reproducible, auditable conte
 **Proof it pays off** (full benchmark below):
 <!--SM:whyMetrics-->
 - **78.6% hit@5** — right file in top 5 results (retrieval corpus, 18 repos)
-- **86.4% vs 40.8% single-shot grep baseline** — 2.12× measured lift on the honest corpus (125 tasks / 19 repos)
+- **88.0% vs 40.8% single-shot grep baseline** — 2.16× measured lift on the honest corpus (125 tasks / 19 repos)
 - **95.8% token reduction** — average across 21 real repos
 - **61.0% task-success proxy** — modeled from retrieval tiers, not measured LLM sessions
 - **1.61 prompts per task** — down from 2.84 (43.4% fewer retries, modeled)
@@ -123,11 +125,11 @@ Ask → Rank → Context → Validate → Judge → Learn
 
 <!--SM:benchmarkBlock-->
 ```
-Benchmark : sigmap-v8.54-main (21 repositories, including R language)
+Benchmark : sigmap-v8.55-main (21 repositories, including R language)
 Date      : 2026-09-30
 
 Hit@5          : 78.6%   (retrieval corpus, 18 repos)
-Honest vs grep : 86.4% vs 40.8% grep baseline — 2.12× lift (125 tasks / 19 repos)
+Honest vs grep : 88.0% vs 40.8% grep baseline — 2.16× lift (125 tasks / 19 repos)
 Token reduction: 95.8%   (across 21 repos)
 Prompt reduction : 43.4% (2.84 → 1.61 prompts per task, modeled)
 Task success   : 61.0%   (proxy — modeled from retrieval tiers)

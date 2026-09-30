@@ -167,7 +167,7 @@ test('sigmap share → exits 0 and prints shareable text', () => {
   // clone. The contract is: report measured numbers, or say there are none.
   assert.ok(/fewer tokens/.test(r.stdout) || /not benchmarked locally/.test(r.stdout),
     `share must report measured numbers or state it has none: ${r.stdout}`);
-  assert.ok(!/6×|6x better/.test(r.stdout), 'unmeasured multiplier is back');
+  assert.ok(!/(?<![\d.])6×|6x better/.test(r.stdout), 'unmeasured multiplier is back'); // lookbehind: a measured `2.16×` is not this claim
 });
 
 // ---------------------------------------------------------------------------

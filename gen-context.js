@@ -21343,7 +21343,7 @@ __factories["./src/mcp/server"] = function(module, exports) {
 
   const SERVER_INFO = {
     name: 'sigmap',
-    version: '8.54.2',
+    version: '8.55.0',
     description: 'SigMap MCP server — code signatures on demand',
   };
 
@@ -22293,9 +22293,17 @@ __factories["./src/retrieval/bm25"] = function(module, exports) {
     s = s.replace(/ies$/, 'y');
     s = s.replace(/(sses|shes|ches|xes|zes)$/, (m) => m.slice(0, -2));
     s = s.replace(/([^s])s$/, '$1');
+    // Plural folding is the one reduction that must survive an over-strip. The
+    // derivational pass below is aggressive, and when it leaves a stub the guard
+    // used to revert to the RAW input — so `users` went user -> us -> back to
+    // `users`, while `user` went user -> us -> back to `user`, and the two never
+    // unified. A query for "users" therefore scored 0 against `loginUser`, and
+    // `ask "where do users log in"` matched nothing at all.
+    const folded = s;
     s = s.replace(/(ization|izations)$/, 'ize');
     s = s.replace(/(ing|edly|ed|er|ers|ation|ations|ment|ness|ity|ive|able|ible|ize|ise|al)$/, '');
-    return s.length >= 3 ? s : w;
+    if (s.length >= 3) return s;
+    return folded.length >= 3 ? folded : w;
   }
 
   /**
@@ -22875,16 +22883,24 @@ __factories["./src/retrieval/ranker"] = function(module, exports) {
 
   const { loadWeights } = __require('./src/learning/weights');
   const { tokenize, STOP_WORDS } = __require('./src/retrieval/tokenizer');
-  const { bm25rank, MODULE_DOC_RE } = __require('./src/retrieval/bm25');
+  const { bm25rank, MODULE_DOC_RE, stem } = __require('./src/retrieval/bm25');
+  const { isTestFile, isMockFile, isGeneratedDir, isDocsFile, isCiFile } = __require('./src/util/file-class');
 
   // ---------------------------------------------------------------------------
   // Default weights
   // ---------------------------------------------------------------------------
   const DEFAULT_WEIGHTS = {
     exactToken: 1.0,       // query token exactly in sig tokens
-    symbolMatch: 0.5,      // bonus if token appears in a function/class name line
+    // symbolMatch ABOVE pathMatch: defining the thing beats mentioning it.
+    // Inverted (0.5 vs 0.8) until #808 — a test file naming the behaviour
+    // repeatedly, or a path that merely contains the token, outscored the
+    // implementation. Raising symbolMatch is the half that carries the fix;
+    // pathMatch stays at 0.8 because a well-organised path is genuinely
+    // informative, and cutting it too (to 0.45) on top of the IDF scaling below
+    // double-suppressed it and cost 4.5pp of hit@5 on the hard corpus.
+    symbolMatch: 0.9,      // bonus if token appears in a function/class name line
     prefixMatch: 0.3,      // partial prefix hit (query token ≥ 4 chars)
-    pathMatch: 0.8,        // query token appears in the file path
+    pathMatch: 0.8,        // query token appears in the file path (scaled by path IDF)
     recencyBoost: 1.5,     // multiplier applied when file is in recencySet
     graphBoost: 0.4,       // additive bonus for 1-hop import neighbors of matching files
   };
@@ -22924,9 +22940,11 @@ __factories["./src/retrieval/ranker"] = function(module, exports) {
 
   // Penalty multipliers for negative signals
   const PENALTY_SIGNALS = {
-    testFile:      0.4,    // test/spec/__tests__ in path
+    testFile:      0.4,    // every test convention, via util/file-class
+    mockFile:      0.3,    // mocks/stubs/fakes/fixtures: test scaffolding
     generatedCode: 0.3,    // dist/build/.next in path
-    docsFile:      0.2,    // docs/doc/README in path
+    docsFile:      0.2,    // docs/ dirs AND the root README/CHANGELOG family
+    ciFile:        0.15,   // .github/workflows & friends: indexed, rarely the answer
     nodeModules:   0.0,    // node_modules (zero score)
     dataHolder:    0.3,    // generated POJO/entity: almost entirely accessors
   };
@@ -22947,15 +22965,17 @@ __factories["./src/retrieval/ranker"] = function(module, exports) {
   // test" classifies as debug and never reaches the test branch.
   const WANTS_TESTS = new Set(['test', 'tests', 'spec', 'specs', 'unit', 'integration', 'e2e', 'assertion', 'assert', 'mock', 'fixture', 'coverage', 'testing']);
   const WANTS_DOCS = new Set(['doc', 'docs', 'documentation', 'readme', 'changelog', 'guide', 'tutorial']);
+  const WANTS_CI = new Set(['ci', 'cd', 'pipeline', 'pipelines', 'workflow', 'workflows', 'actions', 'jenkins', 'travis', 'circleci', 'buildkite', 'deploy', 'deployment', 'release', 'publish']);
   const WANTS_MODELS = new Set(['entity', 'entities', 'model', 'models', 'pojo', 'dto', 'bean', 'getter', 'getters', 'setter', 'setters', 'accessor', 'accessors', 'field', 'fields', 'column', 'columns', 'schema']);
 
   /** Which penalised categories the query is explicitly asking for. */
   function _queryWants(queryTokens) {
-    const wants = { tests: false, docs: false, models: false };
+    const wants = { tests: false, docs: false, models: false, ci: false };
     for (const t of queryTokens || []) {
       if (WANTS_TESTS.has(t)) wants.tests = true;
       if (WANTS_DOCS.has(t)) wants.docs = true;
       if (WANTS_MODELS.has(t)) wants.models = true;
+      if (WANTS_CI.has(t)) wants.ci = true;
     }
     return wants;
   }
@@ -22976,14 +22996,25 @@ __factories["./src/retrieval/ranker"] = function(module, exports) {
   function _computePenalty(filePath, wants, sigs) {
     const pathLower = filePath.toLowerCase();
     if (pathLower.includes('node_modules')) return PENALTY_SIGNALS.nodeModules;
+    // Every path category below is classified by `src/util/file-class.js`, the
+    // same predicates the token-budget drop order uses. The ranker previously
+    // inlined weaker copies that recognised only `foo.test.js` and `test/`, so
+    // `routes_test.go` was never penalised (#808).
+    //
     // A penalty must never fire on the very thing the user asked for. Before
     // this, "write tests for the ranker" multiplied every test file by 0.4 —
     // the query and the penalty were pulling in opposite directions.
-    if (/(^|\/)(test|tests|spec|__tests__|e2e)($|\/)/.test(pathLower) || /\.(test|spec)\./.test(pathLower)) {
+    if (isTestFile(filePath)) {
       return (wants && wants.tests) ? 1.0 : PENALTY_SIGNALS.testFile;
     }
-    if (/(^|\/)(dist|build|\.next|\.nuxt|out|\.venv|venv)($|\/)/.test(pathLower)) return PENALTY_SIGNALS.generatedCode;
-    if (/(^|\/)(docs|doc|readme|changelog)($|\/)/.test(pathLower)) {
+    if (isMockFile(filePath)) {
+      return (wants && wants.tests) ? 1.0 : PENALTY_SIGNALS.mockFile;
+    }
+    if (isGeneratedDir(filePath)) return PENALTY_SIGNALS.generatedCode;
+    if (isCiFile(filePath)) {
+      return (wants && wants.ci) ? 1.0 : PENALTY_SIGNALS.ciFile;
+    }
+    if (isDocsFile(filePath)) {
       return (wants && wants.docs) ? 1.0 : PENALTY_SIGNALS.docsFile;
     }
     // Content-based, and last: a data holder is still a real source file, so it
@@ -23036,6 +23067,80 @@ __factories["./src/retrieval/ranker"] = function(module, exports) {
   }
 
   /**
+   * Per-token corpus coverage: how many indexed files carry each query token in
+   * their signatures, and how many carry it in their path.
+   *
+   * This is the diagnostic that answers "why did my query miss" — a token
+   * matching zero files is the single most useful thing to show, and `ask` had
+   * no way to surface it (#813). Computed only under `opts.explain`, so the
+   * default ranking path pays nothing for it.
+   *
+   * @param {Map<string,string[]>} sigIndex
+   * @param {string[]} queryTokens
+   * @returns {Array<{token: string, sigFiles: number, pathFiles: number}>}
+   */
+  function _tokenCoverage(sigIndex, queryTokens) {
+    const uniq = [...new Set(queryTokens)].filter((t) => !STOP_WORDS.has(t));
+    const sigDf = new Map();
+    const pathDf = new Map();
+    // Counted over STEMS, because BM25 — which supplies the base score every
+    // other signal multiplies — matches on stems. Counting raw tokens made this
+    // table report "users matched nothing" on a query BM25 scored 1.24 via
+    // `loginUser`: precisely the confidently-wrong reporting this view exists
+    // to eliminate.
+    const stems = new Map(uniq.map((t) => [t, stem(t)]));
+    for (const [file, sigs] of sigIndex.entries()) {
+      const sigTokens = new Set(tokenize((sigs || []).filter((l) => !MODULE_DOC_RE.test(l)).join(' ')).map(stem));
+      const pathTokens = new Set(tokenize(file).map(stem));
+      for (const t of uniq) {
+        const st = stems.get(t);
+        if (sigTokens.has(st)) sigDf.set(t, (sigDf.get(t) || 0) + 1);
+        if (pathTokens.has(st)) pathDf.set(t, (pathDf.get(t) || 0) + 1);
+      }
+    }
+    return uniq.map((t) => ({ token: t, sigFiles: sigDf.get(t) || 0, pathFiles: pathDf.get(t) || 0 }));
+  }
+
+  /**
+   * Inverse document frequency of each query token across the corpus's PATH
+   * tokens.
+   *
+   * `pathMatch` was a flat bonus, so a token that happens to equal the project
+   * name lifted every file whose path contains it. On `gin`, "gin" matched the
+   * repo name and pushed `ginS/gins.go` and `.github/workflows/gin.yml` over the
+   * real source (#807). A token present in a large share of paths carries no
+   * discriminating power, which is exactly what IDF encodes — the same intuition
+   * the ranker already applies to signature tokens via BM25, now applied to
+   * paths.
+   *
+   * Normalised to (0, 1] so a maximally rare token earns the full `pathMatch`
+   * weight and a token present in every path earns ~0.
+   *
+   * @param {Map<string,string[]>} sigIndex
+   * @param {string[]} queryTokens
+   * @returns {Map<string, number>} token -> idf multiplier in (0, 1]
+   */
+  function _pathIdf(sigIndex, queryTokens) {
+    const idf = new Map();
+    const n = sigIndex.size;
+    if (n === 0) return idf;
+    const uniq = [...new Set(queryTokens)].filter((t) => !STOP_WORDS.has(t));
+    if (uniq.length === 0) return idf;
+
+    const df = new Map();
+    for (const file of sigIndex.keys()) {
+      const pathTokens = new Set(tokenize(file));
+      for (const t of uniq) if (pathTokens.has(t)) df.set(t, (df.get(t) || 0) + 1);
+    }
+    const denom = Math.log(1 + n);
+    for (const t of uniq) {
+      const d = df.get(t) || 0;
+      idf.set(t, denom > 0 ? Math.log(1 + (n - d) / (1 + d)) / denom : 1);
+    }
+    return idf;
+  }
+
+  /**
    * Score a single file against a query, returning detailed signal breakdown.
    *
    * @param {string}   filePath   - relative file path (e.g. 'src/extractors/python.js')
@@ -23044,7 +23149,7 @@ __factories["./src/retrieval/ranker"] = function(module, exports) {
    * @param {object}   weights
    * @returns {{ score: number, signals: { exactToken: number, symbolMatch: number, prefixMatch: number, pathMatch: number, penalty: number } }}
    */
-  function scoreFile(filePath, sigs, queryTokens, weights, wants) {
+  function scoreFile(filePath, sigs, queryTokens, weights, wants, pathIdf) {
     if (!sigs || sigs.length === 0) return { score: 0, signals: { exactToken: 0, symbolMatch: 0, prefixMatch: 0, pathMatch: 0, penalty: 1.0 } };
 
     const w = weights || DEFAULT_WEIGHTS;
@@ -23094,10 +23199,14 @@ __factories["./src/retrieval/ranker"] = function(module, exports) {
         }
       }
 
-      // Path token match
+      // Path token match, scaled by how discriminating the token is across all
+      // indexed paths. A direct caller that passes no index (tests, external
+      // consumers of the exported scoreFile) keeps the unscaled behaviour.
       if (pathTokenSet.has(qt)) {
-        score += w.pathMatch;
-        signals.pathMatch += w.pathMatch;
+        const scale = pathIdf && pathIdf.has(qt) ? pathIdf.get(qt) : 1;
+        const bonus = w.pathMatch * scale;
+        score += bonus;
+        signals.pathMatch += bonus;
       }
     }
 
@@ -23121,6 +23230,12 @@ __factories["./src/retrieval/ranker"] = function(module, exports) {
    * @param {{ forward: Map<string,string[]> }} [opts.graph] - dependency graph for neighbor boost
    * @param {{ forward: Map<string,string[]> }} [opts.callGraph] - file-level call-graph edges
    *        (from buildCallFileGraph) for the opt-in call-neighbor boost
+   * @param {boolean} [opts.includeZeroScore=false] - keep files that scored 0.
+   *        Off by default: a rank is a claim of relevance and 0.00 is the absence
+   *        of one (#807). Multi-stage callers that boost after ranking opt in.
+   * @param {boolean} [opts.explain=false] - attach the `--explain` surfaces
+   *        (nearMiss, tokenCoverage, pathIdf, totalCandidates, indexSize) as
+   *        properties on the returned array.
    * @param {Map<string,number>} [opts.centrality] - absolute file → normalized
    *        centrality (from computeCentrality) for the opt-in centrality blend
    * @returns {{ file: string, score: number, sigs: string[], tokens: number, intent: string, signals: object }[]}
@@ -23169,10 +23284,12 @@ __factories["./src/retrieval/ranker"] = function(module, exports) {
 
     // Two passes: scoreFile's weighted signal needs the max across the corpus to
     // normalise against, so collect first, then combine.
+    const pathIdf = _pathIdf(sigIndex, queryTokens);
+
     const prescored = [];
     let maxSignal = 0;
     for (const [file, sigs] of sigIndex.entries()) {
-      const result = scoreFile(file, sigs, queryTokens, weights, queryWants);
+      const result = scoreFile(file, sigs, queryTokens, weights, queryWants, pathIdf);
       if (result.score > maxSignal) maxSignal = result.score;
       prescored.push({ file, sigs, result });
     }
@@ -23341,7 +23458,34 @@ __factories["./src/retrieval/ranker"] = function(module, exports) {
     }
 
     scored.sort((a, b) => b.score - a.score || a.file.localeCompare(b.file));
-    return scored.slice(0, topK);
+
+    // Zero-score suppression (#807). A rank is a claim of relevance, and 0.00 is
+    // the absence of one — yet `slice(0, topK)` padded the table with whatever
+    // sorted first among the files that matched nothing, so four
+    // `.github/workflows/*.yml` scoring exactly zero were numbered 3-6 of a
+    // routing query. When nothing scores, callers get an empty array and render
+    // "no match" rather than filler.
+    // `includeZeroScore` is for multi-stage callers that apply their OWN boost
+    // after ranking and therefore need the full pool: a session note naming a
+    // file is explicit user evidence, and `applyNoteBoost` is additive, so the
+    // named file must still be present for the note to lift it into the
+    // selection (#776). Those callers filter at their own selection boundary.
+    const keepZero = !!(opts && opts.includeZeroScore);
+    const ranked = keepZero ? scored : scored.filter((e) => e.score > 0);
+    const out = ranked.slice(0, topK);
+
+    // Explain surfaces (#813), attached as ARRAY PROPERTIES so the return value
+    // stays a plain array for every existing caller and `JSON.stringify` output
+    // is byte-identical unless a caller opts in.
+    if (opts && opts.explain) {
+      const nearMissCount = Number.isInteger(opts.nearMiss) && opts.nearMiss > 0 ? opts.nearMiss : 5;
+      out.nearMiss = ranked.slice(topK, topK + nearMissCount);
+      out.tokenCoverage = _tokenCoverage(sigIndex, queryTokens);
+      out.pathIdf = pathIdf;
+      out.totalCandidates = ranked.length;
+      out.indexSize = sigIndex.size;
+    }
+    return out;
   }
 
   /**
@@ -23607,6 +23751,95 @@ __factories["./src/retrieval/ranker"] = function(module, exports) {
   // Nouns carry an optional plural: `\btest\b` does not match "tests", so
   // "write unit tests for the ranker" matched NO intent at all and fell through
   // to the 'search' default.
+  /**
+   * Human-readable reason a file was demoted, or '' when it was not.
+   * Derived from the same predicates that set the multiplier, so the explain
+   * output can never disagree with the score it is explaining.
+   */
+  function _penaltyReason(filePath, penalty) {
+    if (!(penalty < 1)) return '';
+    if (String(filePath).toLowerCase().includes('node_modules')) return 'node_modules';
+    if (isTestFile(filePath)) return 'test file';
+    if (isMockFile(filePath)) return 'mock/fixture';
+    if (isGeneratedDir(filePath)) return 'build output';
+    if (isCiFile(filePath)) return 'CI definition';
+    if (isDocsFile(filePath)) return 'documentation';
+    return 'data holder (accessors only)';
+  }
+
+  /**
+   * Render the `--explain` diagnostic view (#813).
+   *
+   * Three sections, in the order a miss is actually diagnosed:
+   *   1. per-token corpus coverage — a token matching zero files is the answer
+   *      to "why did my query miss" far more often than anything else;
+   *   2. the selected files with every contributing signal and, when demoted,
+   *      the reason;
+   *   3. near-miss candidates that scored above zero but below the cutoff.
+   *
+   * Opt-in: `rank()` only attaches these surfaces under `opts.explain`, so
+   * default output is untouched.
+   *
+   * @param {Array} results - the array returned by rank(query, index, { explain: true })
+   * @param {string} query
+   * @returns {string}
+   */
+  function formatExplainTable(results, query) {
+    const lines = [`## Explain: ${query}`, ''];
+    const coverage = (results && results.tokenCoverage) || [];
+    const idf = (results && results.pathIdf) || new Map();
+
+    if (coverage.length > 0) {
+      const dead = coverage.filter((c) => c.sigFiles === 0 && c.pathFiles === 0);
+      lines.push(`Index: ${results.indexSize || 0} files · ${results.totalCandidates || 0} scored above zero`);
+      lines.push('');
+      lines.push('| Query token | Files w/ token in sigs | in path | Path IDF |');
+      lines.push('|-------------|------------------------|---------|----------|');
+      for (const c of coverage) {
+        const v = idf.has(c.token) ? idf.get(c.token).toFixed(2) : '1.00';
+        lines.push(`| ${c.token} | ${c.sigFiles} | ${c.pathFiles} | ${v} |`);
+      }
+      lines.push('');
+      if (dead.length > 0) {
+        lines.push(`Matched nothing: ${dead.map((d) => d.token).join(', ')} — these tokens contributed no score.`);
+        lines.push('');
+      }
+    }
+
+    if (!results || results.length === 0) {
+      lines.push('No file scored above zero for this query.');
+      lines.push('');
+      return lines.join('\n');
+    }
+
+    lines.push('### Selected');
+    lines.push('');
+    lines.push('| Rank | File | Score | exact | symbol | prefix | path | bm25 | graph | call | central | learned | penalty | demoted for |');
+    lines.push('|------|------|-------|-------|--------|--------|------|------|-------|------|---------|---------|---------|-------------|');
+    results.forEach((r, i) => {
+      const g = r.signals || {};
+      const n = (v, d) => (typeof v === 'number' ? v : (d === undefined ? 0 : d)).toFixed(2);
+      lines.push(`| ${i + 1} | ${r.file} | ${r.score.toFixed(2)} | ${n(g.exactToken)} | ${n(g.symbolMatch)} | ${n(g.prefixMatch)} | ${n(g.pathMatch)} | ${n(g.bm25)} | ${n(g.graphBoost)} | ${n(g.callGraphBoost)} | ${n(g.centrality)} | ${n(g.learnedWeights, 1)} | ${n(g.penalty, 1)} | ${_penaltyReason(r.file, g.penalty === undefined ? 1 : g.penalty) || '—'} |`);
+    });
+    lines.push('');
+
+    const nearMiss = (results && results.nearMiss) || [];
+    if (nearMiss.length > 0) {
+      const cutoff = results[results.length - 1].score;
+      lines.push(`### Near misses (below the cutoff of ${cutoff.toFixed(2)})`);
+      lines.push('');
+      lines.push('| File | Score | penalty | demoted for |');
+      lines.push('|------|-------|---------|-------------|');
+      for (const r of nearMiss) {
+        const pen = r.signals && r.signals.penalty !== undefined ? r.signals.penalty : 1;
+        lines.push(`| ${r.file} | ${r.score.toFixed(2)} | ${pen.toFixed(2)} | ${_penaltyReason(r.file, pen) || '—'} |`);
+      }
+      lines.push('');
+    }
+
+    return lines.join('\n');
+  }
+
   const INTENT_PATTERNS = {
     debug:    /\b(bugs?|fix(es|ed)?|errors?|crash(es)?|exceptions?|broken|failing|failures?|issues?|problems?|regressions?)\b/i,
     explain:  /\b(explain|how does|what is|understand|overview|architecture|describe|walk me|teach)\b/i,
@@ -23653,7 +23886,7 @@ __factories["./src/retrieval/ranker"] = function(module, exports) {
     return detectIntents(query)[0];
   }
 
-  module.exports = { rank, buildSigIndex, scoreFile, _queryWants, _isDataHolder, detectIntents, formatRankTable, formatRankJSON, DEFAULT_WEIGHTS, GRAPH_BOOST_AMOUNTS, CENTRALITY_BLEND_WEIGHT, detectIntent };
+  module.exports = { rank, buildSigIndex, scoreFile, _queryWants, _isDataHolder, detectIntents, formatRankTable, formatRankJSON, formatExplainTable, DEFAULT_WEIGHTS, GRAPH_BOOST_AMOUNTS, CENTRALITY_BLEND_WEIGHT, detectIntent };
   
 };
 
@@ -26657,6 +26890,120 @@ __factories["./src/tracking/usage-source"] = function(module, exports) {
   
 };
 
+// ── ./src/util/file-class ──
+__factories["./src/util/file-class"] = function(module, exports) {
+  
+  /**
+   * file-class.js — single source of truth for file-category classification.
+   *
+   * Two subsystems classify files and MUST agree:
+   *   1. the token-budget drop order (`gen-context.js`) — what gets dropped first
+   *   2. the retrieval penalty (`src/retrieval/ranker.js`) — what gets demoted
+   *
+   * Before this module they kept divergent private copies, and the ranker's was
+   * strictly weaker: its test pattern recognised only `foo.test.js` and `test/`
+   * path segments, so Go's `routes_test.go`, Python's `test_foo.py`, Rust's
+   * `foo_test.rs` and the JVM's `FooTest.java` were never penalised at all. On
+   * the gin routing question that let `routes_test.go` and `middleware_test.go`
+   * rank ABOVE `gin.go`, and a root `README.md` rank above `routergroup.go`
+   * (#808). The budget order had the correct patterns the whole time (#592).
+   *
+   * Zero dependencies. Pure string predicates — no fs access, so both the
+   * bundled CLI core and every `src/` module can share them.
+   */
+
+  /** Normalise to forward slashes so Windows paths classify identically. */
+  function _norm(filePath) {
+    return String(filePath || '').replace(/\\/g, '/');
+  }
+
+  /**
+   * Test files, across every convention the extractors support.
+   *
+   * Filename forms: `foo.test.ts`, `foo.spec.js`, `foo_test.go`, `test_foo.py`,
+   * plus the PascalCase JVM/C#/Swift family (`FooTest.java`, `FooTests.kt`,
+   * `FooSpec.scala`). The `[a-z0-9]` guard keeps `contest.java` and `Latest.java`
+   * out — the suffix must fall on a real case boundary.
+   *
+   * Path-segment forms: `src/test/java/**`, `tests/`, `spec/`, `__tests__/`,
+   * `e2e/` — the shape the entire JVM world uses. Without it "drop test files
+   * first" ran INVERTED on JVM repos (#592).
+   */
+  function isTestFile(filePath) {
+    const p = _norm(filePath);
+    if (/\.(test|spec)\.[a-z]+$/.test(p) || /_test\.[a-z]+$/.test(p)) return true;
+    if (/(^|\/)test_[^/]+\.[a-z]+$/.test(p)) return true;
+    if (/[a-z0-9](Test|Spec)s?\.(java|kt|kts|scala|groovy|cs|swift)$/.test(p)) return true;
+    return /(^|\/)(test|tests|spec|specs|__tests__|e2e)(\/|$)/i.test(p);
+  }
+
+  /** Mocks, stubs, fakes and fixtures — test scaffolding, not behaviour. */
+  function isMockFile(filePath) {
+    const p = _norm(filePath);
+    return /\/(mock|mocks|stub|stubs|fake|fakes|demo|demos|__mocks__|fixtures)\//i.test(p) ||
+      /\.(mock|stub|fake)\.[jt]sx?$/.test(p) ||
+      /mock\.(ts|js|tsx|jsx)$/.test(p) ||
+      /_mock\.[a-z]+$/i.test(p);
+  }
+
+  /** Machine-emitted sources. */
+  function isGeneratedFile(filePath) {
+    return /(\.generated\.|\.pb\.|_pb\.)/.test(_norm(filePath));
+  }
+
+  /** Build output and vendored trees. */
+  function isGeneratedDir(filePath) {
+    return /(^|\/)(dist|build|\.next|\.nuxt|out|\.venv|venv|vendor|target)(\/|$)/i.test(_norm(filePath));
+  }
+
+  /**
+   * Prose documentation.
+   *
+   * Both a directory form (`docs/`, `website/`) and the well-known root
+   * filenames. The root form is the half the ranker was missing: `README.md`
+   * matched no directory segment, so it carried no penalty and outranked
+   * implementation files on "how does" questions (#808). Deliberately keyed on
+   * the conventional names rather than "any `.md`", so a repo whose content is
+   * genuinely markdown is not blanket-demoted.
+   */
+  function isDocsFile(filePath) {
+    const p = _norm(filePath);
+    // Deliberately NOT `wiki|man|website`: `src/wiki/generate.js` is the module
+    // that BUILDS a wiki, and demoting it cost a gold retrieval task. Directory
+    // names that double as domain nouns do not belong here.
+    if (/(^|\/)(docs|doc|documentation)(\/|$)/i.test(p)) return true;
+    const base = p.slice(p.lastIndexOf('/') + 1);
+    return /^(README|CHANGELOG|CHANGES|CONTRIBUTING|CODE_OF_CONDUCT|SECURITY|LICENCE|LICENSE|AUTHORS|NOTICE|HISTORY|UPGRADING|MIGRATING|MAINTAINERS|GOVERNANCE)(\.[a-z]+)?$/i.test(base);
+  }
+
+  /**
+   * CI / pipeline definitions.
+   *
+   * SigMap extracts these on purpose (`src/extractors/pipeline.js`) because
+   * "how does CI work" is a real question — so they are indexed, then demoted
+   * for every query that is NOT about them. They previously had no category at
+   * all, which is why four `.github/workflows/*.yml` files filled ranks 3-6 of a
+   * routing query (#807) and Alamofire's `ci.yml` reached the top 5 (#808).
+   */
+  function isCiFile(filePath) {
+    const p = _norm(filePath);
+    if (/(^|\/)\.github\/(workflows|actions)(\/|$)/i.test(p)) return true;
+    if (/(^|\/)\.(circleci|gitlab|buildkite|teamcity)(\/|$)/i.test(p)) return true;
+    const base = p.slice(p.lastIndexOf('/') + 1);
+    return /^(\.gitlab-ci\.ya?ml|\.travis\.ya?ml|\.drone\.ya?ml|appveyor\.ya?ml|bitbucket-pipelines\.ya?ml|azure-pipelines.*\.ya?ml|Jenkinsfile.*|cloudbuild\.ya?ml)$/i.test(base);
+  }
+
+  module.exports = {
+    isTestFile,
+    isMockFile,
+    isGeneratedFile,
+    isGeneratedDir,
+    isDocsFile,
+    isCiFile,
+  };
+  
+};
+
 // ── ./src/util/git ──
 __factories["./src/util/git"] = function(module, exports) {
   
@@ -28545,7 +28892,7 @@ function __tryGit(args, opts = {}) {
   catch (_) { return ''; }
 }
 
-const VERSION = '8.54.2';
+const VERSION = '8.55.0';
 const MARKER = '\n\n## Auto-generated signatures\n<!-- Updated by gen-context.js -->\n';
 
 function requireSourceOrBundled(key) {
@@ -28982,21 +29329,20 @@ function estimateTokens(str) {
   return Math.ceil(str.length / 4);
 }
 
+// The budget drop-order and the retrieval penalty (src/retrieval/ranker.js)
+// classify the same files and MUST agree. They previously kept independent
+// copies of these predicates and the ranker's was strictly weaker, so
+// `routes_test.go` was dropped-last-correctly by the budget yet never demoted
+// by the ranker (#808). Both now resolve through one module; the definitions
+// live in src/util/file-class.js and the history is documented there.
+let __fileClassMod = null;
+function _fileClass() {
+  if (!__fileClassMod) __fileClassMod = requireSourceOrBundled('./src/util/file-class');
+  return __fileClassMod;
+}
+
 function isTestFile(filePath) {
-  const p = filePath.replace(/\\/g, '/');
-  // Filename conventions: foo.test.ts / foo.spec.js / foo_test.go / test_foo.py,
-  // plus the PascalCase JVM/C#/Swift family (FooTest.java, FooTests.kt,
-  // FooSpec.scala). The [a-z0-9] guard keeps `contest.java` and `Latest.java`
-  // out; the suffix must be a real case boundary.
-  if (/\.(test|spec)\.[a-z]+$/.test(p) || /_test\.[a-z]+$/.test(p)) return true;
-  if (/(^|\/)test_[^/]+\.[a-z]+$/.test(p)) return true;
-  if (/[a-z0-9](Test|Spec)s?\.(java|kt|kts|scala|groovy|cs|swift)$/.test(p)) return true;
-  // Path-segment conventions (src/test/java/**, tests/, spec/, __tests__/, e2e/)
-  // — the form the entire JVM world uses. Without this, "drop test files first"
-  // ran INVERTED on JVM repos: spring-petclinic's budget kept all 17 src/test/
-  // files while dropping the application entry point, the owner entities and
-  // every owner template (#592).
-  return /(^|\/)(test|tests|spec|specs|__tests__|e2e)(\/|$)/i.test(p);
+  return _fileClass().isTestFile(filePath);
 }
 
 function isConfigFile(filePath) {
@@ -29005,14 +29351,11 @@ function isConfigFile(filePath) {
 }
 
 function isGeneratedFile(filePath) {
-  return /(\.generated\.|\.pb\.|_pb\.)/.test(filePath);
+  return _fileClass().isGeneratedFile(filePath);
 }
 
 function isMockFile(filePath) {
-  const p = filePath.replace(/\\/g, '/');
-  return /\/(mock|mocks|stub|stubs|fake|fakes|demo|demos|__mocks__|fixtures)\//i.test(p) ||
-    /\.(mock|stub|fake)\.[jt]sx?$/.test(p) ||
-    /mock\.(ts|js|tsx|jsx)$/.test(p);
+  return _fileClass().isMockFile(filePath);
 }
 
 // The application entry point is the single most orientation-valuable file in
@@ -31187,7 +31530,9 @@ Usage:
   ${cmd} --query "<text>"                  Rank files by relevance to a query
   ${cmd} --query "<text>" --json           Ranked results as JSON
   ${cmd} --query "<text>" --top <n>        Limit results to top N files (default 10)
+  ${cmd} --query "<text>" --explain        Per-file score signals, token coverage and near misses
   ${cmd} ask "<query>"                     Ranked answer with signatures for a question (--json, --top <n>, --mode)
+  ${cmd} ask "<query>" --explain           Diagnose a miss: which tokens matched, why files were demoted
   ${cmd} plan "<goal>"                     Files to inspect, likely-to-change set, and impact radius (--json)
   ${cmd} explain <file>                    Why a file is in or out of the generated context (--json)
   ${cmd} run                               Alias for a bare generate (${cmd} run --report, etc.)
@@ -31636,12 +31981,12 @@ function main() {
       query = args[2];
     } else if (query && query.startsWith('--') && query !== '--json' && query !== '--model') {
       // Allow --json and --model but not other flags as query
-      console.error('[sigmap] Usage: sigmap ask "<query>" [--followup] [--json] [--model <name>]');
+      console.error('[sigmap] Usage: sigmap ask "<query>" [--followup] [--json] [--explain] [--model <name>]');
       console.error('  Example: sigmap ask "fix the login bug" --followup');
       process.exit(1);
     }
     if (!query || query.startsWith('--')) {
-      console.error('[sigmap] Usage: sigmap ask "<query>" [--followup] [--json] [--model <name>] [--top <n>]');
+      console.error('[sigmap] Usage: sigmap ask "<query>" [--followup] [--json] [--explain] [--model <name>] [--top <n>]');
       console.error('  Example: sigmap ask "fix the login bug" --followup');
       process.exit(1);
     }
@@ -31754,10 +32099,21 @@ function main() {
     } catch (_) { __relevantNotes = []; }
 
     const __poolK = __relevantNotes.length > 0 ? Math.max(askTopK * 4, 25) : askTopK;
-    let ranked = rank(query, sigIndex, { topK: __poolK, weights: intentWeights, cwd, callGraph: askCallGraph, centrality: askCentrality, expansions: askExpansions });
+    const __explain = args.includes('--explain');
+    let ranked = rank(query, sigIndex, { topK: __poolK, weights: intentWeights, cwd, callGraph: askCallGraph, centrality: askCentrality, expansions: askExpansions, explain: __explain, includeZeroScore: __relevantNotes.length > 0 });
+    // `rank()` hangs the explain surfaces off the returned ARRAY, and every
+    // re-ranking step below (.map/.slice/.filter) builds a fresh array, so they
+    // are captured here and re-attached to the final selection. Explaining the
+    // pre-boost ranking would show a different order than `ask` actually used.
+    const __explainMeta = __explain
+      ? { nearMiss: ranked.nearMiss, tokenCoverage: ranked.tokenCoverage, pathIdf: ranked.pathIdf, totalCandidates: ranked.totalCandidates, indexSize: ranked.indexSize }
+      : null;
     if (__relevantNotes.length > 0) {
       const { applyNoteBoost } = requireSourceOrBundled('./src/session/note-relevance');
-      ranked = applyNoteBoost(ranked, __relevantNotes).slice(0, askTopK);
+      // The wider pool was ranked with includeZeroScore so a noted file could
+      // be lifted; anything the note did NOT lift is still a non-match and is
+      // dropped here, so zero-score rows never reach the selection (#807).
+      ranked = applyNoteBoost(ranked, __relevantNotes).filter((r) => r.score > 0).slice(0, askTopK);
     }
 
     // v6.10: Workspace scoping — infer package from query and apply boost
@@ -31809,6 +32165,18 @@ function main() {
       if (!args.includes('--json')) {
         process.stderr.write(`[sigmap] Δ since ${baseRef}: ${ranked.length}/${before} ranked files changed\n`);
       }
+    }
+
+    // `ask --explain` (#813): opt-in diagnostic view. Rendered after every
+    // re-rank so it explains the order `ask` would really have used, and
+    // returned before the context write so a diagnostic run has no side
+    // effects on .context/ or the session.
+    if (__explain) {
+      const { formatExplainTable } = requireSourceOrBundled('./src/retrieval/ranker');
+      const __view = ranked.slice(0, askTopK);
+      Object.assign(__view, __explainMeta);
+      process.stdout.write(formatExplainTable(__view, query));
+      process.exit(0);
     }
 
     // v6.8: Save session for future --followup calls
@@ -34200,7 +34568,9 @@ function main() {
   }
 
   // Feature 1: `sigmap explain <file>` — why a file is included or excluded
-  if (args[0] === 'explain' || args.includes('--explain')) {
+  // The bare `--explain <file>` alias must not swallow `--query ... --explain`,
+  // where --explain takes no argument and means "explain the RANKING" (#813).
+  if (args[0] === 'explain' || (args.includes('--explain') && !args.includes('--query'))) {
     const target = args[0] === 'explain'
       ? args[1]
       : args[args.indexOf('--explain') + 1];
@@ -34626,7 +34996,7 @@ function main() {
         console.error('  Example: node gen-context.js --query "add a new language extractor"');
         process.exit(1);
       }
-      const { rank, buildSigIndex, formatRankTable, formatRankJSON } = requireSourceOrBundled('./src/retrieval/ranker');
+      const { rank, buildSigIndex, formatRankTable, formatRankJSON, formatExplainTable } = requireSourceOrBundled('./src/retrieval/ranker');
 
       // Resolve the context file path to query against.
       // Priority: --output flag > --adapter flag > buildSigIndex probe order
@@ -34685,8 +35055,11 @@ function main() {
       if (config && config.retrieval && config.retrieval.minedExpansions) {
         try { queryExpansions = requireSourceOrBundled('./src/retrieval/mined-expansions').loadOrMine(cwd).expansions; } catch (_) {}
       }
-      const results = rank(query, index, { topK, recencyBoost, cwd, callGraph: queryCallGraph, centrality: queryCentrality, expansions: queryExpansions });
-      if (args.includes('--context')) {
+      const __queryExplain = args.includes('--explain');
+      const results = rank(query, index, { topK, recencyBoost, cwd, callGraph: queryCallGraph, centrality: queryCentrality, expansions: queryExpansions, explain: __queryExplain });
+      if (__queryExplain) {
+        process.stdout.write(formatExplainTable(results, query));
+      } else if (args.includes('--context')) {
         const miniCtx  = buildMiniContext(results, cwd);
         const ctxOut   = path.join(cwd, '.context', 'query-context.md');
         fs.mkdirSync(path.dirname(ctxOut), { recursive: true });

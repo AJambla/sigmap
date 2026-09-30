@@ -51,7 +51,7 @@ features:
     linkText: Task benchmark →
   - icon: 🎯
     title: Right file in context
-    details: 78.6% hit@5 across 18 repos and 105 tasks. On the 125-task honest corpus SigMap scores 86.4% where a single-shot grep agent finds the right file 40.8% of the time — a measured 2.12× better.
+    details: 78.6% hit@5 across 18 repos and 105 tasks. On the 125-task honest corpus SigMap scores 88.0% where a single-shot grep agent finds the right file 40.8% of the time — a measured 2.16× better.
     link: /guide/retrieval-benchmark
     linkText: Retrieval benchmark →
   - icon: ⚖️
@@ -78,12 +78,12 @@ features:
 
 <div style="max-width:840px;margin:0 auto;padding:18px 24px 0;text-align:center">
 <div style="display:inline-flex;flex-wrap:wrap;gap:.5rem;justify-content:center;background:var(--vp-c-brand-soft,#ede9fe);border:1px solid rgba(124,106,247,.25);border-radius:999px;padding:.55rem .9rem;font-size:.9rem;color:var(--vp-c-text-1)">
-  <span><strong>Release:</strong> v8.54.2</span>
+  <span><strong>Release:</strong> v8.55.0</span>
   <span>·</span>
-  <span><strong>New — honouring what you actually said:</strong> three commands took your input and silently ignored it. <code>ask --top &lt;n&gt;</code> was documented in <code>--help</code> and parsed correctly by two <em>other</em> commands, while <code>ask</code> hardcoded 5 — <code>--top 2</code> and <code>--top 20</code> returned context files differing only by a timestamp. A pinned <code>maxTokens</code> was replaced by auto-scaling with the explanation printed only under <code>--report</code>; reproducing that turned up the mirror-image defect, where a project that had pinned <strong>nothing</strong> was told <em>&quot;your maxTokens:6000 config was overridden&quot;</em> — 6000 being SigMap's own default. And <code>sigmap note</code> was <strong>write-only</strong>: a note saying <em>&quot;the redaction logic lives in src/security/patterns.js&quot;</em> could not influence a query about redaction, the one thing a decision log is for. Relevant notes now boost the files they name and lead the emitted context — gated so they never leak into unrelated queries, and inert when you have none. <code>ask</code> also reports which files it chose, where the cut fell, and a hash of what it emitted, so a result is reproducible from its own output. 36 languages, zero dependencies, offline, deterministic.</span>
+  <span><strong>New — a rank is a claim of relevance:</strong> three retrieval defects shared one cause. The ranker kept its own, strictly weaker copy of the file-category rules the token-budget drop order already had right — it recognised only <code>foo.test.js</code> and a <code>test/</code> folder, so Go's <code>routes_test.go</code>, Python's <code>test_foo.py</code> and the JVM's <code>FooTest.java</code> were <strong>never demoted at all</strong>, a root <code>README.md</code> matched no docs folder, and CI files had no category. Asked <em>&quot;how does gin route requests through its middleware chain?&quot;</em>, SigMap answered with two test files and a README above <code>routergroup.go</code>. It also numbered files scoring <strong>exactly 0.00</strong> as ranked matches, and let a token equal to the project name lift files on their path alone. One shared definition now backs both subsystems, zero-score rows are gone, path matches are weighted by how discriminating the token is, and defining a thing outranks mentioning it. New <code>ask --explain</code> shows which query tokens matched nothing, every signal behind each file, why a file was demoted, and the near misses below the cutoff — which is how we found a fourth bug: the stemmer reduced <code>users</code> to <code>us</code>, tripped its own length guard, gave up and returned the original, so <code>users</code> never matched <code>loginUser</code>. 36 languages, zero dependencies, offline, deterministic.</span>
 </div>
 <div style="margin-top:.4rem;display:inline-flex;flex-wrap:wrap;gap:.5rem;justify-content:center;background:var(--vp-c-default-soft,#f3f4f6);border:1px solid rgba(0,0,0,.08);border-radius:999px;padding:.55rem .9rem;font-size:.9rem;color:var(--vp-c-text-2)">
-  <span><strong>Benchmark:</strong> sigmap-v8.54-main</span>
+  <span><strong>Benchmark:</strong> sigmap-v8.55-main</span>
   <span>·</span>
   <span>78.6% hit@5 · 95.8% token reduction · 2026-09-30</span>
 </div>
@@ -173,11 +173,11 @@ See the full [end-to-end walkthrough](/guide/walkthrough) to watch this in actio
 | Task success proxy | — (proxy, modeled from retrieval tiers) | **61.0%** |
 | Prompts per task | 2.84 | **1.61** |
 | Retrieval hit@5 (retrieval corpus) | — | **78.6%** |
-| Honest corpus hit@5 (125 tasks) | 40.8% (single-shot grep) | **86.4%** (2.12× lift) |
+| Honest corpus hit@5 (125 tasks) | 40.8% (single-shot grep) | **88.0%** (2.16× lift) |
 | Overall token reduction | — | **95.8%** |
 | GPT-4o overflow repos | 14/21 | **0/21** |
 
-Latest saved benchmark run: **2026-09-30 (v8.54.2)**.
+Latest saved benchmark run: **2026-09-30 (v8.55.0)**.
 
 </div>
 

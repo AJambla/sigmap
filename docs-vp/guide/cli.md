@@ -1,13 +1,13 @@
 ---
 title: CLI reference
-description: Complete SigMap CLI reference. All commands and flags with examples — ask, evidence, deps, sbom, budget, redact, tune, skills, squeeze, conventions, plan, bench, judge, verify, verify-ai-output, verify-plan, review-pr, create, memory, lines, note, status, doctor, validate, roots, daemon, history, --package, --global, --ci, --cost, --coverage, --watch, --diff, --callers, --callees, --mcp, --report, --health, weights --export/--import and more.
+description: Complete SigMap CLI reference. All commands and flags with examples — ask, evidence, deps, sbom, budget, redact, tune, skills, squeeze, conventions, plan, bench, judge, verify, verify-ai-output, verify-plan, review-pr, create, memory, lines, note, status, doctor, validate, roots, daemon, history, --package, --global, --ci, --cost, --coverage, --watch, --diff, --callers, --callees, --explain, --mcp, --report, --health, weights --export/--import and more.
 head:
   - - meta
     - property: og:title
       content: "SigMap CLI Reference — every command and flag with examples"
   - - meta
     - property: og:description
-      content: "All 84 SigMap commands and flags documented with examples. ask, evidence, deps, sbom, gain, budget, redact, squeeze, conventions, scaffold, plan, bench, judge, verify, verify-ai-output, verify-plan, review-pr, create, note, status, doctor, validate, roots, daemon, history, --ci, --cost, --coverage, --watch, --diff, --callers, --callees, --mcp, --report, --health, weights --export/--import and more."
+      content: "All 101 SigMap commands and flags documented with examples. ask, evidence, deps, sbom, gain, budget, redact, squeeze, conventions, scaffold, plan, bench, judge, verify, verify-ai-output, verify-plan, review-pr, create, note, status, doctor, validate, roots, daemon, history, --ci, --cost, --coverage, --watch, --diff, --callers, --callees, --explain, --mcp, --report, --health, weights --export/--import and more."
   - - meta
     - property: og:url
       content: "https://sigmap.io/guide/cli"
@@ -19,7 +19,7 @@ head:
       content: "SigMap CLI Reference — every command and flag with examples"
   - - meta
     - name: twitter:description
-      content: "All 84 SigMap commands and flags documented with examples. ask, evidence, deps, sbom, gain, budget, redact, squeeze, conventions, scaffold, plan, bench, judge, verify, verify-ai-output, verify-plan, review-pr, create, note, status, doctor, validate, daemon, history, --ci, --cost, --coverage, --watch, --diff, --callers, --callees, --mcp, --report, --health, weights --export/--import and more."
+      content: "All 101 SigMap commands and flags documented with examples. ask, evidence, deps, sbom, gain, budget, redact, squeeze, conventions, scaffold, plan, bench, judge, verify, verify-ai-output, verify-plan, review-pr, create, note, status, doctor, validate, daemon, history, --ci, --cost, --coverage, --watch, --diff, --callers, --callees, --explain, --mcp, --report, --health, weights --export/--import and more."
   - - meta
     - name: twitter:image:alt
       content: "SigMap CLI Reference"
@@ -45,6 +45,7 @@ If you are new to the product, start with the workflow pages first:
 |----------------|-------------|
 | `ask "<query>"` | Unified intent→rank→cost→risk pipeline in one command |
 | `ask "<query>" --top <n>` | How many files to select (default 5) |
+| `ask "<query>" --explain` | Diagnose a miss: which query tokens matched, every signal behind each file, why a file was demoted, and the near misses |
 | `ask "<query>" --followup` | Reuse previous session context for follow-up queries (session carry-forward) |
 | `ask "<query>" --package <name>` | Scope retrieval to a specific monorepo workspace package |
 | `ask "<query>" --global` | Disable package scoping; search entire repo (monorepo override) |
@@ -115,6 +116,7 @@ If you are new to the product, start with the workflow pages first:
 | `--diff --staged` | Generate context only for staged files |
 | `--mcp` | Start the stdio MCP server |
 | `--query <text>` | Rank files by relevance to a free-text query (identifier-aware BM25 + signals) |
+| `--query <text> --explain` | Per-file score signals, per-token corpus coverage and near-miss candidates |
 | `--output <file>` | Write context to a custom path (persisted to config) |
 | `--cost [--model <name>]` | Per-model token/dollar cost comparison |
 | `--coverage` | Enable test coverage annotation (✓/✗ per function) without editing config |
@@ -186,6 +188,51 @@ Until v8.54.2 this flag was documented in `--help` and parsed correctly by [`--q
 `ask` reports tokens, coverage and cost — but it used to say nothing about **which** files it chose or where the cut fell, and emitted no hash, so a result could not be audited or reproduced from its own output. It now prints the selected count, the score at the cutoff, and a short sha256 of the emitted context. The `Generated:` timestamp line is excluded from the hash, so the same query over the same repo hashes identically.
 
 `--json` carries the same as `topK`, `selectedFiles`, `cutoffScore` and `contextHash`.
+
+### ask --explain (v8.55.0)
+
+Diagnose why a query missed. `ask` gave a file list and a cutoff score with no view of what scored, what was close, or which signals drove the order (#813). `--explain` prints three things, in the order a miss is actually diagnosed.
+
+```bash
+sigmap ask "how does the ranker penalise test files" --explain
+```
+
+```
+## Explain: how does the ranker penalise test files
+
+Index: 443 files · 209 scored above zero
+
+| Query token | Files w/ token in sigs | in path | Path IDF |
+|-------------|------------------------|---------|----------|
+| ranker      | 1                      | 2       | 0.82     |
+| penalise    | 0                      | 0       | 1.00     |
+| test        | 214                    | 254     | 0.09     |
+
+Matched nothing: penalise — these tokens contributed no score.
+
+### Selected
+
+| Rank | File                    | Score | exact | symbol | path | bm25 | penalty | demoted for |
+|------|-------------------------|-------|-------|--------|------|------|---------|-------------|
+| 1    | src/learning/weights.js | 9.61  | 1.00  | 0.90   | 0.00 | 8.30 | 1.00    | —           |
+| 3    | src/retrieval/ranker.js | 8.03  | 1.00  | 0.90   | 0.37 | 6.62 | 1.00    | —           |
+
+### Near misses (below the cutoff of 7.33)
+
+| File               | Score | penalty | demoted for |
+|--------------------|-------|---------|-------------|
+| src/eval/scorer.js | 7.09  | 1.00    | —           |
+```
+
+**1. Per-token corpus coverage.** A token that matches zero files answers *"why did my query miss"* more often than anything else — above, `penalise` contributes nothing because the code spells it `penalty`. Counts are over **stems**, because BM25 matches on stems: counting raw tokens reported *"users matched nothing"* on a query BM25 actually scored 1.24 via `loginUser`. `Path IDF` shows how discriminating a token is across indexed paths — `test` scores 0.09 here because 254 of 443 paths contain it, so it barely lifts anything on path alone.
+
+**2. Every signal behind each selected file**, plus the reason when a file was demoted — `test file`, `mock/fixture`, `documentation`, `CI definition`, `build output` or `data holder (accessors only)`. The reason is derived from the same predicates that set the multiplier, so it cannot disagree with the score it explains.
+
+**3. Near misses** — candidates that scored above zero but fell below the cutoff, so a close call is visible rather than invisible.
+
+Note in the example above that `penalty` is `1.00` on the test files: the query contains the word *test*, so the test demotion is correctly suspended. That is visible rather than implied.
+
+`--explain` is **opt-in**, so default `ask` output is byte-identical without it, and because it is a diagnostic it writes nothing to `.context/` and does not overwrite the `--followup` session.
 
 **Input minimization (v7.0.0).** When the query is a pasted blob — a stack trace, CI log, or JSON payload — `ask` classifies it and, on an interactive terminal, offers to minimize it before ranking (dedupe frames, strip vendor noise, collapse repeated array items, and enrich the top stack frame with its real signature). It only prompts when the reduction clears `--squeeze-threshold` (default 30%). Non-interactive (piped/CI) usage is never blocked: `--squeeze` auto-accepts, `--no-squeeze` disables it entirely. See [`squeeze`](#squeeze) below.
 
@@ -1635,7 +1682,7 @@ sigmap compare --json
 ────────────────────────────────────────────
  SigMap vs grep agent
 ────────────────────────────────────────────
- hit@5         86.4% vs 40.8%   (2.12× lift)
+ hit@5         88.0% vs 40.8%   (2.16× lift)
  Corpus        125 tasks · 19 repos (honest split)
  Token cut     95.8% average (saved benchmark, 21 repos)
 ────────────────────────────────────────────
@@ -1662,7 +1709,7 @@ sigmap share
 
 ```
 Generated with SigMap — the deterministic, verifiable grounding layer for AI code work
-95.8% fewer tokens · 78% retrieval accuracy (this repo) · 2.12× vs a grep agent (published)
+95.8% fewer tokens · 78% retrieval accuracy (this repo) · 2.16× vs a grep agent (published)
 https://sigmap.io
 [sigmap] Copied to clipboard.
 ```
@@ -1672,7 +1719,7 @@ On a repo that has never been benchmarked there are no local numbers to print, a
 
 ```
 Generated with SigMap — the deterministic, verifiable grounding layer for AI code work
-not benchmarked locally yet — run `sigmap compare` · 2.12× vs a grep agent (published)
+not benchmarked locally yet — run `sigmap compare` · 2.16× vs a grep agent (published)
 https://sigmap.io
 ```
 
@@ -1788,7 +1835,7 @@ sigmap bench --submit --json
  SigMap Community Benchmark Submission
 ────────────────────────────────────────────────────────
  SigMap version : 8.51.2
- Benchmark ID   : sigmap-v8.54-main
+ Benchmark ID   : sigmap-v8.55-main
  Submitted      : 2026-09-13
 ────────────────────────────────────────────────────────
  Canonical metrics (official release):
@@ -2080,6 +2127,26 @@ Write a focused mini-context (top-5 ranked files) to `.context/query-context.md`
 ```bash
 sigmap --query "authentication flow" --context
 ```
+
+### Ranked rows are relevance claims (v8.55.0)
+
+A rank is a claim of relevance, and `0.00` is the absence of one. Until v8.55.0 `--query` ended in a plain `slice(0, topK)` with no floor, so a query matching nothing still returned a full table — on a fresh `gin` clone, four `.github/workflows/*.yml` files scoring **exactly 0.00** filled ranks 3–6 of a routing query (#807). Zero-score rows are now dropped, and a query that matches nothing says so:
+
+```
+No matching files found for query: "quantum chromodynamics lattice"
+```
+
+Path matches are also scaled by the token's **inverse document frequency across indexed paths** — the same intuition BM25 already applies to signature tokens. A token that happens to equal the project name (`gin` matching `ginS/gins.go` and `.github/workflows/gin.yml`) carries no discriminating power and no longer lifts files on their path alone.
+
+### --query --explain (v8.55.0)
+
+The same diagnostic as [`ask --explain`](#ask-explain-v8-55-0), rendered over the ranked table:
+
+```bash
+sigmap --query "ranker penalty classification" --explain
+```
+
+Note that `--explain` is also a standalone alias for [`explain <file>`](#explain). When `--query` is present it means *explain the ranking* and takes no argument; `sigmap --explain <file>` is unchanged.
 
 ---
 

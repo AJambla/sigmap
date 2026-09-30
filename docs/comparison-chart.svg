@@ -30,13 +30,13 @@
   <!-- With row -->
   <text x="105" y="126" text-anchor="end" font-size="11" fill="#7c6af7">SigMap</text>
   <rect x="112" y="113" width="462" height="20" fill="#ede9fe" rx="4"/>
-  <!-- 86.4% of 462 = 399 (honest corpus; the lift divides these two numbers) -->
-  <rect x="112" y="113" width="399" height="20" fill="#7c6af7" rx="4"/>
-  <text x="502" y="127" text-anchor="end" font-size="11" font-weight="700" fill="#fff">86.4%</text>
+  <!-- 88.0% of 462 = 407 (honest corpus; the lift divides these two numbers) -->
+  <rect x="112" y="113" width="407" height="20" fill="#7c6af7" rx="4"/>
+  <text x="502" y="127" text-anchor="end" font-size="11" font-weight="700" fill="#fff">88.0%</text>
 
   <!-- Badge -->
   <rect x="588" y="95" width="94" height="32" fill="#7c6af7" rx="6"/>
-  <text x="635" y="108" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">+2.12× lift</text>
+  <text x="635" y="108" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">+2.16× lift</text>
   <text x="635" y="121" text-anchor="middle" font-size="9" fill="#ded9ff">vs grep agent</text>
   <text x="112" y="145" font-size="9" fill="#9ca3af">Retrieval corpus (105 tasks / 18 repos) scores 78.6% hit@5 and is reported separately.</text>
 

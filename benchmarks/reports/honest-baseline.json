@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-29T21:48:48.801Z",
+  "generated": "2026-09-30T21:49:33.894Z",
   "methodology": {
     "corpus": "benchmarks/tasks/*.jsonl",
     "scorer": "src/eval/scorer.js hitAtK/reciprocalRank, k=5",
@@ -11,20 +11,20 @@
     "tasks": 125,
     "repos": 19,
     "sigmap": {
-      "hitAt5": 0.864,
-      "mrr": 0.726
+      "hitAt5": 0.88,
+      "mrr": 0.73
     },
     "grepBaseline": {
       "hitAt5": 0.408,
       "mrr": 0.192
     },
-    "lift": 2.12,
-    "deltaPts": 45.6,
+    "lift": 2.16,
+    "deltaPts": 47.2,
     "splits": {
       "easy": {
         "tasks": 110,
         "sigmap": {
-          "hitAt5": 0.909,
+          "hitAt5": 0.918,
           "mrr": 0.753
         },
         "grepBaseline": {
@@ -35,8 +35,8 @@
       "hard": {
         "tasks": 15,
         "sigmap": {
-          "hitAt5": 0.533,
-          "mrr": 0.525
+          "hitAt5": 0.6,
+          "mrr": 0.556
         },
         "grepBaseline": {
           "hitAt5": 0.533,
@@ -49,7 +49,7 @@
         "tasks": 13,
         "sigmap": {
           "hitAt5": 1,
-          "mrr": 0.923
+          "mrr": 0.962
         },
         "grepBaseline": {
           "hitAt5": 0.615,
@@ -59,8 +59,8 @@
       "medium": {
         "tasks": 52,
         "sigmap": {
-          "hitAt5": 0.788,
-          "mrr": 0.65
+          "hitAt5": 0.808,
+          "mrr": 0.646
         },
         "grepBaseline": {
           "hitAt5": 0.462,
@@ -70,12 +70,12 @@
       "large": {
         "tasks": 60,
         "sigmap": {
-          "hitAt5": 0.9,
-          "mrr": 0.748
+          "hitAt5": 0.917,
+          "mrr": 0.752
         },
         "grepBaseline": {
           "hitAt5": 0.317,
-          "mrr": 0.136
+          "mrr": 0.135
         }
       }
     }
@@ -113,14 +113,14 @@
       "repo": "fastapi",
       "tasks": 5,
       "bucket": "large",
-      "sigmapHitAt5": 0.6,
+      "sigmapHitAt5": 0.8,
       "grepHitAt5": 0.4
     },
     {
       "repo": "fastify",
       "tasks": 8,
       "bucket": "medium",
-      "sigmapHitAt5": 0.625,
+      "sigmapHitAt5": 0.75,
       "grepHitAt5": 0.5
     },
     {
