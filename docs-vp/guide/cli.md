@@ -604,6 +604,25 @@ sigmap verify answer.md --report      # standalone red/amber/green HTML report
 
 Full behaviour, options, and installed-library grounding are documented under [`verify-ai-output`](#verify-ai-output) below.
 
+### False positives fixed in v8.54.1 (#777)
+
+A grounding guard that cries wolf is worse than none, and `verify` was doing it in two ways.
+
+**Standard globals were reported as hallucinations.** The allowlist was a hand-maintained inline literal that stopped at `encodeURIComponent`, so `structuredClone(obj)` — a Node and browser global since Node 17 — was flagged as fabricated at **`high` confidence**. Globals now live in `src/verify/globals.js` as grouped data — 184 names across ECMAScript, Web/Node platform, Node module scope, test-runner and Python built-ins — so a missing one is a one-line addition to the right group rather than an edit to a 30-name blob.
+
+**The suggestions were worse than the findings.** The closest-match pool was the entire signature index, so:
+
+| Flagged | Suggested | Sourced from |
+|---|---|---|
+| `structuredClone()` | `structuralFixture()` | a test file |
+| `debounce()` | `resource()` | `test/fixtures/main.tf` |
+
+Applying either would corrupt the answer it claims to correct. The pool now excludes test and fixture paths, and languages whose top-level names are not callable — Terraform resources, SQL tables, GraphQL fields, CSS selectors. A **0.34 similarity floor** drops the remainder, so `debounce()` gets no suggestion rather than a wrong one, while the band that makes the feature useful is untouched: `buildEvidencPack` → `buildEvidencePack()` and `scanx` → `scan()` both still resolve.
+
+::: tip A flagged library call can still be correct behaviour
+A symbol from a library the repo does **not** declare is reported as fake on purpose — that is the guard telling you the call is not available here. When the library *is* a declared dependency, [installed-library grounding](#verify-ai-output) resolves it and nothing is reported.
+:::
+
 ## verify-ai-output
 
 Hallucination Guard — the full command name for [`verify`](#verify). Scans an AI answer (markdown or plain text) and flags claims that do not match the repository: fake file paths, fake test files, unresolvable imports, symbols not in the SigMap index, and `npm run` scripts that don't exist. Fully deterministic — runs offline, no LLM API. Where a flagged name is a near miss for something real, a heuristic closest-match suggestion is attached. **v8.1.0+:** symbol checks also ground against the libraries **actually installed** — JS/TS from `node_modules` (`.d.ts` exports) and, since **v8.3.0**, Python from the project's venv `site-packages` (`__init__.py`/`.pyi` exports) — each with its pinned version, so genuine library calls stop false-flagging — see [Installed-library grounding](/guide/verify-ai-output#installed-library-grounding-v8-1-0-v9-0-g5-d5-the-moat).
@@ -1072,7 +1091,11 @@ x [REDACTED:AWS Access Key] y
 | `--json` | Emit `{ text, redacted, findings: [{line, pattern}], counts }` instead of raw text |
 | *(no file)* | Read from stdin (piped input) |
 
-Patterns covered: AWS access/secret keys, GCP API keys, GitHub tokens, JWTs, DB connection strings, SSH private keys, Stripe keys, Twilio keys, and generic `password=`/`api_key=` assignments.
+**Patterns covered (16).** AWS access/secret keys, GCP API keys, GitHub tokens, JWTs, DB connection strings, SSH private keys, Stripe keys, Twilio keys, generic `password=`/`api_key=` assignments, and — since **v8.54.1** — **Slack tokens**, **Slack webhooks**, **Anthropic keys**, and **OpenAI keys** (both the `sk-proj-` and legacy forms).
+
+::: tip Why the `sk-` family was missing until v8.54.1 (#771)
+The gap was one character. `sk_live_`/`sk_test_` (Stripe) uses an **underscore**; OpenAI and Anthropic use a **hyphen**, so the Stripe pattern never covered them and the three most common modern API-key formats passed through a command whose whole job is keeping secrets out of an AI context file. The new patterns are anchored with `\b`, so `sk-` cannot match inside an ordinary hyphenated word like `risk-`.
+:::
 
 ---
 
@@ -1627,6 +1650,7 @@ roughly three times the published 2.12×, and a repo with no history emitted a h
 
 Explain why a single file is **in or out** of the generated context. It runs the same checks generation does, in the same order, and stops at the first one that excludes the file:
 
+0. **Exists on disk** — there is a file at that path at all.
 1. **`.contextignore`** — the path matches an ignore pattern.
 2. **`srcDirs`** — the path isn't under any configured source directory.
 3. **Extractor** — the file's extractor returned no signatures.
@@ -1659,7 +1683,19 @@ An excluded file names the reason and the fix:
   Fix:    add the containing directory to srcDirs in gen-context.config.json
 ```
 
-`--json` emits the same as one object, with a machine-readable `reason` (`.contextignore`, `not in srcDirs`, or `no signatures`).
+A path with nothing at it is **not** an exclusion, and says so:
+
+```
+[sigmap] src/nope.js — NOT FOUND
+  Reason: no such file on disk
+  Fix:    check the path — nothing at this location to explain
+```
+
+`--json` emits the same as one object, with a machine-readable `status` (`included`, `excluded`, `not-found`) and `reason` (`.contextignore`, `not in srcDirs`, `no signatures`, or `file does not exist on disk`).
+
+::: warning Exit code change in v8.54.1 (#772)
+`sigmap explain <missing-file>` now exits **1**. Before v8.54.1 a path that did not exist fell through to the extractor check and was reported as `EXCLUDED — no extractable signatures`, advising the reader to *"check that the file contains function/class definitions"* — for a file that was not there — at **exit 0**. Scripts that relied on `explain` always succeeding for an arbitrary path will now see a failure. Every other status still exits 0: an exclusion is an answer, not an error.
+:::
 
 `sigmap explain` doesn't model the token budget, so a file can read as INCLUDED here and still be dropped from a particular run once the budget is applied.
 

@@ -38,6 +38,9 @@ To ensure proper attribution:
 
 We welcome contributions! See [Contributing](./docs/CONTRIBUTING.md) for guidelines.
 
+### Recent Contributors (v8.54.1)
+- **@manojmallick** — fix(guard): the two guard commands were wrong in opposite directions. `redact` let five of seven credential shapes through — the cause was one character, `sk_live_` (underscore) covered while `sk-` (hyphen, OpenAI/Anthropic) was not — and `verify` reported `structuredClone()` as fabricated at high confidence, then suggested `structuralFixture()` from a test file as the replacement. Globals became grouped data, the suggestion pool lost its test/fixture/declarative sources and gained a similarity floor, and `explain` stopped reporting a missing file as `EXCLUDED — no extractable signatures` at exit 0. `explain` also gained the test file whose absence let that ship (#798, #771, #777, #772, #785, PR #799)
+
 ### Recent Contributors (v8.54.0)
 - **@manojmallick** — feat(judge): `judge` was the last grounding surface whose verdict rested on raw English word-overlap. It now shares the ranker's tokenizer, so `buildEvidencePack` and `build evidence pack` no longer score 0.750 vs 0.333, and ordinary prose can neither inflate nor dilute a grounded answer — the reported case goes 0.212/fail to 0.643/pass with every claim still grounded. Hedging phrases became warnings instead of a verdict, "nothing to judge" got its own `inconclusive` verdict and exit code instead of being filed as a genuine failure, and `judge` learned to read stdin, default its own `--context`, warn on stale context, and print the per-claim table it previously hid in `--json` (#795, #779, #765, #766, #780, PR #796)
 

@@ -1,13 +1,13 @@
 ---
 title: Roadmap
-description: SigMap version history and roadmap. From v0.0 to v8.54.0, with recent releases completing the grounded-codegen plan — a realistic §9 ablation (real-symbol corpus, exact-signature grounding, --verbose), a Gemini (AI Studio) provider for the §9 ablation, the init Creation-workflow CLAUDE.md block, scaffold persistence, the LLM A/B hallucination ablation harness, the sigmap create orchestrator and its four guard stages (scaffold, verify-plan, verify-ai-output, review-pr), the conventions command with its full flag set (--conflicts, --inject, --report, --ci, --fix, --update), the grounding benchmark, read-time self-heal, live-index MCP write hooks, the get_callee_signatures MCP tool (exact callee signatures), realistic per-query savings, release-pipeline robustness (bundle integrity + version.json gates, standalone-bundle smoke test), the sigmap gain token-savings dashboard, supply-chain hardening (zero system-shell access), Squeeze input minimization with symbol enrichment, source-of-truth llms.txt, the verify-ai-output Hallucination Guard, and Memory tools (note, status, read_memory MCP tool).
+description: SigMap version history and roadmap. From v0.0 to v8.54.1, with recent releases completing the grounded-codegen plan — a realistic §9 ablation (real-symbol corpus, exact-signature grounding, --verbose), a Gemini (AI Studio) provider for the §9 ablation, the init Creation-workflow CLAUDE.md block, scaffold persistence, the LLM A/B hallucination ablation harness, the sigmap create orchestrator and its four guard stages (scaffold, verify-plan, verify-ai-output, review-pr), the conventions command with its full flag set (--conflicts, --inject, --report, --ci, --fix, --update), the grounding benchmark, read-time self-heal, live-index MCP write hooks, the get_callee_signatures MCP tool (exact callee signatures), realistic per-query savings, release-pipeline robustness (bundle integrity + version.json gates, standalone-bundle smoke test), the sigmap gain token-savings dashboard, supply-chain hardening (zero system-shell access), Squeeze input minimization with symbol enrichment, source-of-truth llms.txt, the verify-ai-output Hallucination Guard, and Memory tools (note, status, read_memory MCP tool).
 head:
   - - meta
     - property: og:title
       content: "SigMap Roadmap — version history and upcoming features"
   - - meta
     - property: og:description
-      content: "212 versions shipped. See what changed in each release and what is coming next."
+      content: "213 versions shipped. See what changed in each release and what is coming next."
   - - meta
     - property: og:url
       content: "https://sigmap.io/guide/roadmap"
@@ -20,7 +20,7 @@ head:
 ---
 # Roadmap
 
-Two hundred twelve versions shipped. MIT open source from day one.
+Two hundred thirteen versions shipped. MIT open source from day one.
 
 **Stats:** 95.8% overall token reduction · 78.6% retrieval hit@5 · 2.12× measured lift vs single-shot grep (86.4% vs 40.8%, honest corpus) · 98.0% test-discovery F1 · installed-library grounding (JS/TS + Python) · method-level call-graph (JS/TS, Python, Java, Go, Rust, Kotlin, Scala) · 22 MCP tools · 36 languages · 17-language source resolver · 0 npm deps
 
@@ -835,6 +835,26 @@ Two milestones in one release. **`verify-ai-output` Reliable MVP** (#232) grows 
 **Tags:** `KNOWN_LIMITATIONS.md` · `extraction honesty` · `tier label` · `drift guard` · `G1` · `#520` · `PR #521`
 
 **Impact:** the credibility gap a skeptical reviewer finds first is closed in writing; 6 new guard checks (133 files); zero runtime changes.
+
+---
+
+### v8.54.1 — the guards were wrong in both directions ✓ (2026-09-30)
+
+**Patch release closing the guard-command cluster.** `redact` exists so secrets never reach an AI context file. `verify` exists to flag hallucinations. One was letting real secrets through and the other was inventing hallucinations that were not there — and the command that would have caught either had no test file.
+
+`redact` missed five of seven credential shapes, and the cause was a single character: `sk_live_`/`sk_test_` (Stripe) uses an **underscore**, while OpenAI and Anthropic use a **hyphen**, so `sk-` was never covered. Slack tokens, Slack webhooks, OpenAI project and legacy keys and Anthropic keys now redact — the three most common modern API-key formats in an AI-tooling repo, previously passing straight through. The new patterns are `\b`-anchored so `sk-` cannot match inside an ordinary word like `risk-`.
+
+`verify` reported `structuredClone()` — a Node and browser global since Node 17 — as fabricated, at **`high` confidence**. The allowlist was a hand-maintained inline literal that stopped at `encodeURIComponent`. Globals moved to `src/verify/globals.js` as grouped data: 184 names across ECMAScript, Web/Node platform, Node module scope, test-runner and Python built-ins.
+
+Worse than the false positives were the suggested corrections. The closest-match pool was the entire signature index, so `structuredClone()` was answered with `structuralFixture()` from a test file and `debounce()` with `resource()` from `test/fixtures/main.tf` — suggestions that would corrupt the answer they claim to fix. The pool now excludes test and fixture paths and languages whose top-level names are not callable; `CODE_EXTS` was deliberately not reused for this, since it contains `.tf`, `.sql`, `.graphql` and `.css`. A 0.34 similarity floor drops the rest, on the principle that no suggestion beats a wrong one — while `buildEvidencPack` → `buildEvidencePack()` and `scanx` → `scan()` still resolve.
+
+`explain` reported a path with nothing at it as `EXCLUDED — no extractable signatures`, advising the reader to check the file for function definitions, at exit 0. It now reports `NOT FOUND` and exits 1 — the MCP `explain_file` handler had checked existence all along; only the CLI path had not.
+
+Two findings are worth recording because they shaped the work. #785's *"5 of 11 redact patterns unasserted"* was already fixed — `redact.test.js` carries a table-driven `PATTERNS` gate, and that gate is precisely why the new patterns failed the suite until samples existed. And one acceptance criterion written for this release was wrong: *"the answer produces 0 findings"* cannot hold for a symbol from an undeclared library, because flagging it is the guard working. It was corrected on the issue rather than met by weakening the check.
+
+**Tags:** `redact`, `verify`, `explain`, `globals.js`, closest-match pool, similarity floor, `sk-` family, guard-command cluster
+
+**Impact:** redact patterns 11 → 16 · two false-positive classes closed in the flagship guard · `explain` gains a test file (and an exit-code fix) · 35 new tests (190 integration, was 189) · 0 npm deps
 
 ---
 

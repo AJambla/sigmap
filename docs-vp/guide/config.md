@@ -230,7 +230,7 @@ Before v8.51.0 these layouts were badly under-detected — the scan looked two d
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `secretScan` | `boolean` | `true` | Scan output for 10 credential patterns before writing. Matching content is replaced with `[REDACTED]`. Patterns: AWS keys, GitHub tokens, JWTs, database URLs, SSH keys, GCP keys, Stripe keys, Twilio keys, generic passwords/api_keys. |
+| `secretScan` | `boolean` | `true` | Scan output for 15 credential patterns before writing. Matching content is replaced with `[REDACTED]`. Patterns: AWS keys, GitHub tokens, JWTs, database URLs, SSH keys, GCP keys, Stripe keys, Twilio keys, Slack tokens/webhooks, OpenAI and Anthropic keys (v8.54.1), generic passwords/api_keys. The unquoted `password=value` variant is text-only and applies to [`redact`](/guide/cli#redact), not to signature scanning. |
 | `monorepo` | `boolean` | `false` | See Source scanning above. |
 | `sigCache` | `boolean` | `false` | Enable incremental signature cache. When true, caches extracted signatures with mtime-based validation. Cache is automatically busted on version changes. Skips re-extraction of unchanged files for faster subsequent runs. |
 | `sessionBudgetTokens` | `number\|null` | `null` | Opt-in per-session budget for **estimated SigMap-emitted tokens** (chars/4). When set, [`sigmap budget`](/guide/cli#budget) and the MCP `get_budget` tool report remaining tokens, percent used, and an over-budget flag. Counts only what SigMap outputs — not the host chat's total spend. |

@@ -174,7 +174,7 @@ echo '{"jsonrpc":"2.0","method":"tools/list","id":1}' | node gen-context.js --mc
 - Add a `.contextignore` rule to exclude that specific file from the index entirely.
 - Alternatively, set `"secretScan": false` in your config — but only if you are certain there are no real secrets in your source directories.
 
-**The 10 secret patterns checked:** AWS Access Key, AWS Secret Key, GCP API Key, GitHub Token (`ghp_` / `gho_`), JWT (`eyJ...`), database connection string, SSH private key header, Stripe key (`sk_live_`), Twilio key, generic `password` / `api_key` assignments in code.
+**The 15 secret patterns checked:** AWS Access Key, AWS Secret Key, GCP API Key, GitHub Token (`ghp_` / `gho_`), JWT (`eyJ...`), database connection string, SSH private key header, Stripe key (`sk_live_`), Anthropic key (`sk-ant-`), OpenAI key (`sk-proj-` and legacy `sk-`), Slack token (`xoxb-`), Slack webhook, Twilio key, generic `password` / `api_key` assignments in code. The four `sk-`/Slack entries arrived in **v8.54.1** (#771) — `sk_live_` uses an underscore, so the hyphenated OpenAI and Anthropic forms had never been covered.
 
 ---
 
