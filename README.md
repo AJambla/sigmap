@@ -306,6 +306,7 @@ sigmap validate --query "auth login token"
 
 # 4. Judge — score your AI's answer for groundedness
 sigmap judge --response response.txt --context .context/query-context.md
+claude -p "how does ranking work?" | sigmap judge     # stdin; --context defaults to the generated one
 
 # 5. Inspect health
 sigmap --health

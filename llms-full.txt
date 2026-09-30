@@ -114,7 +114,7 @@ sigmap verify <answer.md> --json         Grounding report as JSON (exits 1 if is
 sigmap verify <answer.md> --report       Write a standalone HTML report (red/amber/green)
 sigmap verify-ai-output <answer.md>      Full command name for gen-context verify
 sigmap validate                          Check config + index coverage; --query "<text>" also probes retrieval (--json)
-sigmap judge --response <f> --context <f>   Score an AI answer's groundedness (--json, --threshold <n>, --learn)
+sigmap judge [--response <f>|-] [--context <f>]  Score an AI answer's groundedness (stdin ok; --json, --threshold <n>, --learn)
 sigmap conventions                       Extract repo file-naming/export/test conventions (--conflicts, --inject, --report, --fix)
 sigmap scaffold "<name>"                 Propose a convention-matched file/dir scaffold (--ext, --threshold, --force, --json)
 sigmap verify-plan <plan.md|->           Check a plan vs the live index — files/symbols exist, blast radius, scope (--json)
