@@ -1,13 +1,13 @@
 ---
 title: Roadmap
-description: SigMap version history and roadmap. From v0.0 to v8.53.0, with recent releases completing the grounded-codegen plan — a realistic §9 ablation (real-symbol corpus, exact-signature grounding, --verbose), a Gemini (AI Studio) provider for the §9 ablation, the init Creation-workflow CLAUDE.md block, scaffold persistence, the LLM A/B hallucination ablation harness, the sigmap create orchestrator and its four guard stages (scaffold, verify-plan, verify-ai-output, review-pr), the conventions command with its full flag set (--conflicts, --inject, --report, --ci, --fix, --update), the grounding benchmark, read-time self-heal, live-index MCP write hooks, the get_callee_signatures MCP tool (exact callee signatures), realistic per-query savings, release-pipeline robustness (bundle integrity + version.json gates, standalone-bundle smoke test), the sigmap gain token-savings dashboard, supply-chain hardening (zero system-shell access), Squeeze input minimization with symbol enrichment, source-of-truth llms.txt, the verify-ai-output Hallucination Guard, and Memory tools (note, status, read_memory MCP tool).
+description: SigMap version history and roadmap. From v0.0 to v8.54.0, with recent releases completing the grounded-codegen plan — a realistic §9 ablation (real-symbol corpus, exact-signature grounding, --verbose), a Gemini (AI Studio) provider for the §9 ablation, the init Creation-workflow CLAUDE.md block, scaffold persistence, the LLM A/B hallucination ablation harness, the sigmap create orchestrator and its four guard stages (scaffold, verify-plan, verify-ai-output, review-pr), the conventions command with its full flag set (--conflicts, --inject, --report, --ci, --fix, --update), the grounding benchmark, read-time self-heal, live-index MCP write hooks, the get_callee_signatures MCP tool (exact callee signatures), realistic per-query savings, release-pipeline robustness (bundle integrity + version.json gates, standalone-bundle smoke test), the sigmap gain token-savings dashboard, supply-chain hardening (zero system-shell access), Squeeze input minimization with symbol enrichment, source-of-truth llms.txt, the verify-ai-output Hallucination Guard, and Memory tools (note, status, read_memory MCP tool).
 head:
   - - meta
     - property: og:title
       content: "SigMap Roadmap — version history and upcoming features"
   - - meta
     - property: og:description
-      content: "194 versions shipped. See what changed in each release and what is coming next."
+      content: "212 versions shipped. See what changed in each release and what is coming next."
   - - meta
     - property: og:url
       content: "https://sigmap.io/guide/roadmap"
@@ -20,7 +20,7 @@ head:
 ---
 # Roadmap
 
-One hundred eighty-seven versions shipped. MIT open source from day one.
+Two hundred twelve versions shipped. MIT open source from day one.
 
 **Stats:** 95.8% overall token reduction · 78.6% retrieval hit@5 · 2.12× measured lift vs single-shot grep (86.4% vs 40.8%, honest corpus) · 98.0% test-discovery F1 · installed-library grounding (JS/TS + Python) · method-level call-graph (JS/TS, Python, Java, Go, Rust, Kotlin, Scala) · 22 MCP tools · 36 languages · 17-language source resolver · 0 npm deps
 
@@ -835,6 +835,24 @@ Two milestones in one release. **`verify-ai-output` Reliable MVP** (#232) grows 
 **Tags:** `KNOWN_LIMITATIONS.md` · `extraction honesty` · `tier label` · `drift guard` · `G1` · `#520` · `PR #521`
 
 **Impact:** the credibility gap a skeptical reviewer finds first is closed in writing; 6 new guard checks (133 files); zero runtime changes.
+
+---
+
+### v8.54.0 — the judge stops scoring English ✓ (2026-09-30)
+
+**Minor release finishing the judge convergence.** `sigmap judge` was the last grounding surface whose *verdict* rested on raw English word-overlap, and four open issues turned out to be four symptoms of the same forty lines — so they landed together rather than re-deriving the `--learn` band four times.
+
+The score now counts **technical** vocabulary, not English. `groundedness()` uses the ranker's own `tokenize()`/`stem()` from `src/retrieval/bm25.js`, so the judge and retrieval finally agree on what a token is: `buildEvidencePack` and `build evidence pack` — the same fact, written two ways — scored **0.750 and 0.333**, and now score identically. Ordinary-English vocabulary is dropped from both sides before scoring, so filler can neither inflate nor dilute a grounded answer: the reported prose case moves from **0.212 → fail** to **0.643 → pass** with every claim still `1/1 grounded`. The `learnBoostAbove`/`learnPenalizeBelow` defaults survived the rewrite unchanged — the same drift-guard confirms the 80%/30% mixtures still land either side of the band.
+
+Hedging phrases became warnings. A fully-grounded answer used to fail, exit 1, *at `high` confidence*, solely because it contained the word "typically,". `GENERIC_MARKERS` moved out of `reasons[]` into a `warnings[]` that never flips the verdict, matched on word boundaries so `in general` stops firing inside `in general-purpose`. A warning now caps confidence below `high` — the judge cannot report high confidence in a result a stylistic signal had any part in.
+
+"Nothing to judge" got its own verdict. An empty response file was scored as a genuine failure, handing CI the identical signal a confidently hallucinated answer produces. Empty input, an empty context, or a response with no scoreable tokens now verdicts `inconclusive` and exits **2**, naming the file; `--learn` never learns from it. `pass`=0 and `fail`=1 are untouched, so existing gates keep working.
+
+The command also became usable. `--response` accepts `-` and a bare pipe, so a model's output no longer has to be written to disk first. `--context` is optional and resolves the context this repo already generated, naming which file it used. A new `src/judge/context-source.js` owns that resolution and a freshness check — a context older than its newest source now warns, naming the gap — mirroring the adapter-output list `doctor` already checks so both commands agree on what "the repo's generated context" means. And the per-claim table, which existed only in `--json`, now prints on `fail`/`inconclusive`, so a reader can see which claim broke without re-running the command.
+
+**Tags:** `judge`, `groundedness`, `bm25 tokenizer`, `warnings`, `inconclusive`, `stdin`, `stale context`, `context-source.js`, J1/J2 tail
+
+**Impact:** one tokenizer across judge and retrieval · two reproducible false-fail classes closed · 20 new tests (judge suite 29 → 49) · 189 integration tests passing · 0 npm deps
 
 ---
 

@@ -10,6 +10,20 @@ Format: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [8.54.0] — 2026-09-30
+
+### Changed
+- **`sigmap judge` scores technical content, not English** (#795, #779, PR #796) — `judge` was the last grounding surface whose *verdict* rested on raw word-overlap. `groundedness()` now uses the ranker's own `tokenize()`/`stem()` from `src/retrieval/bm25.js`, so the judge and retrieval agree on what a token is: `buildEvidencePack` and `build evidence pack` scored **0.750 vs 0.333** for the same fact and now score identically. Ordinary-English vocabulary is dropped from both sides before scoring, so filler can neither inflate nor dilute a grounded answer — the reported prose case goes **0.212 → fail** to **0.643 → pass** with every claim still `1/1 grounded`. The shipped `learnBoostAbove`/`learnPenalizeBelow` band still separates the measured 80%/30% mixtures under the new scorer, so the `--learn` defaults are unchanged
+- **Generic phrases are warnings, never a verdict** (#765, PR #796) — a fully-grounded answer failed, exit 1, *at `high` confidence*, solely because it contained the word "typically,". `GENERIC_MARKERS` moved out of `reasons[]` into a new `warnings[]` that never flips the verdict, and are matched on word boundaries so `in general` no longer fires inside `in general-purpose`. A warning now caps confidence below `high` — the judge cannot report high confidence in a result a stylistic signal had any part in
+
+### Added
+- **`inconclusive` verdict — "nothing to judge" is not the same as "wrong"** (#766, PR #796) — an empty response file was scored as a genuine failure, giving CI the identical signal a confidently hallucinated answer produces. An empty response, an empty context, or a response with no scoreable tokens now verdicts `inconclusive` and exits **2**, naming the file; `--learn` never learns from it. `pass`=0 and `fail`=1 are unchanged, so existing CI gates keep working
+- **`judge` reads stdin and defaults its context** (#780, PR #796) — `--response` accepts `-` and a bare pipe, so `… | sigmap judge` works without writing the model's output to disk first. `--context` is now optional: it resolves the context this repo already generated and names which file it used
+- **Stale-context warning** (#780, PR #796) — `judge` never compared the context file's age against the sources it describes, so an answer could be judged against ground that had moved with no hint. A context older than its newest source now warns, naming the gap and the file. New `src/judge/context-source.js` owns the resolution and the freshness check, mirroring the adapter-output list `sigmap doctor` already checks so both commands agree on what "the repo's generated context" means
+- **Per-claim detail in the human output** (#780, PR #796) — the checked-claims table existed only in `--json`, so on a failure the reader could not see which claim was checked or how it resolved without re-running the command. It now prints on `fail`/`inconclusive`, alongside the warnings block
+
+---
+
 ## [8.53.0] — 2026-09-29
 
 ### Added
