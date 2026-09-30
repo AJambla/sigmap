@@ -89,6 +89,135 @@ function coverageScore(cwd, fileEntries, config) {
   return { score: pct, grade, total, included, dropped, nonCodeSkipped, confidence, perModule };
 }
 
+/**
+ * Source files that exist in the repo but fall OUTSIDE every configured
+ * srcDir (#805).
+ *
+ * `coverageScore` walks srcDirs only, so its denominator cannot see a file the
+ * detector never selected — which is how a flat Go layout reported a plausible
+ * "indexed 67% (2/3 files)" while ten of thirteen source files were invisible.
+ * The number was not wrong about its own population; nothing told the user the
+ * population was wrong.
+ *
+ * Deliberately a SEPARATE primitive rather than a new denominator inside
+ * `coverageScore`: the named populations (#762) are pinned, and the fix here is
+ * to disclose what is missing, not to redefine coverage.
+ *
+ * @param {string} cwd
+ * @param {{srcDirs:string[], exclude:string[], maxDepth?:number}} config
+ * Counts IMPLEMENTATION files only — tests, docs, CI, mocks and the
+ * conventional tooling directories are legitimately outside srcDirs and are
+ * reported separately as `skipped`.
+ *
+ * @returns {{ total: number, byExt: Array<{ext: string, count: number}>,
+ *             dirs: string[], skipped: number, inScope: number, share: number }}
+ */
+function outsideSrcDirs(cwd, config) {
+  const fs   = require('fs');
+  const path = require('path');
+
+  const srcDirs = (config && Array.isArray(config.srcDirs) && config.srcDirs.length > 0)
+    ? config.srcDirs : ['src', 'app', 'lib'];
+
+  // A srcDir of '.' covers the whole tree, so nothing can be outside it.
+  if (srcDirs.some((d) => d === '.' || d === './')) return { total: 0, byExt: [], dirs: [], skipped: 0, inScope: 0, share: 0 };
+
+  const excludeSet = new Set([
+    'node_modules', '.git', 'dist', 'build', 'out', '__pycache__',
+    '.next', 'coverage', 'target', 'vendor', '.context',
+  ]);
+  if (config && Array.isArray(config.exclude)) {
+    for (const x of config.exclude) excludeSet.add(String(x));
+  }
+
+  const srcAbs = srcDirs.map((d) => path.resolve(cwd, d));
+  const inSrc  = (f) => srcAbs.some((a) => f === a || f.startsWith(a + path.sep));
+
+  const all = [];
+  _walkOwned(cwd, excludeSet, all, 0);
+
+  let inScope = 0;
+  for (const a of srcAbs) {
+    const found = [];
+    try { if (fs.existsSync(a)) _walkOwned(a, excludeSet, found, 0); } catch (_) {}
+    for (const f of found) if (CODE_EXTS.has(path.extname(f).toLowerCase())) inScope++;
+  }
+
+  // Only IMPLEMENTATION counts. Tests, docs, CI, mocks and the conventional
+  // tooling directories are routinely and correctly outside srcDirs — counting
+  // them turned this into a 297-file warning on SigMap's own repo, where the
+  // real answer is the two root-level entrypoints. A check that cries wolf on a
+  // correct configuration teaches the user to ignore it.
+  let cls = null;
+  try { cls = require('../util/file-class'); } catch (_) {}
+  const OUT_OF_SCOPE_DIRS = new Set([
+    'test', 'tests', 'spec', 'specs', '__tests__', 'e2e',
+    'docs', 'doc', 'documentation', 'examples', 'example', 'samples',
+    'scripts', 'benchmarks', 'fixtures', 'mocks', '__mocks__',
+    'testdata', 'demo', 'demos', 'tools', 'migrations',
+  ]);
+
+  const byExt = new Map();
+  const dirs  = new Set();
+  let total = 0;
+  let skipped = 0;
+  for (const f of all) {
+    const ext = path.extname(f).toLowerCase();
+    if (!CODE_EXTS.has(ext)) continue;
+    if (inSrc(f)) continue;
+    const rel = path.relative(cwd, f).split(path.sep).join('/');
+    const topDir = rel.includes('/') ? rel.split('/')[0] : '.';
+    if (OUT_OF_SCOPE_DIRS.has(topDir)) { skipped++; continue; }
+    if (cls && (cls.isTestFile(rel) || cls.isDocsFile(rel) || cls.isCiFile(rel) || cls.isMockFile(rel))) {
+      skipped++; continue;
+    }
+    total++;
+    byExt.set(ext, (byExt.get(ext) || 0) + 1);
+    dirs.add(topDir);
+  }
+
+  return {
+    total,
+    byExt: [...byExt.entries()]
+      .map(([ext, count]) => ({ ext, count }))
+      .sort((a, b) => b.count - a.count || a.ext.localeCompare(b.ext)),
+    dirs: [...dirs].sort(),
+    skipped,
+    inScope,
+    // Share of the implementation that srcDirs is missing. A handful of root
+    // entrypoints outside srcDirs is normal; a majority of the codebase is the
+    // #805 failure. Callers grade on this rather than on the raw count.
+    share: inScope + total > 0 ? total / (inScope + total) : 0,
+  };
+}
+
+/**
+ * Depth-bounded walk that stops at NESTED REPOSITORIES.
+ *
+ * A vendored or cloned repo is not this repo's source, and walking it is both
+ * wrong and expensive: on SigMap's own tree `benchmarks/repos/` holds 43 cloned
+ * repositories — 47,327 of the 53,013 files under cwd — so an unbounded walk
+ * spent its entire time in directories whose files could never be the user's.
+ * A `.git` entry is the marker, which also covers submodules and any vendored
+ * checkout the exclude list does not happen to name.
+ */
+const OWNED_WALK_MAX_DEPTH = 10;
+
+function _walkOwned(dir, excludeSet, out, depth) {
+  const fs   = require('fs');
+  const path = require('path');
+  if (depth > OWNED_WALK_MAX_DEPTH) return;
+  let entries;
+  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return; }
+  if (depth > 0 && entries.some((e) => e.name === '.git')) return; // a repo of its own
+  for (const e of entries) {
+    if (excludeSet.has(e.name)) continue;
+    const full = path.join(dir, e.name);
+    if (e.isDirectory()) { _walkOwned(full, excludeSet, out, depth + 1); }
+    else if (e.isFile())  { out.push(full); }
+  }
+}
+
 function _walk(dir, excludeSet, out) {
   const fs   = require('fs');
   const path = require('path');
@@ -171,5 +300,5 @@ function inContextFiles(cwd) {
   return [...out].map((filePath) => ({ filePath }));
 }
 
-module.exports = { coverageScore, formatCoverage, inContextFiles, POPULATIONS, CODE_EXTS };
+module.exports = { coverageScore, formatCoverage, inContextFiles, outsideSrcDirs, POPULATIONS, CODE_EXTS };
 

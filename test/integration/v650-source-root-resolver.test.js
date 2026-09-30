@@ -178,7 +178,12 @@ test('resolveSourceRoots returns correct roots for Go project with internal/ dir
     'vendor/some-lib.go': '',
   });
   const result = resolveSourceRoots(cwd);
-  assert(result.roots.includes('internal'), `internal should be in roots, got: ${result.roots.join(',')}`);
+  // A Go module's root IS a package, so `.` is the root and it covers
+  // `internal/`. This assertion used to require `internal` as a SEPARATE root,
+  // which is the #805 defect stated as a requirement: selecting a subdirectory
+  // while `main.go` at the root stayed invisible. `vendor` is still excluded —
+  // from the roots here, and from the walk via the default exclude list.
+  assert(result.roots.includes('.'), `the Go module root should be a root, got: ${result.roots.join(',')}`);
   assert(!result.roots.includes('vendor'), 'vendor should not be in roots');
 });
 

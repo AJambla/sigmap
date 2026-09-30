@@ -5,12 +5,12 @@ const path = require('path');
 const { REGISTRY }              = require('./source-root-registry');
 const { detectLanguages }       = require('./language-detector');
 const { detectFrameworks }      = require('./framework-detector');
-const { scoreCandidate, getRecentlyChangedDirs, ROOT_ENTRYPOINTS } = require('./source-root-scorer');
+const { scoreCandidate, getRecentlyChangedDirs, ROOT_ENTRYPOINTS, CODE_EXTS, AUTO_SKIP } = require('./source-root-scorer');
 const { loadIgnorePatterns, matchesIgnorePattern } = require('./sigmapignore');
+const { detectMonorepo }         = require('./monorepo');
 
 module.exports = { resolveSourceRoots };
 
-const MONOREPO_MARKERS = ['pnpm-workspace.yaml','turbo.json','nx.json','lerna.json'];
 const MAX_ROOTS = 6;
 
 // A Gradle/Maven multi-module build legitimately has one source root per
@@ -107,7 +107,8 @@ function resolveSourceRoots(cwd, opts = {}) {
   const languages      = detectLanguages(cwd);
   const frameworks     = detectFrameworks(cwd);
   const recentDirs     = getRecentlyChangedDirs(cwd);
-  const isMonorepo     = _detectMonorepo(cwd);
+  const monorepo       = detectMonorepo(cwd);
+  const isMonorepo     = monorepo.isMonorepo;
 
   const primaryLang   = languages[0]?.name;
   const primaryFw     = frameworks[0];
@@ -153,7 +154,7 @@ function resolveSourceRoots(cwd, opts = {}) {
     .sort((a, b) => b.score - a.score || a.dir.localeCompare(b.dir));
 
   // Handle special rules
-  let roots = _applySpecialRules(scored, cwd, primaryFw, fwEntry, frameworks);
+  let roots = _applySpecialRules(scored, cwd, primaryFw, fwEntry, frameworks, new Set(opts.exclude || []));
 
   // Dedupe nested paths (prefer parent)
   roots = _dedupeNested(roots);
@@ -177,19 +178,9 @@ function resolveSourceRoots(cwd, opts = {}) {
       reason: `score: ${c.score}`,
     })),
     isMonorepo,
+    monorepo,
     isJvmMultiModule,
   };
-}
-
-function _detectMonorepo(cwd) {
-  for (const m of MONOREPO_MARKERS) {
-    if (fs.existsSync(path.join(cwd, m))) return true;
-  }
-  try {
-    const pkg = JSON.parse(fs.readFileSync(path.join(cwd, 'package.json'), 'utf8'));
-    if (pkg.workspaces) return true;
-  } catch (_) {}
-  return false;
 }
 
 function _enumerateCandidates(cwd, isMonorepo, ignorePatterns, excludeList) {
@@ -254,8 +245,94 @@ function _enumerateCandidates(cwd, isMonorepo, ignorePatterns, excludeList) {
   return candidates;
 }
 
-function _applySpecialRules(scored, cwd, primaryFw, fwEntry, frameworks) {
+// A flat layout keeps its source at the repo root — the normal shape of a Go
+// module, and common in C and single-file-per-package Rust. `_enumerateCandidates`
+// only ever walks DIRECTORIES, so `.` could never be selected no matter how much
+// source sat there: a fresh `gin` clone detected
+// ["internal","binding","render","codec","ginS","testdata"] and left `gin.go`,
+// `routergroup.go`, `context.go` and `tree.go` invisible, with nothing warning
+// (#805). Two structural signals qualify the root, deliberately not one tuned
+// ratio:
+//
+//   A. a Go module — `go.mod` at the root means the root IS a package, which is
+//      the toolchain's own model. Measured across 43 cached benchmark repos this
+//      selects exactly the four Go modules (cobra, echo, gin, gorm) and nothing
+//      else; every non-Go repo has zero root-level `.go` files.
+//   B. the root holds a meaningful share of the tree's code. The margin is wide:
+//      the Go repos sit at 10-69% while every other repo is at or below 4%.
+const ROOT_MIN_FILES = 3;
+const ROOT_MIN_SHARE = 0.20;
+const ROOT_SCORE     = 9.0;   // above any scored subdirectory, so `.` sorts first
+
+/** Code files directly in `dir` (non-recursive). */
+function _directCodeFiles(dir) {
+  try {
+    return fs.readdirSync(dir, { withFileTypes: true })
+      .filter((e) => e.isFile() && CODE_EXTS.has(path.extname(e.name))).length;
+  } catch (_) { return 0; }
+}
+
+/**
+ * Code files in the whole tree, bounded in depth, skipping vendor directories
+ * and stopping at NESTED REPOSITORIES — a vendored or cloned repo is not this
+ * repo's source, and walking one is both wrong and expensive.
+ */
+function _treeCodeFiles(dir, excSet, depth = 0) {
+  if (depth > 6) return 0;
+  let entries;
+  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return _directCodeFiles(dir); }
+  if (depth > 0 && entries.some((e) => e.name === '.git')) return 0;
+  let n = _directCodeFiles(dir);
+  for (const e of entries) {
+    if (!e.isDirectory()) continue;
+    if (AUTO_SKIP.has(e.name) || excSet.has(e.name) || e.name.startsWith('.')) continue;
+    n += _treeCodeFiles(path.join(dir, e.name), excSet, depth + 1);
+  }
+  return n;
+}
+
+/**
+ * Whether the repo root is itself a source root, and why.
+ * @returns {{ score: number, reason: string }|null}
+ */
+function _flatLayoutRoot(cwd, excSet) {
+  const rootFiles = _directCodeFiles(cwd);
+  if (rootFiles === 0) return null;
+
+  // A — a Go module's root is a package by definition.
+  if (fs.existsSync(path.join(cwd, 'go.mod'))) {
+    let goFiles = 0;
+    try {
+      goFiles = fs.readdirSync(cwd, { withFileTypes: true })
+        .filter((e) => e.isFile() && e.name.endsWith('.go')).length;
+    } catch (_) {}
+    if (goFiles > 0) {
+      return { score: ROOT_SCORE, reason: `go.mod with ${goFiles} root-level .go file(s)` };
+    }
+  }
+
+  // B — the root holds a meaningful share of the tree's code.
+  if (rootFiles < ROOT_MIN_FILES) return null;
+  const total = _treeCodeFiles(cwd, excSet);
+  if (total === 0) return null;
+  const share = rootFiles / total;
+  if (share >= ROOT_MIN_SHARE) {
+    return { score: ROOT_SCORE, reason: `${rootFiles} of ${total} code files at the root (${Math.round(share * 100)}%)` };
+  }
+  return null;
+}
+
+function _applySpecialRules(scored, cwd, primaryFw, fwEntry, frameworks, excSet = new Set()) {
   let roots = [...scored];
+
+  // Flat layout: the root is a source root. Added here rather than as an
+  // ordinary candidate because `scoreCandidate` scores directory NAMES against
+  // the framework registry, and `.` is not a name it can reason about.
+  const flatRoot = _flatLayoutRoot(cwd, excSet);
+  if (flatRoot && !roots.find((r) => r.dir === '.')) {
+    roots.push({ dir: '.', full: cwd, score: flatRoot.score, reason: flatRoot.reason });
+    roots.sort((a, b) => b.score - a.score || a.dir.localeCompare(b.dir));
+  }
 
   // Django: walk root dirs for any containing models.py or views.py
   if (primaryFw?.name === 'django' || frameworks.some(f => f.name === 'django')) {
@@ -297,6 +374,10 @@ function _dedupeNested(scored) {
     const cNorm = c.dir.replace(/\\/g, '/');
     const isNested = result.some(r => {
       const rNorm = r.dir.replace(/\\/g, '/');
+      // `.` is the parent of everything, but `'internal'.startsWith('./')` is
+      // false, so without this a flat layout would return ['.', 'internal', …]
+      // and walk the same files twice.
+      if (rNorm === '.') return cNorm !== '.';
       return cNorm.startsWith(rNorm + '/');
     });
     if (!isNested) result.push(c);
