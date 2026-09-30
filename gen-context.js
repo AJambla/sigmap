@@ -1041,6 +1041,135 @@ __factories["./src/analysis/coverage-score"] = function(module, exports) {
     return { score: pct, grade, total, included, dropped, nonCodeSkipped, confidence, perModule };
   }
 
+  /**
+   * Source files that exist in the repo but fall OUTSIDE every configured
+   * srcDir (#805).
+   *
+   * `coverageScore` walks srcDirs only, so its denominator cannot see a file the
+   * detector never selected — which is how a flat Go layout reported a plausible
+   * "indexed 67% (2/3 files)" while ten of thirteen source files were invisible.
+   * The number was not wrong about its own population; nothing told the user the
+   * population was wrong.
+   *
+   * Deliberately a SEPARATE primitive rather than a new denominator inside
+   * `coverageScore`: the named populations (#762) are pinned, and the fix here is
+   * to disclose what is missing, not to redefine coverage.
+   *
+   * @param {string} cwd
+   * @param {{srcDirs:string[], exclude:string[], maxDepth?:number}} config
+   * Counts IMPLEMENTATION files only — tests, docs, CI, mocks and the
+   * conventional tooling directories are legitimately outside srcDirs and are
+   * reported separately as `skipped`.
+   *
+   * @returns {{ total: number, byExt: Array<{ext: string, count: number}>,
+   *             dirs: string[], skipped: number, inScope: number, share: number }}
+   */
+  function outsideSrcDirs(cwd, config) {
+    const fs   = require('fs');
+    const path = require('path');
+
+    const srcDirs = (config && Array.isArray(config.srcDirs) && config.srcDirs.length > 0)
+      ? config.srcDirs : ['src', 'app', 'lib'];
+
+    // A srcDir of '.' covers the whole tree, so nothing can be outside it.
+    if (srcDirs.some((d) => d === '.' || d === './')) return { total: 0, byExt: [], dirs: [], skipped: 0, inScope: 0, share: 0 };
+
+    const excludeSet = new Set([
+      'node_modules', '.git', 'dist', 'build', 'out', '__pycache__',
+      '.next', 'coverage', 'target', 'vendor', '.context',
+    ]);
+    if (config && Array.isArray(config.exclude)) {
+      for (const x of config.exclude) excludeSet.add(String(x));
+    }
+
+    const srcAbs = srcDirs.map((d) => path.resolve(cwd, d));
+    const inSrc  = (f) => srcAbs.some((a) => f === a || f.startsWith(a + path.sep));
+
+    const all = [];
+    _walkOwned(cwd, excludeSet, all, 0);
+
+    let inScope = 0;
+    for (const a of srcAbs) {
+      const found = [];
+      try { if (fs.existsSync(a)) _walkOwned(a, excludeSet, found, 0); } catch (_) {}
+      for (const f of found) if (CODE_EXTS.has(path.extname(f).toLowerCase())) inScope++;
+    }
+
+    // Only IMPLEMENTATION counts. Tests, docs, CI, mocks and the conventional
+    // tooling directories are routinely and correctly outside srcDirs — counting
+    // them turned this into a 297-file warning on SigMap's own repo, where the
+    // real answer is the two root-level entrypoints. A check that cries wolf on a
+    // correct configuration teaches the user to ignore it.
+    let cls = null;
+    try { cls = __require('./src/util/file-class'); } catch (_) {}
+    const OUT_OF_SCOPE_DIRS = new Set([
+      'test', 'tests', 'spec', 'specs', '__tests__', 'e2e',
+      'docs', 'doc', 'documentation', 'examples', 'example', 'samples',
+      'scripts', 'benchmarks', 'fixtures', 'mocks', '__mocks__',
+      'testdata', 'demo', 'demos', 'tools', 'migrations',
+    ]);
+
+    const byExt = new Map();
+    const dirs  = new Set();
+    let total = 0;
+    let skipped = 0;
+    for (const f of all) {
+      const ext = path.extname(f).toLowerCase();
+      if (!CODE_EXTS.has(ext)) continue;
+      if (inSrc(f)) continue;
+      const rel = path.relative(cwd, f).split(path.sep).join('/');
+      const topDir = rel.includes('/') ? rel.split('/')[0] : '.';
+      if (OUT_OF_SCOPE_DIRS.has(topDir)) { skipped++; continue; }
+      if (cls && (cls.isTestFile(rel) || cls.isDocsFile(rel) || cls.isCiFile(rel) || cls.isMockFile(rel))) {
+        skipped++; continue;
+      }
+      total++;
+      byExt.set(ext, (byExt.get(ext) || 0) + 1);
+      dirs.add(topDir);
+    }
+
+    return {
+      total,
+      byExt: [...byExt.entries()]
+        .map(([ext, count]) => ({ ext, count }))
+        .sort((a, b) => b.count - a.count || a.ext.localeCompare(b.ext)),
+      dirs: [...dirs].sort(),
+      skipped,
+      inScope,
+      // Share of the implementation that srcDirs is missing. A handful of root
+      // entrypoints outside srcDirs is normal; a majority of the codebase is the
+      // #805 failure. Callers grade on this rather than on the raw count.
+      share: inScope + total > 0 ? total / (inScope + total) : 0,
+    };
+  }
+
+  /**
+   * Depth-bounded walk that stops at NESTED REPOSITORIES.
+   *
+   * A vendored or cloned repo is not this repo's source, and walking it is both
+   * wrong and expensive: on SigMap's own tree `benchmarks/repos/` holds 43 cloned
+   * repositories — 47,327 of the 53,013 files under cwd — so an unbounded walk
+   * spent its entire time in directories whose files could never be the user's.
+   * A `.git` entry is the marker, which also covers submodules and any vendored
+   * checkout the exclude list does not happen to name.
+   */
+  const OWNED_WALK_MAX_DEPTH = 10;
+
+  function _walkOwned(dir, excludeSet, out, depth) {
+    const fs   = require('fs');
+    const path = require('path');
+    if (depth > OWNED_WALK_MAX_DEPTH) return;
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return; }
+    if (depth > 0 && entries.some((e) => e.name === '.git')) return; // a repo of its own
+    for (const e of entries) {
+      if (excludeSet.has(e.name)) continue;
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) { _walkOwned(full, excludeSet, out, depth + 1); }
+      else if (e.isFile())  { out.push(full); }
+    }
+  }
+
   function _walk(dir, excludeSet, out) {
     const fs   = require('fs');
     const path = require('path');
@@ -1123,7 +1252,7 @@ __factories["./src/analysis/coverage-score"] = function(module, exports) {
     return [...out].map((filePath) => ({ filePath }));
   }
 
-  module.exports = { coverageScore, formatCoverage, inContextFiles, POPULATIONS, CODE_EXTS };
+  module.exports = { coverageScore, formatCoverage, inContextFiles, outsideSrcDirs, POPULATIONS, CODE_EXTS };
   
 };
 
@@ -2061,8 +2190,8 @@ __factories["./src/config/tune"] = function(module, exports) {
   /**
    * sigmap tune — deterministic config optimizer (F2, #514).
    *
-   * Packages the existing discovery stack (source-root-resolver, monorepo
-   * markers, client-artifact probes) into a recommended config diff with a
+   * Packages the existing discovery stack (source-root-resolver, the shared
+   * monorepo detector, client-artifact probes) into a recommended config diff with a
    * one-line reason per change. Read-only by default; `applyTuneProposal`
    * merges accepted changes into gen-context.config.json, preserving every
    * user key. Explicit user choices are never proposed against.
@@ -2072,9 +2201,7 @@ __factories["./src/config/tune"] = function(module, exports) {
   const path = require('path');
   const { loadConfig } = __require('./src/config/loader');
   const { resolveSourceRoots } = __require('./src/discovery/source-root-resolver');
-
-  // Workspace markers, in probe order (reason names the first one found).
-  const MONOREPO_MARKERS = ['pnpm-workspace.yaml', 'turbo.json', 'nx.json', 'lerna.json'];
+  const { detectMonorepo } = __require('./src/discovery/monorepo');
 
   // Client artifacts → adapter names (additive only).
   const ADAPTER_MARKERS = [
@@ -2129,24 +2256,19 @@ __factories["./src/config/tune"] = function(module, exports) {
     return count;
   }
 
-  /** The workspace marker present at cwd, or null. */
-  function _monorepoMarker(cwd) {
-    for (const m of MONOREPO_MARKERS) {
-      if (fs.existsSync(path.join(cwd, m))) return m;
-    }
-    try {
-      const pkg = JSON.parse(fs.readFileSync(path.join(cwd, 'package.json'), 'utf8'));
-      if (pkg.workspaces) return 'package.json workspaces';
-    } catch (_) {}
-    return null;
-  }
+  // `_monorepoMarker` used to live here as a byte-for-byte duplicate of the
+  // resolver's own marker check. Both answered "no" on a repo where `--monorepo`
+  // processes two packages, so `tune` never proposed `monorepo: true` for a
+  // layout the mode demonstrably supports (#781). One detector now answers it,
+  // and it reports whether the evidence is a declared marker or the layout.
 
   /**
    * Build the recommended config diff for a repo.
    *
    * @param {string} cwd
    * @returns {{ changes: Array<{key:string, current:*, recommended:*, reason:string}>,
-   *             detection: { roots:string[], confidence:string, isMonorepo:boolean },
+   *             detection: { roots:string[], confidence:string, isMonorepo:boolean,
+   *                           monorepoEvidence:string },
    *             configExists: boolean }}
    */
   function buildTuneProposal(cwd) {
@@ -2169,13 +2291,13 @@ __factories["./src/config/tune"] = function(module, exports) {
     }
 
     // 2. monorepo — a workspace marker exists but the mode is off.
-    const marker = _monorepoMarker(cwd);
-    if (marker && config.monorepo !== true) {
+    const monorepo = detectMonorepo(cwd);
+    if (monorepo.isMonorepo && config.monorepo !== true) {
       changes.push({
         key: 'monorepo',
         current: config.monorepo,
         recommended: true,
-        reason: `workspace marker found: ${marker}`,
+        reason: monorepo.evidence,
       });
     }
 
@@ -2228,7 +2350,7 @@ __factories["./src/config/tune"] = function(module, exports) {
 
     return {
       changes,
-      detection: { roots: detection.roots, confidence: detection.confidence, isMonorepo: detection.isMonorepo },
+      detection: { roots: detection.roots, confidence: detection.confidence, isMonorepo: monorepo.isMonorepo, monorepoEvidence: monorepo.evidence },
       configExists: userConfig !== null,
     };
   }
@@ -2261,7 +2383,9 @@ __factories["./src/config/tune"] = function(module, exports) {
       lines.push('');
       lines.push('  apply with: sigmap tune --apply   (then: sigmap validate)');
     }
-    lines.push(`  detection: roots [${proposal.detection.roots.join(', ')}] · confidence ${proposal.detection.confidence} · monorepo ${proposal.detection.isMonorepo ? 'yes' : 'no'}`);
+    const mono = proposal.detection.isMonorepo ? 'yes' : 'no';
+    const monoWhy = proposal.detection.monorepoEvidence ? ` (${proposal.detection.monorepoEvidence})` : '';
+    lines.push(`  detection: roots [${proposal.detection.roots.join(', ')}] · confidence ${proposal.detection.confidence} · monorepo ${mono}${monoWhy}`);
     return lines.join('\n');
   }
 
@@ -4365,6 +4489,147 @@ __factories["./src/discovery/language-detector"] = function(module, exports) {
   
 };
 
+// ── ./src/discovery/monorepo ──
+__factories["./src/discovery/monorepo"] = function(module, exports) {
+  
+  /**
+   * monorepo.js — the single monorepo verdict, with its evidence.
+   *
+   * SigMap had three detectors that disagreed about the same repo (#781):
+   *
+   *   * `_detectMonorepo` in source-root-resolver.js — marker files only
+   *   * `_monorepoMarker` in config/tune.js          — a duplicate of the above
+   *   * `detectMonorepoPackages` in gen-context.js   — scans the layout
+   *
+   * On SigMap's own repo the marker-based pair answered "no" (there is no
+   * `pnpm-workspace.yaml` and no `package.json.workspaces`) while the layout scan
+   * found two packages, so `roots` and `tune` told the user they were not in a
+   * monorepo while `--monorepo` demonstrably processed `packages/core` and
+   * `packages/cli`. `tune` therefore never proposed `monorepo: true` for a repo
+   * where the mode works.
+   *
+   * One function answers it now, and it reports HOW it decided: a declared
+   * workspace and a layout-only match are different facts, and collapsing them
+   * into a bare boolean is what let the disagreement hide.
+   *
+   * Zero dependencies.
+   */
+
+  const fs = require('fs');
+  const path = require('path');
+
+  /** Files that DECLARE a workspace. */
+  const MARKERS = ['pnpm-workspace.yaml', 'turbo.json', 'nx.json', 'lerna.json'];
+
+  /** Directories that conventionally hold sibling packages. */
+  const MONO_ROOTS = ['packages', 'apps', 'services', 'libs', 'modules'];
+
+  /** Any of these makes a directory a package. */
+  const PKG_MANIFESTS = [
+    'package.json', 'pyproject.toml', 'Cargo.toml', 'go.mod',
+    'build.gradle', 'build.gradle.kts', 'pom.xml', 'requirements.txt',
+  ];
+
+  /** A layout match needs at least this many sibling packages to count. */
+  const MIN_LAYOUT_PACKAGES = 2;
+
+  /**
+   * The declared-workspace marker for this repo, or null.
+   * @returns {string|null} the marker's filename, for use as evidence
+   */
+  function workspaceMarker(cwd) {
+    for (const m of MARKERS) {
+      if (fs.existsSync(path.join(cwd, m))) return m;
+    }
+    try {
+      const pkg = JSON.parse(fs.readFileSync(path.join(cwd, 'package.json'), 'utf8'));
+      if (pkg.workspaces) return 'package.json workspaces';
+    } catch (_) {}
+    return null;
+  }
+
+  /**
+   * Sibling packages found by scanning the conventional container directories.
+   * @returns {Array<{dir: string, manifest: string}>} repo-relative package dirs
+   */
+  function layoutPackages(cwd) {
+    const found = [];
+    for (const top of MONO_ROOTS) {
+      const topFull = path.join(cwd, top);
+      let entries;
+      try { entries = fs.readdirSync(topFull, { withFileTypes: true }); } catch (_) { continue; }
+      for (const e of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+        if (!e.isDirectory()) continue;
+        const pkgDir = path.join(topFull, e.name);
+        const manifest = PKG_MANIFESTS.find((m) => fs.existsSync(path.join(pkgDir, m)));
+        if (manifest) found.push({ dir: `${top}/${e.name}`, manifest });
+      }
+    }
+    return found;
+  }
+
+  /**
+   * The monorepo verdict for a repo, and the evidence behind it.
+   *
+   * `isMonorepo` is true for a declared workspace OR a layout carrying at least
+   * MIN_LAYOUT_PACKAGES sibling packages. One package under `packages/` is a
+   * common single-package layout, not a monorepo, so it does not qualify.
+   *
+   * @param {string} cwd
+   * @returns {{
+   *   isMonorepo: boolean,
+   *   source: 'marker'|'layout'|'none',
+   *   evidence: string,
+   *   marker: string|null,
+   *   packages: Array<{dir: string, manifest: string}>
+   * }}
+   */
+  function detectMonorepo(cwd) {
+    const marker = workspaceMarker(cwd);
+    const packages = layoutPackages(cwd);
+
+    if (marker) {
+      return {
+        isMonorepo: true,
+        source: 'marker',
+        evidence: `marker: ${marker}`,
+        marker,
+        packages,
+      };
+    }
+    if (packages.length >= MIN_LAYOUT_PACKAGES) {
+      const top = packages[0].dir.split('/')[0];
+      return {
+        isMonorepo: true,
+        source: 'layout',
+        evidence: `layout: ${packages.length} manifests under ${top}/`,
+        marker: null,
+        packages,
+      };
+    }
+    return {
+      isMonorepo: false,
+      source: 'none',
+      evidence: packages.length === 1
+        ? `no: 1 package under ${packages[0].dir.split('/')[0]}/ (needs ${MIN_LAYOUT_PACKAGES})`
+        : 'no: no workspace marker and no sibling packages',
+      marker: null,
+      packages,
+    };
+  }
+
+  module.exports = {
+    detectMonorepo,
+    workspaceMarker,
+    layoutPackages,
+    MARKERS,
+    MONO_ROOTS,
+    PKG_MANIFESTS,
+    MIN_LAYOUT_PACKAGES,
+  };
+  
+};
+
 // ── ./src/discovery/r-manifest ──
 __factories["./src/discovery/r-manifest"] = function(module, exports) {
   
@@ -4774,12 +5039,12 @@ __factories["./src/discovery/source-root-resolver"] = function(module, exports) 
   const { REGISTRY }              = __require('./src/discovery/source-root-registry');
   const { detectLanguages }       = __require('./src/discovery/language-detector');
   const { detectFrameworks }      = __require('./src/discovery/framework-detector');
-  const { scoreCandidate, getRecentlyChangedDirs, ROOT_ENTRYPOINTS } = __require('./src/discovery/source-root-scorer');
+  const { scoreCandidate, getRecentlyChangedDirs, ROOT_ENTRYPOINTS, CODE_EXTS, AUTO_SKIP } = __require('./src/discovery/source-root-scorer');
   const { loadIgnorePatterns, matchesIgnorePattern } = __require('./src/discovery/sigmapignore');
+  const { detectMonorepo }         = __require('./src/discovery/monorepo');
 
   module.exports = { resolveSourceRoots };
 
-  const MONOREPO_MARKERS = ['pnpm-workspace.yaml','turbo.json','nx.json','lerna.json'];
   const MAX_ROOTS = 6;
 
   // A Gradle/Maven multi-module build legitimately has one source root per
@@ -4876,7 +5141,8 @@ __factories["./src/discovery/source-root-resolver"] = function(module, exports) 
     const languages      = detectLanguages(cwd);
     const frameworks     = detectFrameworks(cwd);
     const recentDirs     = getRecentlyChangedDirs(cwd);
-    const isMonorepo     = _detectMonorepo(cwd);
+    const monorepo       = detectMonorepo(cwd);
+    const isMonorepo     = monorepo.isMonorepo;
 
     const primaryLang   = languages[0]?.name;
     const primaryFw     = frameworks[0];
@@ -4922,7 +5188,7 @@ __factories["./src/discovery/source-root-resolver"] = function(module, exports) 
       .sort((a, b) => b.score - a.score || a.dir.localeCompare(b.dir));
 
     // Handle special rules
-    let roots = _applySpecialRules(scored, cwd, primaryFw, fwEntry, frameworks);
+    let roots = _applySpecialRules(scored, cwd, primaryFw, fwEntry, frameworks, new Set(opts.exclude || []));
 
     // Dedupe nested paths (prefer parent)
     roots = _dedupeNested(roots);
@@ -4946,19 +5212,9 @@ __factories["./src/discovery/source-root-resolver"] = function(module, exports) 
         reason: `score: ${c.score}`,
       })),
       isMonorepo,
+      monorepo,
       isJvmMultiModule,
     };
-  }
-
-  function _detectMonorepo(cwd) {
-    for (const m of MONOREPO_MARKERS) {
-      if (fs.existsSync(path.join(cwd, m))) return true;
-    }
-    try {
-      const pkg = JSON.parse(fs.readFileSync(path.join(cwd, 'package.json'), 'utf8'));
-      if (pkg.workspaces) return true;
-    } catch (_) {}
-    return false;
   }
 
   function _enumerateCandidates(cwd, isMonorepo, ignorePatterns, excludeList) {
@@ -5023,8 +5279,94 @@ __factories["./src/discovery/source-root-resolver"] = function(module, exports) 
     return candidates;
   }
 
-  function _applySpecialRules(scored, cwd, primaryFw, fwEntry, frameworks) {
+  // A flat layout keeps its source at the repo root — the normal shape of a Go
+  // module, and common in C and single-file-per-package Rust. `_enumerateCandidates`
+  // only ever walks DIRECTORIES, so `.` could never be selected no matter how much
+  // source sat there: a fresh `gin` clone detected
+  // ["internal","binding","render","codec","ginS","testdata"] and left `gin.go`,
+  // `routergroup.go`, `context.go` and `tree.go` invisible, with nothing warning
+  // (#805). Two structural signals qualify the root, deliberately not one tuned
+  // ratio:
+  //
+  //   A. a Go module — `go.mod` at the root means the root IS a package, which is
+  //      the toolchain's own model. Measured across 43 cached benchmark repos this
+  //      selects exactly the four Go modules (cobra, echo, gin, gorm) and nothing
+  //      else; every non-Go repo has zero root-level `.go` files.
+  //   B. the root holds a meaningful share of the tree's code. The margin is wide:
+  //      the Go repos sit at 10-69% while every other repo is at or below 4%.
+  const ROOT_MIN_FILES = 3;
+  const ROOT_MIN_SHARE = 0.20;
+  const ROOT_SCORE     = 9.0;   // above any scored subdirectory, so `.` sorts first
+
+  /** Code files directly in `dir` (non-recursive). */
+  function _directCodeFiles(dir) {
+    try {
+      return fs.readdirSync(dir, { withFileTypes: true })
+        .filter((e) => e.isFile() && CODE_EXTS.has(path.extname(e.name))).length;
+    } catch (_) { return 0; }
+  }
+
+  /**
+   * Code files in the whole tree, bounded in depth, skipping vendor directories
+   * and stopping at NESTED REPOSITORIES — a vendored or cloned repo is not this
+   * repo's source, and walking one is both wrong and expensive.
+   */
+  function _treeCodeFiles(dir, excSet, depth = 0) {
+    if (depth > 6) return 0;
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return _directCodeFiles(dir); }
+    if (depth > 0 && entries.some((e) => e.name === '.git')) return 0;
+    let n = _directCodeFiles(dir);
+    for (const e of entries) {
+      if (!e.isDirectory()) continue;
+      if (AUTO_SKIP.has(e.name) || excSet.has(e.name) || e.name.startsWith('.')) continue;
+      n += _treeCodeFiles(path.join(dir, e.name), excSet, depth + 1);
+    }
+    return n;
+  }
+
+  /**
+   * Whether the repo root is itself a source root, and why.
+   * @returns {{ score: number, reason: string }|null}
+   */
+  function _flatLayoutRoot(cwd, excSet) {
+    const rootFiles = _directCodeFiles(cwd);
+    if (rootFiles === 0) return null;
+
+    // A — a Go module's root is a package by definition.
+    if (fs.existsSync(path.join(cwd, 'go.mod'))) {
+      let goFiles = 0;
+      try {
+        goFiles = fs.readdirSync(cwd, { withFileTypes: true })
+          .filter((e) => e.isFile() && e.name.endsWith('.go')).length;
+      } catch (_) {}
+      if (goFiles > 0) {
+        return { score: ROOT_SCORE, reason: `go.mod with ${goFiles} root-level .go file(s)` };
+      }
+    }
+
+    // B — the root holds a meaningful share of the tree's code.
+    if (rootFiles < ROOT_MIN_FILES) return null;
+    const total = _treeCodeFiles(cwd, excSet);
+    if (total === 0) return null;
+    const share = rootFiles / total;
+    if (share >= ROOT_MIN_SHARE) {
+      return { score: ROOT_SCORE, reason: `${rootFiles} of ${total} code files at the root (${Math.round(share * 100)}%)` };
+    }
+    return null;
+  }
+
+  function _applySpecialRules(scored, cwd, primaryFw, fwEntry, frameworks, excSet = new Set()) {
     let roots = [...scored];
+
+    // Flat layout: the root is a source root. Added here rather than as an
+    // ordinary candidate because `scoreCandidate` scores directory NAMES against
+    // the framework registry, and `.` is not a name it can reason about.
+    const flatRoot = _flatLayoutRoot(cwd, excSet);
+    if (flatRoot && !roots.find((r) => r.dir === '.')) {
+      roots.push({ dir: '.', full: cwd, score: flatRoot.score, reason: flatRoot.reason });
+      roots.sort((a, b) => b.score - a.score || a.dir.localeCompare(b.dir));
+    }
 
     // Django: walk root dirs for any containing models.py or views.py
     if (primaryFw?.name === 'django' || frameworks.some(f => f.name === 'django')) {
@@ -5066,6 +5408,10 @@ __factories["./src/discovery/source-root-resolver"] = function(module, exports) 
       const cNorm = c.dir.replace(/\\/g, '/');
       const isNested = result.some(r => {
         const rNorm = r.dir.replace(/\\/g, '/');
+        // `.` is the parent of everything, but `'internal'.startsWith('./')` is
+        // false, so without this a flat layout would return ['.', 'internal', …]
+        // and walk the same files twice.
+        if (rNorm === '.') return cNorm !== '.';
         return cNorm.startsWith(rNorm + '/');
       });
       if (!isNested) result.push(c);
@@ -5104,6 +5450,11 @@ __factories["./src/discovery/source-root-scorer"] = function(module, exports) {
     'test','tests','spec','__tests__','e2e','docs','doc','docs-vp',
     'examples','example','fixtures','mocks','__mocks__','demo','samples','migrations',
     'benchmarks','scripts',
+    // `testdata` is Go's fixture convention and the go tool ignores it outright.
+    // Without it here, a flat Go layout selected `testdata` as a source root
+    // while the module root — holding every file that answers a question — was
+    // never even a candidate (#805).
+    'testdata','test-data','__fixtures__','snapshots','__snapshots__',
   ]);
 
   // Matches a JVM source root anywhere in a path, for any SOURCE SET.
@@ -5195,7 +5546,7 @@ __factories["./src/discovery/source-root-scorer"] = function(module, exports) {
     return count;
   }
 
-  module.exports = { scoreCandidate, getRecentlyChangedDirs, ROOT_ENTRYPOINTS, JVM_PATH_PATTERN };
+  module.exports = { scoreCandidate, getRecentlyChangedDirs, ROOT_ENTRYPOINTS, JVM_PATH_PATTERN, CODE_EXTS, AUTO_SKIP, PENALTY_DIRS };
   
 };
 
@@ -5235,6 +5586,10 @@ __factories["./src/doctor/diagnose"] = function(module, exports) {
   ]);
 
   const ICON = { ok: '✓', warn: '⚠', fail: '✗' };
+
+  // Share of implementation outside srcDirs that turns the report into a warning.
+  // Below it, a couple of root entrypoints outside srcDirs is an ordinary layout.
+  const OUTSIDE_WARN_SHARE = 0.10;
 
   function _short(p, cwd) {
     const rel = path.relative(cwd, p);
@@ -5348,6 +5703,31 @@ __factories["./src/doctor/diagnose"] = function(module, exports) {
         } else {
           add('config', 'Config & source roots', 'ok', `source roots: ${present.slice(0, 8).join(', ')}${present.length > 8 ? `, +${present.length - 8} more` : ''}`);
         }
+
+        // #805: srcDirs can be confidently wrong. A coverage figure computed over
+        // srcDirs cannot see a file the detector never selected, so a flat Go
+        // layout reported a healthy-looking percentage while the codebase was
+        // invisible. This check measures the population itself.
+        try {
+          const { outsideSrcDirs } = __require('./src/analysis/coverage-score');
+          const outside = outsideSrcDirs(cwd, config);
+          const pct = Math.round(outside.share * 100);
+          if (outside.total === 0) {
+            add('srcdirs-coverage', 'Source files in scope', 'ok', 'every implementation file is under srcDirs');
+          } else if (outside.share < OUTSIDE_WARN_SHARE) {
+            // A few root-level entrypoints outside srcDirs is a normal layout,
+            // so the count is reported without crying wolf.
+            const exts = outside.byExt.slice(0, 3).map((e) => `${e.count}${e.ext}`).join(' ');
+            add('srcdirs-coverage', 'Source files in scope', 'ok',
+              `${outside.inScope} in scope · ${outside.total} outside (${pct}%) — ${exts} in ${outside.dirs.slice(0, 3).join(', ')}`);
+          } else {
+            const exts = outside.byExt.slice(0, 4).map((e) => `${e.count}${e.ext}`).join(' ');
+            add('srcdirs-coverage', 'Source files in scope',
+              'warn',
+              `${outside.total} of ${outside.inScope + outside.total} implementation file(s) are OUTSIDE srcDirs (${pct}%) — ${exts} in ${outside.dirs.slice(0, 5).join(', ')}`,
+              'run: sigmap roots --fix   or widen "srcDirs" in gen-context.config.json');
+          }
+        } catch (_) {}
       }
     } catch (e) {
       if (!checks.some((c) => c.id === 'config')) add('config', 'Config & source roots', 'warn', `could not load config: ${e.message}`);
@@ -33147,6 +33527,15 @@ function main() {
       }
     }
 
+    // #805: a coverage figure computed over srcDirs cannot see a file the
+    // detector never selected. Report what is outside, so a wrong srcDirs is
+    // visible without reading the detector's output. Computed before the
+    // json/human split so both surfaces report the same number.
+    let __valOutside = { total: 0, byExt: [], dirs: [] };
+    try {
+      __valOutside = __require('./src/analysis/coverage-score').outsideSrcDirs(cwd, config);
+    } catch (_) {}
+
     if (args.includes('--json')) {
       const payload = {
         valid: issues.length === 0,
@@ -33157,6 +33546,7 @@ function main() {
         notIndexed: valNotIndexed,
         staleEntries: valStale,
         totalFiles: valTotal,
+        outsideSrcDirs: __valOutside,
       };
       if (queryReport) payload.query = queryReport;
       process.stdout.write(JSON.stringify(payload) + '\n');
@@ -33177,6 +33567,12 @@ function main() {
           { included: valCovered, total: valTotal, grade: false }
         );
         console.log(`[sigmap] ✓ config valid  coverage: ${_line}${residual ? `  — ${residual}` : ''}`);
+        if (__valOutside.total > 0 && __valOutside.share >= 0.10) {
+          const _exts = __valOutside.byExt.slice(0, 4).map((e) => `${e.count}${e.ext}`).join(' ');
+          console.warn(`[sigmap] ⚠  ${__valOutside.total} of ${__valOutside.inScope + __valOutside.total} implementation file(s) OUTSIDE srcDirs (${Math.round(__valOutside.share * 100)}%) — ${_exts}`);
+          console.warn(`[sigmap]    in: ${__valOutside.dirs.slice(0, 6).join(', ')}`);
+          console.warn(`[sigmap]    srcDirs is (${(config.srcDirs || []).join(', ')}) — widen it or set "srcDirs" explicitly`);
+        }
       } else {
         for (const iss of issues) console.error(`[sigmap] ✗ ${iss}`);
         process.exit(1);
@@ -33500,7 +33896,11 @@ function main() {
       const exp = result.explanation?.find(e => e.dir === r);
       console.log(`  ${i + 1}. ${r.padEnd(20)} ${exp ? 'score ' + exp.score : ''}`);
     });
-    console.log('\nMonorepo:', result.isMonorepo ? 'yes' : 'no');
+    // Name the evidence: a declared workspace and a layout-only match are
+    // different facts, and reporting a bare yes/no is what let `roots` and
+    // `--monorepo` disagree in silence (#781).
+    const __monoWhy = result.monorepo && result.monorepo.evidence ? `  (${result.monorepo.evidence})` : '';
+    console.log('\nMonorepo:', (result.isMonorepo ? 'yes' : 'no') + __monoWhy);
     console.log('Confidence:', result.confidence);
     process.exit(0);
   }

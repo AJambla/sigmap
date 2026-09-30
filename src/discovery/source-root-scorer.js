@@ -20,6 +20,11 @@ const PENALTY_DIRS = new Set([
   'test','tests','spec','__tests__','e2e','docs','doc','docs-vp',
   'examples','example','fixtures','mocks','__mocks__','demo','samples','migrations',
   'benchmarks','scripts',
+  // `testdata` is Go's fixture convention and the go tool ignores it outright.
+  // Without it here, a flat Go layout selected `testdata` as a source root
+  // while the module root — holding every file that answers a question — was
+  // never even a candidate (#805).
+  'testdata','test-data','__fixtures__','snapshots','__snapshots__',
 ]);
 
 // Matches a JVM source root anywhere in a path, for any SOURCE SET.
@@ -111,4 +116,4 @@ function _countSourceFiles(dir, depth) {
   return count;
 }
 
-module.exports = { scoreCandidate, getRecentlyChangedDirs, ROOT_ENTRYPOINTS, JVM_PATH_PATTERN };
+module.exports = { scoreCandidate, getRecentlyChangedDirs, ROOT_ENTRYPOINTS, JVM_PATH_PATTERN, CODE_EXTS, AUTO_SKIP, PENALTY_DIRS };

@@ -3,8 +3,8 @@
 /**
  * sigmap tune — deterministic config optimizer (F2, #514).
  *
- * Packages the existing discovery stack (source-root-resolver, monorepo
- * markers, client-artifact probes) into a recommended config diff with a
+ * Packages the existing discovery stack (source-root-resolver, the shared
+ * monorepo detector, client-artifact probes) into a recommended config diff with a
  * one-line reason per change. Read-only by default; `applyTuneProposal`
  * merges accepted changes into gen-context.config.json, preserving every
  * user key. Explicit user choices are never proposed against.
@@ -14,9 +14,7 @@ const fs = require('fs');
 const path = require('path');
 const { loadConfig } = require('./loader');
 const { resolveSourceRoots } = require('../discovery/source-root-resolver');
-
-// Workspace markers, in probe order (reason names the first one found).
-const MONOREPO_MARKERS = ['pnpm-workspace.yaml', 'turbo.json', 'nx.json', 'lerna.json'];
+const { detectMonorepo } = require('../discovery/monorepo');
 
 // Client artifacts → adapter names (additive only).
 const ADAPTER_MARKERS = [
@@ -71,24 +69,19 @@ function _countSourceFiles(cwd, roots, exclude, depth = 5) {
   return count;
 }
 
-/** The workspace marker present at cwd, or null. */
-function _monorepoMarker(cwd) {
-  for (const m of MONOREPO_MARKERS) {
-    if (fs.existsSync(path.join(cwd, m))) return m;
-  }
-  try {
-    const pkg = JSON.parse(fs.readFileSync(path.join(cwd, 'package.json'), 'utf8'));
-    if (pkg.workspaces) return 'package.json workspaces';
-  } catch (_) {}
-  return null;
-}
+// `_monorepoMarker` used to live here as a byte-for-byte duplicate of the
+// resolver's own marker check. Both answered "no" on a repo where `--monorepo`
+// processes two packages, so `tune` never proposed `monorepo: true` for a
+// layout the mode demonstrably supports (#781). One detector now answers it,
+// and it reports whether the evidence is a declared marker or the layout.
 
 /**
  * Build the recommended config diff for a repo.
  *
  * @param {string} cwd
  * @returns {{ changes: Array<{key:string, current:*, recommended:*, reason:string}>,
- *             detection: { roots:string[], confidence:string, isMonorepo:boolean },
+ *             detection: { roots:string[], confidence:string, isMonorepo:boolean,
+ *                           monorepoEvidence:string },
  *             configExists: boolean }}
  */
 function buildTuneProposal(cwd) {
@@ -111,13 +104,13 @@ function buildTuneProposal(cwd) {
   }
 
   // 2. monorepo — a workspace marker exists but the mode is off.
-  const marker = _monorepoMarker(cwd);
-  if (marker && config.monorepo !== true) {
+  const monorepo = detectMonorepo(cwd);
+  if (monorepo.isMonorepo && config.monorepo !== true) {
     changes.push({
       key: 'monorepo',
       current: config.monorepo,
       recommended: true,
-      reason: `workspace marker found: ${marker}`,
+      reason: monorepo.evidence,
     });
   }
 
@@ -170,7 +163,7 @@ function buildTuneProposal(cwd) {
 
   return {
     changes,
-    detection: { roots: detection.roots, confidence: detection.confidence, isMonorepo: detection.isMonorepo },
+    detection: { roots: detection.roots, confidence: detection.confidence, isMonorepo: monorepo.isMonorepo, monorepoEvidence: monorepo.evidence },
     configExists: userConfig !== null,
   };
 }
@@ -203,7 +196,9 @@ function formatTuneProposal(proposal) {
     lines.push('');
     lines.push('  apply with: sigmap tune --apply   (then: sigmap validate)');
   }
-  lines.push(`  detection: roots [${proposal.detection.roots.join(', ')}] · confidence ${proposal.detection.confidence} · monorepo ${proposal.detection.isMonorepo ? 'yes' : 'no'}`);
+  const mono = proposal.detection.isMonorepo ? 'yes' : 'no';
+  const monoWhy = proposal.detection.monorepoEvidence ? ` (${proposal.detection.monorepoEvidence})` : '';
+  lines.push(`  detection: roots [${proposal.detection.roots.join(', ')}] · confidence ${proposal.detection.confidence} · monorepo ${mono}${monoWhy}`);
   return lines.join('\n');
 }
 
