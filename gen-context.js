@@ -1960,6 +1960,7 @@ __factories["./src/config/loader"] = function(module, exports) {
       const cfg = deepClone(DEFAULTS);
       const detected = detectAutoSrcDirs(cwd, cfg.exclude);
       if (detected.length > 0) cfg.srcDirs = detected;
+      cfg._userKeys = [];
       return _applyJvmDepth(cfg, cwd, false);
     }
 
@@ -1972,6 +1973,7 @@ __factories["./src/config/loader"] = function(module, exports) {
       const cfg = deepClone(DEFAULTS);
       const detected = detectAutoSrcDirs(cwd, cfg.exclude);
       if (detected.length > 0) cfg.srcDirs = detected;
+      cfg._userKeys = [];
       return _applyJvmDepth(cfg, cwd, false);
     }
 
@@ -2024,6 +2026,23 @@ __factories["./src/config/loader"] = function(module, exports) {
     } else if (Array.isArray(merged.adapters) && !userConfig.outputs) {
       merged.outputs = merged.adapters.filter((a) => ['copilot','claude','cursor','windsurf'].includes(a));
     }
+
+    // Provenance (#783): which keys the project actually set, as opposed to
+    // inheriting from DEFAULTS. Without this, "your maxTokens was overridden"
+    // could not tell a pinned 500 from the shipped default 6000, and the notice
+    // fired on every repo that had never configured a budget at all. The `_`
+    // prefix is the existing convention for a key the merge loops skip, so this
+    // can neither collide with a real key nor trigger the unknown-key warning.
+    // A key set by an `extends` base counts as user-set: the project chose it.
+    const _userKeys = [];
+    for (const src of [baseConfig, userConfig]) {
+      for (const key of Object.keys(src || {})) {
+        if (key.startsWith('_') || key === 'extends') continue;
+        if (!KNOWN_KEYS.has(key)) continue;
+        if (!_userKeys.includes(key)) _userKeys.push(key);
+      }
+    }
+    merged._userKeys = _userKeys;
 
     return _applyJvmDepth(merged, cwd, userConfig.maxDepth !== undefined);
   }
@@ -24964,6 +24983,200 @@ __factories["./src/session/memory-inspect"] = function(module, exports) {
   
 };
 
+// ── ./src/session/note-relevance ──
+__factories["./src/session/note-relevance"] = function(module, exports) {
+  
+  /**
+   * Notes as a retrieval signal (#776).
+   *
+   * `sigmap note` writes human-authored facts to `.context/notes.ndjson`, and
+   * until now nothing in the retrieval path read them: every `readNotes` call
+   * site was the `note` command listing its own notes, `status` counting them, or
+   * the MCP `read_memory` tool. A note saying "the redaction logic lives in
+   * src/security/patterns.js" could not influence a query about redaction — the
+   * one thing a decision log is for.
+   *
+   * This module turns notes into a bounded, relevance-gated signal:
+   *   - a note is considered only if it shares substantive vocabulary with the query
+   *   - a relevant note boosts the files whose paths it names
+   *   - relevant notes are rendered into the emitted context so the agent sees them
+   *
+   * Deliberately inert when no notes exist, so a repo that never ran `note` —
+   * including every benchmark repo — produces byte-identical ranking.
+   *
+   * Deterministic, offline, zero dependencies. Reuses the ranker's tokenizer so
+   * notes and queries are tokenized the same way the index is.
+   */
+
+  const { tokenize } = __require('./src/retrieval/bm25');
+
+  /** Most recent notes considered for a single query. */
+  const MAX_NOTES = 20;
+
+  /**
+   * Minimum share of a note's tokens that must also appear in the query.
+   *
+   * Gated rather than unconditional: appending every note to every answer would
+   * make notes noise, and the issue's own criterion is that notes must not leak
+   * into unrelated queries.
+   */
+  const RELEVANCE_FLOOR = 0.2;
+
+  /**
+   * Share of the query's own top score granted to a file a relevant note names.
+   *
+   * Relative, not a fixed constant: observed scores span roughly 4–30 depending
+   * on the query and repo, so any absolute number would be decisive on one query
+   * and invisible on another. Scaling by the top score makes the boost mean the
+   * same thing everywhere — "worth about half of the best hit, weighted by how
+   * well the note matches".
+   *
+   * It is ADDITIVE rather than multiplicative because a multiplier cannot lift a
+   * zero-scoring file, and zero is exactly the case a note is most valuable in:
+   * the ranker found no lexical overlap and a human already knew the answer. The
+   * `max(top, 1)` floor keeps that case working when every score is 0.
+   */
+  const NOTE_BOOST = 0.5;
+
+  /** Path-shaped tokens inside a note, e.g. `src/security/patterns.js`. */
+  const PATH_RE = /\b[\w.@-]+(?:\/[\w.@-]+)+\.[A-Za-z0-9]+\b/g;
+
+  /**
+   * Overlap between a note and a query, as a share of the note's own tokens.
+   *
+   * Normalizing by the note (not the query) keeps a long note from scoring highly
+   * just for being long, and lets a short, pointed note match strongly.
+   *
+   * @returns {number} 0–1
+   */
+  function relevance(noteText, queryTokens) {
+    const noteTokens = tokenize(noteText || '');
+    if (noteTokens.length === 0 || queryTokens.size === 0) return 0;
+    let hits = 0;
+    for (const t of noteTokens) if (queryTokens.has(t)) hits++;
+    return Math.round((hits / noteTokens.length) * 1000) / 1000;
+  }
+
+  /** Repo-relative paths a note mentions. */
+  function pathsIn(noteText) {
+    return [...new Set(String(noteText || '').match(PATH_RE) || [])];
+  }
+
+  /**
+   * Select the notes relevant to a query.
+   *
+   * @param {object[]} notes  entries from `readNotes` (chronological)
+   * @param {string} query
+   * @returns {Array<{text:string, ts:string, branch:string|null, score:number, paths:string[]}>}
+   *          most relevant first; empty when nothing clears the floor
+   */
+  function selectRelevant(notes, query) {
+    if (!Array.isArray(notes) || notes.length === 0 || !query) return [];
+    const queryTokens = new Set(tokenize(query));
+    if (queryTokens.size === 0) return [];
+
+    const recent = notes.slice(-MAX_NOTES);
+    const scored = [];
+    for (const n of recent) {
+      const score = relevance(n && n.text, queryTokens);
+      if (score < RELEVANCE_FLOOR) continue;
+      scored.push({
+        text: n.text,
+        ts: n.ts || '',
+        branch: n.branch || null,
+        score,
+        paths: pathsIn(n.text),
+      });
+    }
+    // Most relevant first; ties broken by recency (later ts wins), then text, so
+    // the order is total and reproducible.
+    scored.sort((a, b) => b.score - a.score || String(b.ts).localeCompare(String(a.ts)) || a.text.localeCompare(b.text));
+    return scored;
+  }
+
+  /**
+   * Re-order ranked results so files named by a relevant note rise.
+   *
+   * Applied AFTER ranking rather than inside `rank()` so the scoring core stays
+   * free of session state and the benchmark harness is unaffected.
+   *
+   * @param {Array<{file:string, score:number}>} ranked
+   * @param {Array<{paths:string[]}>} relevantNotes
+   * @returns {Array} a new array; the input is not mutated
+   */
+  function applyNoteBoost(ranked, relevantNotes) {
+    if (!Array.isArray(ranked) || ranked.length === 0) return ranked;
+    if (!Array.isArray(relevantNotes) || relevantNotes.length === 0) return ranked;
+
+    const named = new Set();
+    for (const n of relevantNotes) for (const p of n.paths || []) named.add(p.replace(/^\.\//, ''));
+    if (named.size === 0) return ranked;
+
+    const matches = (file) => {
+      const f = String(file).replace(/\\/g, '/');
+      for (const p of named) {
+        if (f === p || f.endsWith('/' + p) || p.endsWith('/' + f)) return true;
+      }
+      return false;
+    };
+
+    // Best note relevance per named path, so a strongly-matching note lifts more
+    // than a marginal one.
+    const weightFor = (file) => {
+      let best = 0;
+      for (const n of relevantNotes) {
+        for (const p of (n.paths || [])) {
+          const q = p.replace(/^\.\//, '');
+          const f = String(file).replace(/\\/g, '/');
+          if (f === q || f.endsWith('/' + q) || q.endsWith('/' + f)) {
+            if (n.score > best) best = n.score;
+          }
+        }
+      }
+      return best;
+    };
+
+    const top = ranked.reduce((m, r) => (typeof r.score === 'number' && r.score > m ? r.score : m), 0);
+    const scale = Math.max(top, 1);
+
+    const out = ranked.map((r) => {
+      if (!matches(r.file)) return r;
+      const gain = scale * NOTE_BOOST * weightFor(r.file);
+      return Object.assign({}, r, {
+        score: Math.round((r.score + gain) * 1000) / 1000,
+        signals: Object.assign({}, r.signals, { noteBoost: Math.round(gain * 1000) / 1000 }),
+      });
+    });
+    out.sort((a, b) => b.score - a.score || String(a.file).localeCompare(String(b.file)));
+    return out;
+  }
+
+  /** Render relevant notes as a `## Notes` context section, or '' when there are none. */
+  function formatNotesSection(relevantNotes) {
+    if (!Array.isArray(relevantNotes) || relevantNotes.length === 0) return '';
+    const lines = ['## Notes', '', '_Human-authored notes matching this query (`sigmap note`)._', ''];
+    for (const n of relevantNotes) {
+      const when = String(n.ts).replace('T', ' ').slice(0, 16);
+      const br = n.branch ? ` (${n.branch})` : '';
+      lines.push(`- [${when}${br}] ${n.text}`);
+    }
+    lines.push('');
+    return lines.join('\n');
+  }
+
+  module.exports = {
+    selectRelevant,
+    applyNoteBoost,
+    formatNotesSection,
+    relevance,
+    pathsIn,
+    MAX_NOTES,
+    RELEVANCE_FLOOR,
+    NOTE_BOOST,
+  };
+  
+};
+
 // ── ./src/session/notes ──
 __factories["./src/session/notes"] = function(module, exports) {
   
@@ -28832,6 +29045,20 @@ function isEntryPointFile(filePath) {
  * @param {object} config
  * @returns {number} effective token budget
  */
+/**
+ * True when the project pinned `maxTokens` and auto-scaling replaced it (#783).
+ *
+ * Requires `_userKeys` provenance from `loadConfig`: `config.maxTokens` is the
+ * MERGED value, so comparing it alone cannot tell a pinned 500 from the shipped
+ * default 6000 — which is why the old notice fired on repos that had never set
+ * a budget, claiming a default as "your config".
+ */
+function _pinnedBudgetOverridden(config, effectiveMaxTokens) {
+  if (!config || config.autoMaxTokens === false) return false;
+  if (!Array.isArray(config._userKeys) || !config._userKeys.includes('maxTokens')) return false;
+  return effectiveMaxTokens !== config.maxTokens;
+}
+
 function computeEffectiveMaxTokens(fileEntries, config) {
   if (config.autoMaxTokens === false) return config.maxTokens;
 
@@ -29647,10 +29874,8 @@ function printReport(inputTokens, finalTokens, fileCount, droppedCount, asJson, 
     const budgetLabel = isAutoBudget
       ? `${budgetLimit || 6000} (auto-scaled)`
       : `${budgetLimit || 6000} (fixed)`;
-    if (isAutoBudget && configuredMaxTokens && configuredMaxTokens !== budgetLimit) {
-      console.warn(`[sigmap] note: autoMaxTokens is active — your maxTokens:${configuredMaxTokens} config was overridden by auto-scaled budget (${budgetLimit})`);
-      console.warn(`  to use your value, set "autoMaxTokens": false in gen-context.config.json`);
-    }
+    // The notice now prints once, earlier, on every path (#783) — emitting it
+    // again here would double it under --report.
     console.log(`[sigmap] report:`);
     console.log(`  version         : ${VERSION}`);
     console.log(`  files processed : ${fileCount}`);
@@ -30514,6 +30739,18 @@ function runGenerate(cwd, config, reportMode, reportJson = false) {
     result = { inputTokenTotal, finalTokens, fileCount: beforeCount, droppedCount, coverageResult };
   }
 
+  // Budget-override notice (#783) — on EVERY path, not only under --report.
+  // `autoMaxTokens` defaults to true and silently replaces a pinned budget;
+  // the only trace on a default run was the word "auto-scaled" in the coverage
+  // line. Gated on `_userKeys` so it speaks only about a value the project
+  // actually set: the previous check compared the MERGED maxTokens, so it
+  // announced "your maxTokens:6000 was overridden" in repos that had never
+  // configured a budget at all.
+  if (_pinnedBudgetOverridden(config, effectiveMaxTokens) && !reportJson) {
+    console.warn(`[sigmap] note: autoMaxTokens is active — your maxTokens:${config.maxTokens} config was overridden by auto-scaled budget (${effectiveMaxTokens})`);
+    console.warn(`  to use your value, set "autoMaxTokens": false in gen-context.config.json`);
+  }
+
   if (reportMode || process.argv.includes('--report')) {
     printReport(result.inputTokenTotal, result.finalTokens, result.fileCount, result.droppedCount, reportJson, effectiveMaxTokens, result.coverageResult, config.autoMaxTokens !== false && effectiveMaxTokens !== config.maxTokens, config.maxTokens);
   }
@@ -31157,8 +31394,11 @@ function registerMcp(cwd, scriptPath) {
 // shared with the `gain` dashboard). The old inline MODEL_COSTS table was
 // removed — it disagreed with pricing.js (e.g. gpt-4o at $5 vs $2.50 /Mtok).
 
-function buildMiniContext(ranked, cwd) {
+function buildMiniContext(ranked, cwd, notesSection) {
   const lines = ['# SigMap Query Context', `Generated: ${new Date().toISOString()}`, ''];
+  // Relevant notes lead the context (#776): a human already answered part of
+  // this question, and the agent consuming the file should see that first.
+  if (notesSection) lines.push(notesSection);
   for (const { file, sigs } of ranked) {
     lines.push(`## ${file}`, '```', ...sigs.slice(0, 20), '```', '');
   }
@@ -31401,9 +31641,26 @@ function main() {
       process.exit(1);
     }
     if (!query || query.startsWith('--')) {
-      console.error('[sigmap] Usage: sigmap ask "<query>" [--followup] [--json] [--model <name>]');
+      console.error('[sigmap] Usage: sigmap ask "<query>" [--followup] [--json] [--model <name>] [--top <n>]');
       console.error('  Example: sigmap ask "fix the login bug" --followup');
       process.exit(1);
+    }
+
+    // `--top <n>` (#775) — documented in --help and parsed by `--query` and
+    // `evidence`, but `ask` hardcoded topK: 5 and ignored it, so `--top 2` and
+    // `--top 20` returned byte-identical context. An invalid value is an error
+    // rather than a silent fall back to the default: silently doing something
+    // other than what the flag said is the defect being fixed.
+    let askTopK = 5;
+    const __topIdx = args.indexOf('--top');
+    if (__topIdx !== -1) {
+      const raw = args[__topIdx + 1];
+      const n = Number(raw);
+      if (!raw || raw.startsWith('--') || !Number.isInteger(n) || n < 1) {
+        console.error(`[sigmap] --top requires a positive integer (got: ${raw === undefined ? '<missing>' : raw})`);
+        process.exit(1);
+      }
+      askTopK = n;
     }
 
     const { detectIntent, detectIntents, buildSigIndex, rank } = requireSourceOrBundled('./src/retrieval/ranker');
@@ -31482,7 +31739,26 @@ function main() {
       try { askExpansions = requireSourceOrBundled('./src/retrieval/mined-expansions').loadOrMine(cwd).expansions; } catch (_) {}
     }
 
-    let ranked = rank(query, sigIndex, { topK: 5, weights: intentWeights, cwd, callGraph: askCallGraph, centrality: askCentrality, expansions: askExpansions });
+    // Notes as a retrieval signal (#776). `sigmap note` wrote human-authored
+    // facts that nothing in the retrieval path ever read. A note matching the
+    // query now boosts the files it names and is rendered into the emitted
+    // context. Ranking a WIDER pool first matters: `rank()` slices to topK, so
+    // boosting afterwards could never lift a noted file INTO the selection —
+    // which is the whole point. With no relevant note the pool collapses back
+    // to askTopK and the result is byte-identical to before.
+    let __relevantNotes = [];
+    try {
+      const { readNotes } = requireSourceOrBundled('./src/session/notes');
+      const { selectRelevant } = requireSourceOrBundled('./src/session/note-relevance');
+      __relevantNotes = selectRelevant(readNotes(cwd), query);
+    } catch (_) { __relevantNotes = []; }
+
+    const __poolK = __relevantNotes.length > 0 ? Math.max(askTopK * 4, 25) : askTopK;
+    let ranked = rank(query, sigIndex, { topK: __poolK, weights: intentWeights, cwd, callGraph: askCallGraph, centrality: askCentrality, expansions: askExpansions });
+    if (__relevantNotes.length > 0) {
+      const { applyNoteBoost } = requireSourceOrBundled('./src/session/note-relevance');
+      ranked = applyNoteBoost(ranked, __relevantNotes).slice(0, askTopK);
+    }
 
     // v6.10: Workspace scoping — infer package from query and apply boost
     const workspaces = detectWorkspaces(cwd);
@@ -31539,7 +31815,10 @@ function main() {
     saveSession(cwd, { intent, topFiles: ranked.slice(0, 5).map(r => ({ file: r.file, score: r.score })), query });
     // v6.12: Two-tier output — `--mode index` emits symbol pointers only (bodies via get_lines).
     const indexMode = mode === 'index' || args.includes('--index');
-    const miniCtx = indexMode ? buildIndexContext(ranked, cwd) : buildMiniContext(ranked, cwd);
+    const __notesSection = __relevantNotes.length > 0
+      ? requireSourceOrBundled('./src/session/note-relevance').formatNotesSection(__relevantNotes)
+      : '';
+    const miniCtx = indexMode ? buildIndexContext(ranked, cwd) : buildMiniContext(ranked, cwd, __notesSection);
     const outPath = path.join(cwd, '.context', 'query-context.md');
     fs.mkdirSync(path.dirname(outPath), { recursive: true });
     fs.writeFileSync(outPath, miniCtx, 'utf8');
@@ -31573,6 +31852,28 @@ function main() {
 
     const riskLevel = computeCurrentRisk(cwd);
 
+    // Reproducibility (#775): an `ask` result reported tokens and cost but never
+    // which files it chose, where the cut fell, or a hash of what it emitted —
+    // so the result could not be audited or reproduced from its own output.
+    // The hash covers the written context with the `Generated:` timestamp line
+    // removed, so the same query over the same repo hashes identically.
+    const __selection = (() => {
+      const count = Array.isArray(ranked) ? ranked.length : 0;
+      const last = count > 0 ? ranked[count - 1] : null;
+      const cutoff = last && typeof last.score === 'number' ? Math.round(last.score * 1000) / 1000 : null;
+      // `crypto` is resolved OUTSIDE the guard on purpose: only a missing or
+      // unreadable context file is an expected failure here, and a bare catch
+      // around both would hide a coding error as "unavailable" — the same
+      // silent-failure shape this issue exists to remove.
+      const _crypto = require('crypto');
+      let body = null;
+      try { body = fs.readFileSync(outPath, 'utf8'); } catch (_) {}
+      const hash = body === null
+        ? 'sha256:unavailable'
+        : 'sha256:' + _crypto.createHash('sha256').update(body.replace(/^Generated:.*$/m, '')).digest('hex').slice(0, 12);
+      return { count, cutoff, hash };
+    })();
+
     if (args.includes('--json')) {
       process.stdout.write(JSON.stringify({
         intent, coverage: coveragePct, contextTokens: ctxTok,
@@ -31580,6 +31881,9 @@ function main() {
         pricedModel: __price.model,
         costBasis: 'estimate — counterfactual = full content of ranked files; input tokens only',
         riskLevel, contextPath: path.relative(cwd, outPath),
+        topK: askTopK, selectedFiles: __selection.count, cutoffScore: __selection.cutoff,
+        notes: __relevantNotes.map((n) => ({ text: n.text, score: n.score, paths: n.paths })),
+        contextHash: __selection.hash,
       }) + '\n');
     } else {
       if (coveragePct < 70) {
@@ -31591,12 +31895,17 @@ function main() {
         ` sigmap ask  "${query}"`,
         ` Intent    : ${detectIntents(query).join(', ')}`,
         ` Context   : ${ctxTok.toLocaleString()} tokens  →  ${path.relative(cwd, outPath)}`,
+        ` Selected  : ${__selection.count} of ${sigIndex.size} file(s) (--top ${askTopK})${__selection.cutoff !== null ? ` · cutoff score ${__selection.cutoff}` : ''}`,
+        ` Hash      : ${__selection.hash}`,
+        __relevantNotes.length > 0
+          ? ` Notes     : ${__relevantNotes.length} matching (${__relevantNotes.map((n) => n.text.slice(0, 48)).join(' · ')})`
+          : null,
         ` Coverage  : ${coveragePct}%`,
         ` Risk      : ${riskLevel}`,
         ` Cost      : $${costCtx}/query  (was $${costRaw} · saved ${savings}%)`,
         ` ${' '.repeat(9)} est. @ ${__price.model} $${__price.perMtok}/Mtok input; "was" = full ranked files`,
         bar,
-      ].join('\n'));
+      ].filter(Boolean).join('\n'));
     }
     // gain: capture this query's savings for the `sigmap gain` dashboard.
     try {

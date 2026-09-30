@@ -288,6 +288,7 @@ function loadConfig(cwd) {
     const cfg = deepClone(DEFAULTS);
     const detected = detectAutoSrcDirs(cwd, cfg.exclude);
     if (detected.length > 0) cfg.srcDirs = detected;
+    cfg._userKeys = [];
     return _applyJvmDepth(cfg, cwd, false);
   }
 
@@ -300,6 +301,7 @@ function loadConfig(cwd) {
     const cfg = deepClone(DEFAULTS);
     const detected = detectAutoSrcDirs(cwd, cfg.exclude);
     if (detected.length > 0) cfg.srcDirs = detected;
+    cfg._userKeys = [];
     return _applyJvmDepth(cfg, cwd, false);
   }
 
@@ -352,6 +354,23 @@ function loadConfig(cwd) {
   } else if (Array.isArray(merged.adapters) && !userConfig.outputs) {
     merged.outputs = merged.adapters.filter((a) => ['copilot','claude','cursor','windsurf'].includes(a));
   }
+
+  // Provenance (#783): which keys the project actually set, as opposed to
+  // inheriting from DEFAULTS. Without this, "your maxTokens was overridden"
+  // could not tell a pinned 500 from the shipped default 6000, and the notice
+  // fired on every repo that had never configured a budget at all. The `_`
+  // prefix is the existing convention for a key the merge loops skip, so this
+  // can neither collide with a real key nor trigger the unknown-key warning.
+  // A key set by an `extends` base counts as user-set: the project chose it.
+  const _userKeys = [];
+  for (const src of [baseConfig, userConfig]) {
+    for (const key of Object.keys(src || {})) {
+      if (key.startsWith('_') || key === 'extends') continue;
+      if (!KNOWN_KEYS.has(key)) continue;
+      if (!_userKeys.includes(key)) _userKeys.push(key);
+    }
+  }
+  merged._userKeys = _userKeys;
 
   return _applyJvmDepth(merged, cwd, userConfig.maxDepth !== undefined);
 }
