@@ -94,7 +94,9 @@ sigmap --diagnose-extractors             Run all 21 extractors vs fixtures; show
 sigmap --query "<text>"                  Rank files by relevance to a query
 sigmap --query "<text>" --json           Ranked results as JSON
 sigmap --query "<text>" --top <n>        Limit results to top N files (default 10)
+sigmap --query "<text>" --explain        Per-file score signals, token coverage and near misses
 sigmap ask "<query>"                     Ranked answer with signatures for a question (--json, --top <n>, --mode)
+sigmap ask "<query>" --explain           Diagnose a miss: which tokens matched, why files were demoted
 sigmap plan "<goal>"                     Files to inspect, likely-to-change set, and impact radius (--json)
 sigmap explain <file>                    Why a file is in or out of the generated context (--json)
 sigmap run                               Alias for a bare generate (gen-context run --report, etc.)

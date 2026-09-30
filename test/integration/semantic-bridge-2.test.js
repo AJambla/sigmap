@@ -159,7 +159,10 @@ test('rank(): centrality breaks the tie toward the hub; only score>0 files boost
     ['leaf.js', ['function connectDb()']],
     ['importer1.js', ['function unrelatedStuff()']],
   ]);
-  const on = rank('connect db', index, { topK: 5, cwd: '/p', centrality: c });
+  // includeZeroScore so the unmatched file is still observable: ranked output
+  // drops zero-score rows (#807), and the assertion below is about boost
+  // ELIGIBILITY, not about zero-score files being presented as results.
+  const on = rank('connect db', index, { topK: 5, cwd: '/p', centrality: c, includeZeroScore: true });
   const hub = on.find((r) => r.file === 'hub.js');
   const leaf = on.find((r) => r.file === 'leaf.js');
   const unrelated = on.find((r) => r.file === 'importer1.js');

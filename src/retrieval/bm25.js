@@ -39,9 +39,17 @@ function stem(w) {
   s = s.replace(/ies$/, 'y');
   s = s.replace(/(sses|shes|ches|xes|zes)$/, (m) => m.slice(0, -2));
   s = s.replace(/([^s])s$/, '$1');
+  // Plural folding is the one reduction that must survive an over-strip. The
+  // derivational pass below is aggressive, and when it leaves a stub the guard
+  // used to revert to the RAW input — so `users` went user -> us -> back to
+  // `users`, while `user` went user -> us -> back to `user`, and the two never
+  // unified. A query for "users" therefore scored 0 against `loginUser`, and
+  // `ask "where do users log in"` matched nothing at all.
+  const folded = s;
   s = s.replace(/(ization|izations)$/, 'ize');
   s = s.replace(/(ing|edly|ed|er|ers|ation|ations|ment|ness|ity|ive|able|ible|ize|ise|al)$/, '');
-  return s.length >= 3 ? s : w;
+  if (s.length >= 3) return s;
+  return folded.length >= 3 ? folded : w;
 }
 
 /**

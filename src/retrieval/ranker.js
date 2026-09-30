@@ -19,16 +19,24 @@
 
 const { loadWeights } = require('../learning/weights');
 const { tokenize, STOP_WORDS } = require('./tokenizer');
-const { bm25rank, MODULE_DOC_RE } = require('./bm25');
+const { bm25rank, MODULE_DOC_RE, stem } = require('./bm25');
+const { isTestFile, isMockFile, isGeneratedDir, isDocsFile, isCiFile } = require('../util/file-class');
 
 // ---------------------------------------------------------------------------
 // Default weights
 // ---------------------------------------------------------------------------
 const DEFAULT_WEIGHTS = {
   exactToken: 1.0,       // query token exactly in sig tokens
-  symbolMatch: 0.5,      // bonus if token appears in a function/class name line
+  // symbolMatch ABOVE pathMatch: defining the thing beats mentioning it.
+  // Inverted (0.5 vs 0.8) until #808 — a test file naming the behaviour
+  // repeatedly, or a path that merely contains the token, outscored the
+  // implementation. Raising symbolMatch is the half that carries the fix;
+  // pathMatch stays at 0.8 because a well-organised path is genuinely
+  // informative, and cutting it too (to 0.45) on top of the IDF scaling below
+  // double-suppressed it and cost 4.5pp of hit@5 on the hard corpus.
+  symbolMatch: 0.9,      // bonus if token appears in a function/class name line
   prefixMatch: 0.3,      // partial prefix hit (query token ≥ 4 chars)
-  pathMatch: 0.8,        // query token appears in the file path
+  pathMatch: 0.8,        // query token appears in the file path (scaled by path IDF)
   recencyBoost: 1.5,     // multiplier applied when file is in recencySet
   graphBoost: 0.4,       // additive bonus for 1-hop import neighbors of matching files
 };
@@ -68,9 +76,11 @@ const SIGNAL_BLEND = 0.5;
 
 // Penalty multipliers for negative signals
 const PENALTY_SIGNALS = {
-  testFile:      0.4,    // test/spec/__tests__ in path
+  testFile:      0.4,    // every test convention, via util/file-class
+  mockFile:      0.3,    // mocks/stubs/fakes/fixtures: test scaffolding
   generatedCode: 0.3,    // dist/build/.next in path
-  docsFile:      0.2,    // docs/doc/README in path
+  docsFile:      0.2,    // docs/ dirs AND the root README/CHANGELOG family
+  ciFile:        0.15,   // .github/workflows & friends: indexed, rarely the answer
   nodeModules:   0.0,    // node_modules (zero score)
   dataHolder:    0.3,    // generated POJO/entity: almost entirely accessors
 };
@@ -91,15 +101,17 @@ const DATA_HOLDER_MIN_MEMBERS = 6;
 // test" classifies as debug and never reaches the test branch.
 const WANTS_TESTS = new Set(['test', 'tests', 'spec', 'specs', 'unit', 'integration', 'e2e', 'assertion', 'assert', 'mock', 'fixture', 'coverage', 'testing']);
 const WANTS_DOCS = new Set(['doc', 'docs', 'documentation', 'readme', 'changelog', 'guide', 'tutorial']);
+const WANTS_CI = new Set(['ci', 'cd', 'pipeline', 'pipelines', 'workflow', 'workflows', 'actions', 'jenkins', 'travis', 'circleci', 'buildkite', 'deploy', 'deployment', 'release', 'publish']);
 const WANTS_MODELS = new Set(['entity', 'entities', 'model', 'models', 'pojo', 'dto', 'bean', 'getter', 'getters', 'setter', 'setters', 'accessor', 'accessors', 'field', 'fields', 'column', 'columns', 'schema']);
 
 /** Which penalised categories the query is explicitly asking for. */
 function _queryWants(queryTokens) {
-  const wants = { tests: false, docs: false, models: false };
+  const wants = { tests: false, docs: false, models: false, ci: false };
   for (const t of queryTokens || []) {
     if (WANTS_TESTS.has(t)) wants.tests = true;
     if (WANTS_DOCS.has(t)) wants.docs = true;
     if (WANTS_MODELS.has(t)) wants.models = true;
+    if (WANTS_CI.has(t)) wants.ci = true;
   }
   return wants;
 }
@@ -120,14 +132,25 @@ function _isDataHolder(sigs) {
 function _computePenalty(filePath, wants, sigs) {
   const pathLower = filePath.toLowerCase();
   if (pathLower.includes('node_modules')) return PENALTY_SIGNALS.nodeModules;
+  // Every path category below is classified by `src/util/file-class.js`, the
+  // same predicates the token-budget drop order uses. The ranker previously
+  // inlined weaker copies that recognised only `foo.test.js` and `test/`, so
+  // `routes_test.go` was never penalised (#808).
+  //
   // A penalty must never fire on the very thing the user asked for. Before
   // this, "write tests for the ranker" multiplied every test file by 0.4 —
   // the query and the penalty were pulling in opposite directions.
-  if (/(^|\/)(test|tests|spec|__tests__|e2e)($|\/)/.test(pathLower) || /\.(test|spec)\./.test(pathLower)) {
+  if (isTestFile(filePath)) {
     return (wants && wants.tests) ? 1.0 : PENALTY_SIGNALS.testFile;
   }
-  if (/(^|\/)(dist|build|\.next|\.nuxt|out|\.venv|venv)($|\/)/.test(pathLower)) return PENALTY_SIGNALS.generatedCode;
-  if (/(^|\/)(docs|doc|readme|changelog)($|\/)/.test(pathLower)) {
+  if (isMockFile(filePath)) {
+    return (wants && wants.tests) ? 1.0 : PENALTY_SIGNALS.mockFile;
+  }
+  if (isGeneratedDir(filePath)) return PENALTY_SIGNALS.generatedCode;
+  if (isCiFile(filePath)) {
+    return (wants && wants.ci) ? 1.0 : PENALTY_SIGNALS.ciFile;
+  }
+  if (isDocsFile(filePath)) {
     return (wants && wants.docs) ? 1.0 : PENALTY_SIGNALS.docsFile;
   }
   // Content-based, and last: a data holder is still a real source file, so it
@@ -180,6 +203,80 @@ function _isHub(filePath) {
 }
 
 /**
+ * Per-token corpus coverage: how many indexed files carry each query token in
+ * their signatures, and how many carry it in their path.
+ *
+ * This is the diagnostic that answers "why did my query miss" — a token
+ * matching zero files is the single most useful thing to show, and `ask` had
+ * no way to surface it (#813). Computed only under `opts.explain`, so the
+ * default ranking path pays nothing for it.
+ *
+ * @param {Map<string,string[]>} sigIndex
+ * @param {string[]} queryTokens
+ * @returns {Array<{token: string, sigFiles: number, pathFiles: number}>}
+ */
+function _tokenCoverage(sigIndex, queryTokens) {
+  const uniq = [...new Set(queryTokens)].filter((t) => !STOP_WORDS.has(t));
+  const sigDf = new Map();
+  const pathDf = new Map();
+  // Counted over STEMS, because BM25 — which supplies the base score every
+  // other signal multiplies — matches on stems. Counting raw tokens made this
+  // table report "users matched nothing" on a query BM25 scored 1.24 via
+  // `loginUser`: precisely the confidently-wrong reporting this view exists
+  // to eliminate.
+  const stems = new Map(uniq.map((t) => [t, stem(t)]));
+  for (const [file, sigs] of sigIndex.entries()) {
+    const sigTokens = new Set(tokenize((sigs || []).filter((l) => !MODULE_DOC_RE.test(l)).join(' ')).map(stem));
+    const pathTokens = new Set(tokenize(file).map(stem));
+    for (const t of uniq) {
+      const st = stems.get(t);
+      if (sigTokens.has(st)) sigDf.set(t, (sigDf.get(t) || 0) + 1);
+      if (pathTokens.has(st)) pathDf.set(t, (pathDf.get(t) || 0) + 1);
+    }
+  }
+  return uniq.map((t) => ({ token: t, sigFiles: sigDf.get(t) || 0, pathFiles: pathDf.get(t) || 0 }));
+}
+
+/**
+ * Inverse document frequency of each query token across the corpus's PATH
+ * tokens.
+ *
+ * `pathMatch` was a flat bonus, so a token that happens to equal the project
+ * name lifted every file whose path contains it. On `gin`, "gin" matched the
+ * repo name and pushed `ginS/gins.go` and `.github/workflows/gin.yml` over the
+ * real source (#807). A token present in a large share of paths carries no
+ * discriminating power, which is exactly what IDF encodes — the same intuition
+ * the ranker already applies to signature tokens via BM25, now applied to
+ * paths.
+ *
+ * Normalised to (0, 1] so a maximally rare token earns the full `pathMatch`
+ * weight and a token present in every path earns ~0.
+ *
+ * @param {Map<string,string[]>} sigIndex
+ * @param {string[]} queryTokens
+ * @returns {Map<string, number>} token -> idf multiplier in (0, 1]
+ */
+function _pathIdf(sigIndex, queryTokens) {
+  const idf = new Map();
+  const n = sigIndex.size;
+  if (n === 0) return idf;
+  const uniq = [...new Set(queryTokens)].filter((t) => !STOP_WORDS.has(t));
+  if (uniq.length === 0) return idf;
+
+  const df = new Map();
+  for (const file of sigIndex.keys()) {
+    const pathTokens = new Set(tokenize(file));
+    for (const t of uniq) if (pathTokens.has(t)) df.set(t, (df.get(t) || 0) + 1);
+  }
+  const denom = Math.log(1 + n);
+  for (const t of uniq) {
+    const d = df.get(t) || 0;
+    idf.set(t, denom > 0 ? Math.log(1 + (n - d) / (1 + d)) / denom : 1);
+  }
+  return idf;
+}
+
+/**
  * Score a single file against a query, returning detailed signal breakdown.
  *
  * @param {string}   filePath   - relative file path (e.g. 'src/extractors/python.js')
@@ -188,7 +285,7 @@ function _isHub(filePath) {
  * @param {object}   weights
  * @returns {{ score: number, signals: { exactToken: number, symbolMatch: number, prefixMatch: number, pathMatch: number, penalty: number } }}
  */
-function scoreFile(filePath, sigs, queryTokens, weights, wants) {
+function scoreFile(filePath, sigs, queryTokens, weights, wants, pathIdf) {
   if (!sigs || sigs.length === 0) return { score: 0, signals: { exactToken: 0, symbolMatch: 0, prefixMatch: 0, pathMatch: 0, penalty: 1.0 } };
 
   const w = weights || DEFAULT_WEIGHTS;
@@ -238,10 +335,14 @@ function scoreFile(filePath, sigs, queryTokens, weights, wants) {
       }
     }
 
-    // Path token match
+    // Path token match, scaled by how discriminating the token is across all
+    // indexed paths. A direct caller that passes no index (tests, external
+    // consumers of the exported scoreFile) keeps the unscaled behaviour.
     if (pathTokenSet.has(qt)) {
-      score += w.pathMatch;
-      signals.pathMatch += w.pathMatch;
+      const scale = pathIdf && pathIdf.has(qt) ? pathIdf.get(qt) : 1;
+      const bonus = w.pathMatch * scale;
+      score += bonus;
+      signals.pathMatch += bonus;
     }
   }
 
@@ -265,6 +366,12 @@ function scoreFile(filePath, sigs, queryTokens, weights, wants) {
  * @param {{ forward: Map<string,string[]> }} [opts.graph] - dependency graph for neighbor boost
  * @param {{ forward: Map<string,string[]> }} [opts.callGraph] - file-level call-graph edges
  *        (from buildCallFileGraph) for the opt-in call-neighbor boost
+ * @param {boolean} [opts.includeZeroScore=false] - keep files that scored 0.
+ *        Off by default: a rank is a claim of relevance and 0.00 is the absence
+ *        of one (#807). Multi-stage callers that boost after ranking opt in.
+ * @param {boolean} [opts.explain=false] - attach the `--explain` surfaces
+ *        (nearMiss, tokenCoverage, pathIdf, totalCandidates, indexSize) as
+ *        properties on the returned array.
  * @param {Map<string,number>} [opts.centrality] - absolute file → normalized
  *        centrality (from computeCentrality) for the opt-in centrality blend
  * @returns {{ file: string, score: number, sigs: string[], tokens: number, intent: string, signals: object }[]}
@@ -313,10 +420,12 @@ function rank(query, sigIndex, opts) {
 
   // Two passes: scoreFile's weighted signal needs the max across the corpus to
   // normalise against, so collect first, then combine.
+  const pathIdf = _pathIdf(sigIndex, queryTokens);
+
   const prescored = [];
   let maxSignal = 0;
   for (const [file, sigs] of sigIndex.entries()) {
-    const result = scoreFile(file, sigs, queryTokens, weights, queryWants);
+    const result = scoreFile(file, sigs, queryTokens, weights, queryWants, pathIdf);
     if (result.score > maxSignal) maxSignal = result.score;
     prescored.push({ file, sigs, result });
   }
@@ -485,7 +594,34 @@ function rank(query, sigIndex, opts) {
   }
 
   scored.sort((a, b) => b.score - a.score || a.file.localeCompare(b.file));
-  return scored.slice(0, topK);
+
+  // Zero-score suppression (#807). A rank is a claim of relevance, and 0.00 is
+  // the absence of one — yet `slice(0, topK)` padded the table with whatever
+  // sorted first among the files that matched nothing, so four
+  // `.github/workflows/*.yml` scoring exactly zero were numbered 3-6 of a
+  // routing query. When nothing scores, callers get an empty array and render
+  // "no match" rather than filler.
+  // `includeZeroScore` is for multi-stage callers that apply their OWN boost
+  // after ranking and therefore need the full pool: a session note naming a
+  // file is explicit user evidence, and `applyNoteBoost` is additive, so the
+  // named file must still be present for the note to lift it into the
+  // selection (#776). Those callers filter at their own selection boundary.
+  const keepZero = !!(opts && opts.includeZeroScore);
+  const ranked = keepZero ? scored : scored.filter((e) => e.score > 0);
+  const out = ranked.slice(0, topK);
+
+  // Explain surfaces (#813), attached as ARRAY PROPERTIES so the return value
+  // stays a plain array for every existing caller and `JSON.stringify` output
+  // is byte-identical unless a caller opts in.
+  if (opts && opts.explain) {
+    const nearMissCount = Number.isInteger(opts.nearMiss) && opts.nearMiss > 0 ? opts.nearMiss : 5;
+    out.nearMiss = ranked.slice(topK, topK + nearMissCount);
+    out.tokenCoverage = _tokenCoverage(sigIndex, queryTokens);
+    out.pathIdf = pathIdf;
+    out.totalCandidates = ranked.length;
+    out.indexSize = sigIndex.size;
+  }
+  return out;
 }
 
 /**
@@ -751,6 +887,95 @@ function formatRankJSON(results, query) {
 // Nouns carry an optional plural: `\btest\b` does not match "tests", so
 // "write unit tests for the ranker" matched NO intent at all and fell through
 // to the 'search' default.
+/**
+ * Human-readable reason a file was demoted, or '' when it was not.
+ * Derived from the same predicates that set the multiplier, so the explain
+ * output can never disagree with the score it is explaining.
+ */
+function _penaltyReason(filePath, penalty) {
+  if (!(penalty < 1)) return '';
+  if (String(filePath).toLowerCase().includes('node_modules')) return 'node_modules';
+  if (isTestFile(filePath)) return 'test file';
+  if (isMockFile(filePath)) return 'mock/fixture';
+  if (isGeneratedDir(filePath)) return 'build output';
+  if (isCiFile(filePath)) return 'CI definition';
+  if (isDocsFile(filePath)) return 'documentation';
+  return 'data holder (accessors only)';
+}
+
+/**
+ * Render the `--explain` diagnostic view (#813).
+ *
+ * Three sections, in the order a miss is actually diagnosed:
+ *   1. per-token corpus coverage — a token matching zero files is the answer
+ *      to "why did my query miss" far more often than anything else;
+ *   2. the selected files with every contributing signal and, when demoted,
+ *      the reason;
+ *   3. near-miss candidates that scored above zero but below the cutoff.
+ *
+ * Opt-in: `rank()` only attaches these surfaces under `opts.explain`, so
+ * default output is untouched.
+ *
+ * @param {Array} results - the array returned by rank(query, index, { explain: true })
+ * @param {string} query
+ * @returns {string}
+ */
+function formatExplainTable(results, query) {
+  const lines = [`## Explain: ${query}`, ''];
+  const coverage = (results && results.tokenCoverage) || [];
+  const idf = (results && results.pathIdf) || new Map();
+
+  if (coverage.length > 0) {
+    const dead = coverage.filter((c) => c.sigFiles === 0 && c.pathFiles === 0);
+    lines.push(`Index: ${results.indexSize || 0} files · ${results.totalCandidates || 0} scored above zero`);
+    lines.push('');
+    lines.push('| Query token | Files w/ token in sigs | in path | Path IDF |');
+    lines.push('|-------------|------------------------|---------|----------|');
+    for (const c of coverage) {
+      const v = idf.has(c.token) ? idf.get(c.token).toFixed(2) : '1.00';
+      lines.push(`| ${c.token} | ${c.sigFiles} | ${c.pathFiles} | ${v} |`);
+    }
+    lines.push('');
+    if (dead.length > 0) {
+      lines.push(`Matched nothing: ${dead.map((d) => d.token).join(', ')} — these tokens contributed no score.`);
+      lines.push('');
+    }
+  }
+
+  if (!results || results.length === 0) {
+    lines.push('No file scored above zero for this query.');
+    lines.push('');
+    return lines.join('\n');
+  }
+
+  lines.push('### Selected');
+  lines.push('');
+  lines.push('| Rank | File | Score | exact | symbol | prefix | path | bm25 | graph | call | central | learned | penalty | demoted for |');
+  lines.push('|------|------|-------|-------|--------|--------|------|------|-------|------|---------|---------|---------|-------------|');
+  results.forEach((r, i) => {
+    const g = r.signals || {};
+    const n = (v, d) => (typeof v === 'number' ? v : (d === undefined ? 0 : d)).toFixed(2);
+    lines.push(`| ${i + 1} | ${r.file} | ${r.score.toFixed(2)} | ${n(g.exactToken)} | ${n(g.symbolMatch)} | ${n(g.prefixMatch)} | ${n(g.pathMatch)} | ${n(g.bm25)} | ${n(g.graphBoost)} | ${n(g.callGraphBoost)} | ${n(g.centrality)} | ${n(g.learnedWeights, 1)} | ${n(g.penalty, 1)} | ${_penaltyReason(r.file, g.penalty === undefined ? 1 : g.penalty) || '—'} |`);
+  });
+  lines.push('');
+
+  const nearMiss = (results && results.nearMiss) || [];
+  if (nearMiss.length > 0) {
+    const cutoff = results[results.length - 1].score;
+    lines.push(`### Near misses (below the cutoff of ${cutoff.toFixed(2)})`);
+    lines.push('');
+    lines.push('| File | Score | penalty | demoted for |');
+    lines.push('|------|-------|---------|-------------|');
+    for (const r of nearMiss) {
+      const pen = r.signals && r.signals.penalty !== undefined ? r.signals.penalty : 1;
+      lines.push(`| ${r.file} | ${r.score.toFixed(2)} | ${pen.toFixed(2)} | ${_penaltyReason(r.file, pen) || '—'} |`);
+    }
+    lines.push('');
+  }
+
+  return lines.join('\n');
+}
+
 const INTENT_PATTERNS = {
   debug:    /\b(bugs?|fix(es|ed)?|errors?|crash(es)?|exceptions?|broken|failing|failures?|issues?|problems?|regressions?)\b/i,
   explain:  /\b(explain|how does|what is|understand|overview|architecture|describe|walk me|teach)\b/i,
@@ -797,4 +1022,4 @@ function detectIntent(query) {
   return detectIntents(query)[0];
 }
 
-module.exports = { rank, buildSigIndex, scoreFile, _queryWants, _isDataHolder, detectIntents, formatRankTable, formatRankJSON, DEFAULT_WEIGHTS, GRAPH_BOOST_AMOUNTS, CENTRALITY_BLEND_WEIGHT, detectIntent };
+module.exports = { rank, buildSigIndex, scoreFile, _queryWants, _isDataHolder, detectIntents, formatRankTable, formatRankJSON, formatExplainTable, DEFAULT_WEIGHTS, GRAPH_BOOST_AMOUNTS, CENTRALITY_BLEND_WEIGHT, detectIntent };

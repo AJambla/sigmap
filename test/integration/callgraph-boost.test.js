@@ -88,7 +88,11 @@ test('rank(): callGraph boosts the call-connected sibling; without it, no boost'
   withGoProject((dir) => {
     const index = buildSigIndex(dir);
     const query = 'run server port';
-    const plain = rank(query, index, { topK: 5, cwd: dir });
+    // includeZeroScore: util.go matches nothing in this query on its own — the
+    // whole point is that only the call edge reaches it. Ranked output now
+    // suppresses zero-score rows (#807), so the unboosted control has to opt
+    // into the full pool to observe it at all.
+    const plain = rank(query, index, { topK: 5, cwd: dir, includeZeroScore: true });
     const utilPlain = plain.find((r) => r.file.endsWith('util.go'));
     assert.ok(utilPlain, 'util.go missing from results');
     assert.strictEqual(utilPlain.signals.callGraphBoost, undefined, 'boost leaked into default path');
