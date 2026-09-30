@@ -38,6 +38,9 @@ To ensure proper attribution:
 
 We welcome contributions! See [Contributing](./docs/CONTRIBUTING.md) for guidelines.
 
+### Recent Contributors (v8.54.0)
+- **@manojmallick** — feat(judge): `judge` was the last grounding surface whose verdict rested on raw English word-overlap. It now shares the ranker's tokenizer, so `buildEvidencePack` and `build evidence pack` no longer score 0.750 vs 0.333, and ordinary prose can neither inflate nor dilute a grounded answer — the reported case goes 0.212/fail to 0.643/pass with every claim still grounded. Hedging phrases became warnings instead of a verdict, "nothing to judge" got its own `inconclusive` verdict and exit code instead of being filed as a genuine failure, and `judge` learned to read stdin, default its own `--context`, warn on stale context, and print the per-claim table it previously hid in `--json` (#795, #779, #765, #766, #780, PR #796)
+
 ### Recent Contributors (v8.53.0)
 - **@manojmallick** — feat(usage): four commands published a token-reduction figure and no two were comparable, because `tracking` defaults to false so the store `--health`, `history` and the dashboard read is never written, while `recordUsage` writes a different one unconditionally. One read path now normalises both, and every figure names its population — 524 generate runs is not 2,047 operations is not a session window (#773, PR #793)
 

@@ -68,7 +68,7 @@ If you are new to the product, start with the workflow pages first:
 | `conventions --update` | Incremental rescan — refresh `.context/conventions.json` only when source files changed (else "up to date") |
 | `scaffold <name>` | Propose a convention-matched structure (filename, export style, test file) for a new module — refuses below the confidence floor |
 | `plan "<goal>"` | Analyze change impact and plan modifications — returns files grouped by confidence |
-| `judge --response <f> --context <f>` | Rule-based groundedness scoring for LLM responses |
+| `judge [--response <f>\|-] [--context <f>]` | Rule-based groundedness scoring for LLM responses (stdin ok; `--context` defaults to the generated one) |
 | `verify-plan <plan.md>` | Check a plan against the live index before execution — referenced files/symbols exist, blast radius, scope (`--json`; stdin via `-`) |
 | `verify <answer.md>` | **Flagship** grounding guard — flag fake files, test files, imports, symbols, and npm scripts in an AI answer (deterministic, offline). Short alias of `verify-ai-output` |
 | `verify-ai-output <answer.md>` | Full command name for `verify` — identical behaviour, flags, and exit codes |
@@ -419,7 +419,8 @@ Rule-based groundedness scoring for LLM responses. Combines token overlap with *
 
 ```bash
 sigmap judge --response response.txt --context .context/copilot-instructions.md
-sigmap judge --response response.txt --context .context/copilot-instructions.md --json
+sigmap judge --response response.txt --json
+claude -p "how does ranking work?" | sigmap judge      # stdin; --context defaults
 sigmap judge --response response.txt --context .context/query-context.md --learn
 ```
 
@@ -429,9 +430,103 @@ sigmap judge --response response.txt --context .context/query-context.md --learn
  Score     : 0.72
  Verdict   : pass
  Confidence: high (2 claim(s) checked · structural pass ran · score margin 0.47)
+ Context   : .github/copilot-instructions.md (default — no --context given)
  Claims    : 2/2 grounded (1 context, 1 repo)
  Reasons   : none
 ────────────────────────────────────────────
+```
+
+### Scoring technical content, not English (v8.54.0)
+
+`judge` scores how much of an answer's **technical** vocabulary the context
+grounds — not how much of the answer is English. It shares the ranker's
+tokenizer (`src/retrieval/bm25.js`), so camelCase and snake_case are split and
+stemmed, and ordinary-English vocabulary is dropped from both sides before
+scoring.
+
+Before v8.54.0 the score was a raw word-overlap ratio over a 40-word stoplist
+with no identifier splitting, which produced two reproducible false failures:
+
+- **Prose diluted a grounded answer.** An answer whose every claim was grounded
+  scored `0.212` and failed because it contained ordinary English. The same
+  answer now scores `0.643` and passes.
+- **Identifiers written as prose were invisible.** `buildEvidencePack` scored
+  `0.750` while `build evidence pack` — the same fact — scored `0.333`. Both
+  now score identically.
+
+The `--learn` band defaults (`learnBoostAbove` / `learnPenalizeBelow`) are
+unchanged: they still separate the measured 80%/30% grounded mixtures under the
+new scorer.
+
+### Warnings vs. reasons (v8.54.0)
+
+Hedging phrases (`typically,`, `in general`, `generally speaking`, …) are a
+**style** signal, never a grounding one. They are reported in `warnings[]` and
+**never flip the verdict**. Previously a fully-grounded answer failed with exit
+1, *at `high` confidence*, solely because it contained the word "typically,".
+
+```
+ Score     : 0.75
+ Verdict   : pass
+ Confidence: medium (1 claim(s) checked · structural pass ran · score margin 0.5 · generic phrasing present)
+ Claims    : 1/1 grounded (1 context, 0 repo)
+ Reasons   : none
+ Warnings  :
+   response contains generic phrase: "typically,"
+```
+
+Markers are matched on word boundaries, so `in general` no longer fires inside
+`in general-purpose`. A warning caps `confidence` below `high` — the judge never
+reports high confidence in a result a stylistic signal had any part in.
+
+### The `inconclusive` verdict (v8.54.0)
+
+"Nothing to judge" is not the same as "wrong". An empty response, an empty
+context, or a response with no scoreable tokens verdicts `inconclusive` and
+**exits 2**, naming the file on stderr. `--learn` never learns from it.
+Previously an empty response file was scored as a genuine `fail` — the same
+signal in CI that a confidently hallucinated answer produces.
+
+```
+$ : > empty.md && sigmap judge --response empty.md --context ctx.md
+[sigmap] response is empty: empty.md — nothing to judge
+ Verdict   : inconclusive
+ Confidence: low (nothing to judge)
+$ echo $?
+2
+```
+
+`pass` = `0` and `fail` = `1` are **unchanged**, so existing CI gates keep
+working.
+
+### Stdin, default context, and stale ground (v8.54.0)
+
+`--response` accepts `-` and a bare pipe, so a model's output can be judged
+without writing it to disk first. `--context` is optional: it resolves the
+context this repo already generated — the same adapter-output list
+[`doctor`](#doctor) checks — and names which file it used.
+
+`judge` also compares that file's age against the sources it describes, and
+warns when the answer is being judged against ground that has moved:
+
+```
+ Warnings  :
+   context is 3.2 day(s) older than src/retrieval/ranker.js — the answer is being judged against stale ground
+```
+
+### Per-claim output (v8.54.0)
+
+The checked-claims table existed only in `--json`, so on a failure the reader
+could not see which claim was checked or how it resolved without re-running the
+command. It now prints on `fail` and `inconclusive`:
+
+```
+ Claims    : 1/2 grounded (1 context, 0 repo)
+ Checked   :
+   ✗ symbol computeQuantumScore() — not grounded
+   ✓ file   src/security/scanner.js — context
+ Reasons   :
+   symbol claim not grounded in context or repo index: computeQuantumScore()
 ```
 
 Since **v8.49.0 (J4)** the judge explains itself: a deterministic `confidence` level (`high` — structural pass ran, every claim grounded, comfortable score margin; `medium` — claims checked lexically only or a thin margin; `low` — no concrete claims, the verdict rests on word overlap alone) with an auditable `basis`, and a per-claim `checked` report stating each claim's grounding route (`"context"` — the context quotes it; `"repo"` — the structural pass cleared it; `null` — ungrounded). JSON output (`--json`) carries `score`, `reasons`, the claim report, `confidence`, and a `verdict` field that drives the exit code:
@@ -446,13 +541,19 @@ With `--learn`, judge becomes an opt-in feedback loop. It reads file headings fr
 
 | Option | Description |
 |--------|-------------|
-| `--response <file>` | Path to the LLM response text file (required) |
-| `--context <file>` | Path to the context/source file (required) |
+| `--response <file\|->` | Path to the LLM response text file, or `-` for stdin. Omit it entirely and `judge` reads a bare pipe |
+| `--context <file>` | Path to the context/source file. **Optional since v8.54.0** — defaults to the repo's generated context, and the output names which file it used |
 | `--threshold <n>` | Minimum score to pass (default: `0.25`; overrides `judge.threshold` from config) |
 | `--learn` | Apply opt-in learned boosts/penalties to files referenced by context headings |
 | `--json` | Emit JSON instead of human-readable output |
 
-Exit code `0` = pass, `1` = fail. Use in CI to gate on response quality.
+| Exit code | Verdict | Meaning |
+|---|---|---|
+| `0` | `pass` | Score clears the threshold and every claim is grounded |
+| `1` | `fail` | Below threshold, or a claim nothing grounds — also used for usage errors |
+| `2` | `inconclusive` | Nothing to judge: empty response, empty context, or no scoreable tokens |
+
+`0`/`1` are unchanged from earlier versions, so existing CI gates keep working.
 
 ---
 
@@ -1609,7 +1710,7 @@ sigmap bench --submit --json
  SigMap Community Benchmark Submission
 ────────────────────────────────────────────────────────
  SigMap version : 8.51.2
- Benchmark ID   : sigmap-v8.53-main
+ Benchmark ID   : sigmap-v8.54-main
  Submitted      : 2026-09-13
 ────────────────────────────────────────────────────────
  Canonical metrics (official release):

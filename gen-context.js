@@ -17921,6 +17921,144 @@ __factories["./src/init/creation-workflow"] = function(module, exports) {
   
 };
 
+// ── ./src/judge/context-source ──
+__factories["./src/judge/context-source"] = function(module, exports) {
+  
+  /**
+   * Context-file resolution and freshness for `sigmap judge` (#780).
+   *
+   * Two gaps this closes. First, `--context` was mandatory, so the most common
+   * case — judge an answer against the context this repo just generated — still
+   * meant typing the adapter's output path. Second, nothing ever compared that
+   * file's age against the sources it describes, so an answer could be judged
+   * against a context generated weeks and hundreds of commits ago with no hint
+   * that the ground had moved.
+   *
+   * Zero dependencies, deterministic, filesystem-only.
+   */
+
+  const fs = require('fs');
+  const path = require('path');
+
+  /**
+   * Generated context files, in the order `judge` prefers them. Mirrors the list
+   * `sigmap doctor` checks, so both commands agree on what "the repo's generated
+   * context" means.
+   */
+  const ADAPTER_OUTPUTS = [
+    ['.github', 'copilot-instructions.md'],
+    ['CLAUDE.md'],
+    ['AGENTS.md'],
+    ['.cursorrules'],
+    ['.windsurfrules'],
+    ['.github', 'openai-context.md'],
+    ['.github', 'gemini-context.md'],
+    ['llm-full.txt'],
+    ['llm.txt'],
+  ];
+
+  const EXCLUDE_DIRS = new Set([
+    'node_modules', '.git', 'dist', 'build', 'out', '__pycache__',
+    '.next', 'coverage', 'target', 'vendor', '.context',
+  ]);
+
+  /**
+   * The repo's generated context file, or null when none has been generated.
+   *
+   * @param {string} cwd
+   * @returns {string|null} absolute path
+   */
+  function resolveContextFile(cwd) {
+    for (const parts of ADAPTER_OUTPUTS) {
+      const p = path.join(cwd, ...parts);
+      try { if (fs.statSync(p).isFile()) return p; } catch (_) {}
+    }
+    return null;
+  }
+
+  /**
+   * Newest source file under `srcDirs`, by mtime.
+   *
+   * @returns {{ file: string, mtimeMs: number }|null}
+   */
+  function _newestSource(cwd, srcDirs, config) {
+    const { CODE_EXTS } = __require('./src/analysis/coverage-score');
+    const exclude = new Set(EXCLUDE_DIRS);
+    if (config && Array.isArray(config.exclude)) for (const x of config.exclude) exclude.add(String(x));
+
+    let newest = null;
+    let seen = 0;
+    const walk = (dir, depth) => {
+      if (depth > 8 || seen > 5000) return;
+      let entries;
+      try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return; }
+      for (const e of entries) {
+        if (exclude.has(e.name)) continue;
+        const full = path.join(dir, e.name);
+        if (e.isDirectory()) walk(full, depth + 1);
+        else if (e.isFile() && CODE_EXTS.has(path.extname(e.name).toLowerCase())) {
+          seen++;
+          try {
+            const m = fs.statSync(full).mtimeMs;
+            if (!newest || m > newest.mtimeMs) newest = { file: full, mtimeMs: m };
+          } catch (_) {}
+        }
+      }
+    };
+    for (const d of srcDirs || []) {
+      const abs = path.isAbsolute(d) ? d : path.join(cwd, d);
+      if (fs.existsSync(abs)) walk(abs, 0);
+    }
+    return newest;
+  }
+
+  /**
+   * Whether a context file is older than the sources it describes.
+   *
+   * @param {string} contextFile absolute path to the context file
+   * @param {string} cwd
+   * @param {object} [config] loaded sigmap config (reads `srcDirs`, `exclude`)
+   * @returns {{ stale: boolean, ageHours: number, newest: string }|null} null when
+   *   freshness cannot be established (unreadable context, no source files found)
+   */
+  function contextStaleness(contextFile, cwd, config) {
+    let ctxMtime;
+    try { ctxMtime = fs.statSync(contextFile).mtimeMs; } catch (_) { return null; }
+
+    const srcDirs = (config && Array.isArray(config.srcDirs) && config.srcDirs.length)
+      ? config.srcDirs
+      : ['src', 'lib', 'app'];
+    const newest = _newestSource(cwd, srcDirs, config);
+    if (!newest) return null;
+
+    const gapMs = newest.mtimeMs - ctxMtime;
+    return {
+      stale: gapMs > 0,
+      gapMs: Math.max(0, Math.round(gapMs)),
+      ageHours: Math.round((gapMs / 3600000) * 10) / 10,
+      newest: path.relative(cwd, newest.file) || newest.file,
+    };
+  }
+
+  /** Largest sensible unit for a gap, so a sub-hour drift never prints "0 hour(s)". */
+  function _formatGap(ms) {
+    const minutes = ms / 60000;
+    if (minutes < 60) return `${Math.max(1, Math.round(minutes))} minute(s)`;
+    const hours = minutes / 60;
+    if (hours < 24) return `${Math.round(hours * 10) / 10} hour(s)`;
+    return `${Math.round((hours / 24) * 10) / 10} day(s)`;
+  }
+
+  /** Human one-liner for a stale context, or null when it is fresh. */
+  function stalenessWarning(staleness) {
+    if (!staleness || !staleness.stale) return null;
+    return `context is ${_formatGap(staleness.gapMs)} older than ${staleness.newest} — the answer is being judged against stale ground`;
+  }
+
+  module.exports = { resolveContextFile, contextStaleness, stalenessWarning, ADAPTER_OUTPUTS };
+  
+};
+
 // ── ./src/judge/judge-engine ──
 __factories["./src/judge/judge-engine"] = function(module, exports) {
   
@@ -17928,23 +18066,81 @@ __factories["./src/judge/judge-engine"] = function(module, exports) {
   const path = require('path');
   const { boostFiles, normalizeFile, penalizeFiles } = __require('./src/learning/weights');
   const parsers = __require('./src/verify/parsers');
+  const { tokenize: rankTokenize, stem } = __require('./src/retrieval/bm25');
 
-  const STOP = new Set([
-    'the','a','an','in','on','at','to','of','for','and','or','but',
-    'is','are','was','were','be','been','being','have','has','had',
-    'do','does','did','will','would','could','should','may','might',
-    'shall','can','not','with','from','by','as','this','that','it',
-  ]);
+  /**
+   * Ordinary-English vocabulary (#779).
+   *
+   * The judge scores how much of an answer's *technical* content the context
+   * grounds — not how much of the answer is English. Before this list existed,
+   * `groundedness` was a raw word-overlap ratio, so five words of hedging prose
+   * dropped a fully-grounded answer below the threshold and failed it. Filler is
+   * removed from BOTH sides, so it can neither inflate nor dilute the score.
+   *
+   * Deliberately excludes words that name things in a repo (`value`, `type`,
+   * `error`, `state`, `class`, `result`, `case`, `file`, `path`, `key`, `index`):
+   * dropping those would hide real vocabulary. Entries are stemmed at load with
+   * the ranker's own stemmer, so surface forms match after tokenization.
+   */
+  const PROSE_WORDS = (
+    // pronouns, determiners, quantifiers
+    'i you we they he she it me us them him her my your our their his hers its ' +
+    'this that these those which who whom whose what there here any some all both ' +
+    'each every either neither many much few several other another same such own ' +
+    'most more less least enough none nothing something anything everything ' +
+    // auxiliaries and modals
+    'am is are was were be been being have has had having do does did doing ' +
+    'will would shall should can could may might must ought ' +
+    // conjunctions, prepositions, discourse connectives
+    'and or but if then else because since while when where whether though ' +
+    'although unless until after before during about above below over under ' +
+    'between among through across into onto upon within without along around ' +
+    'beside behind beyond toward towards per via than so yet nor also too only ' +
+    'just even still already again once ever never always often sometimes ' +
+    'however therefore thus hence moreover furthermore additionally instead ' +
+    'otherwise meanwhile overall indeed anyway rather ' +
+    // hedges and intensifiers — the vocabulary of ungrounded prose
+    'usually typically generally normally commonly probably possibly perhaps ' +
+    'maybe likely unlikely actually really quite very fairly somewhat mostly ' +
+    'largely simply basically essentially effectively clearly obviously ' +
+    'certainly definitely particularly specifically especially approximately ' +
+    'roughly slightly nearly almost ' +
+    // generic verbs that carry no repo signal
+    'look see make take give come want need know think say tell find use go ' +
+    'put keep let help try seem become live decide mean work start happen ' +
+    'consider note show tend appear allow provide ensure avoid prefer choose ' +
+    'mention describe explain suggest recommend ' +
+    // generic nouns and adjectives
+    'thing way time place part kind sort lot bit point fact example reason ' +
+    'problem question good bad better best worse worst big small large long ' +
+    'short high low old first last next previous different important useful ' +
+    'helpful easy hard difficult simple complex complicated general specific ' +
+    'common possible sure able right wrong true false yes'
+  ).split(/\s+/).filter(Boolean);
 
-  function tokenize(text) {
-    return (text || '').toLowerCase().match(/\b[a-z][a-z0-9_]{2,}\b/g) || [];
+  const PROSE_STOP = new Set(PROSE_WORDS.map(stem));
+
+  /**
+   * The tokens a groundedness score is computed over.
+   *
+   * Uses the ranker's tokenizer (`src/retrieval/bm25.js`) so the judge and the
+   * retrieval side agree on what a token is: camelCase and snake_case are split
+   * and stemmed, which is why `buildEvidencePack` and `build evidence pack` now
+   * score the same. The judge's own ad-hoc `/\b[a-z][a-z0-9_]{2,}\b/` regex did
+   * neither, so a bare identifier written out as prose was invisible to it.
+   *
+   * @param {string} text
+   * @returns {string[]}
+   */
+  function scoreTokens(text) {
+    return rankTokenize(text).filter((t) => !PROSE_STOP.has(t));
   }
 
   function groundedness(response, context) {
     if (!response || !context) return 0;
-    const ctxTokens = new Set(tokenize(context).filter((t) => !STOP.has(t)));
+    const ctxTokens = new Set(scoreTokens(context));
     if (ctxTokens.size === 0) return 0;
-    const respTokens = tokenize(response).filter((t) => !STOP.has(t));
+    const respTokens = scoreTokens(response);
     if (respTokens.length === 0) return 0;
     const matched = respTokens.filter((t) => ctxTokens.has(t));
     return parseFloat((matched.length / respTokens.length).toFixed(3));
@@ -18051,6 +18247,13 @@ __factories["./src/judge/judge-engine"] = function(module, exports) {
     };
   }
 
+  /**
+   * Hedging phrases that signal an answer is reasoning from general knowledge
+   * rather than from the context. These are a *style* signal, never a grounding
+   * one (#765): before this change a fully-grounded answer failed — exit 1, and
+   * reported at `high` confidence — solely because it contained the word
+   * "typically,". They are now reported as warnings and never flip the verdict.
+   */
   const GENERIC_MARKERS = [
     'however, based on my knowledge',
     'generally speaking',
@@ -18059,6 +18262,18 @@ __factories["./src/judge/judge-engine"] = function(module, exports) {
     'usually,',
     'as a general rule',
   ];
+
+  /**
+   * Word-boundary matcher for a generic marker.
+   *
+   * A plain `includes()` matched `in general` inside `in general-purpose code`
+   * (#765). The trailing lookahead rejects a following word character *or*
+   * hyphen, so hyphenated compounds no longer trip the check, while markers that
+   * end in punctuation (`typically,`) still match.
+   */
+  function markerRegex(marker) {
+    return new RegExp(`\\b${marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`, 'i');
+  }
 
   function extractContextFiles(context, cwd) {
     if (!context || !cwd) return [];
@@ -18084,21 +18299,60 @@ __factories["./src/judge/judge-engine"] = function(module, exports) {
     return files;
   }
 
+  /** Empty claim report, for a verdict reached without scoring anything. */
+  function emptyClaims() {
+    return { total: 0, grounded: 0, ungrounded: [], structural: false, checked: [], coverage: 0 };
+  }
+
+  /**
+   * Why this input cannot be judged at all, or null when it can (#766).
+   *
+   * `pass`/`fail` is a judgement about an answer. An empty response file, an
+   * empty context, or an answer with no scoreable vocabulary is not a wrong
+   * answer — it is a missing one, and filing it as `fail` gives CI the same
+   * signal a confidently hallucinated answer produces.
+   */
+  function inconclusiveReason(response, context) {
+    if (!response || !response.trim()) return 'response is empty — nothing to judge';
+    if (!context || !context.trim()) return 'context is empty — nothing to judge against';
+    if (scoreTokens(context).length === 0) return 'context has no scoreable tokens — nothing to judge against';
+    if (scoreTokens(response).length === 0) return 'response has no scoreable tokens — nothing to check against the context';
+    return null;
+  }
+
   function judge(response, context, opts = {}) {
-    const score = groundedness(response, context);
     const threshold = opts.threshold !== undefined ? opts.threshold : 0.25;
+
+    // Inconclusive short-circuit (#766): nothing was scored, so there is no
+    // verdict to reach and no weights feedback to apply.
+    const blocked = inconclusiveReason(response, context);
+    if (blocked) {
+      const result = {
+        score: 0,
+        verdict: 'inconclusive',
+        reasons: [blocked],
+        warnings: [],
+        claims: emptyClaims(),
+        confidence: { level: 'low', basis: ['nothing to judge'] },
+      };
+      if (opts.learn) {
+        result.learning = { applied: false, action: 'none', files: [], reason: 'verdict inconclusive — no signal to learn from' };
+      }
+      return result;
+    }
+
+    const score = groundedness(response, context);
     const reasons = [];
 
     if (score < threshold) {
       reasons.push(`score ${score} is below threshold ${threshold} — response may not be grounded in context`);
     }
 
-    if (response) {
-      const lower = response.toLowerCase();
-      for (const m of GENERIC_MARKERS) {
-        if (lower.includes(m)) {
-          reasons.push(`response contains generic phrase: "${m}"`);
-        }
+    // Style warnings (#765) — reported, never a verdict input.
+    const warnings = [];
+    for (const m of GENERIC_MARKERS) {
+      if (markerRegex(m).test(response)) {
+        warnings.push(`response contains generic phrase: "${m}"`);
       }
     }
 
@@ -18112,7 +18366,7 @@ __factories["./src/judge/judge-engine"] = function(module, exports) {
       reasons.push(`${c.kind} claim not grounded in ${where}: ${c.value}${c.kind === 'symbol' ? '()' : ''}`);
     }
 
-    const verdict = score >= threshold && reasons.length === 0 ? 'pass' : 'fail';
+    const verdict = score >= threshold && claims.ungrounded.length === 0 ? 'pass' : 'fail';
 
     // Confidence in the verdict (J4, #653) — a deterministic level with an
     // auditable basis, aligned with the Evidence Pack's confidence vocabulary:
@@ -18131,9 +18385,16 @@ __factories["./src/judge/judge-engine"] = function(module, exports) {
     if (claims.structural && claims.total > 0 && claims.ungrounded.length === 0 && margin >= 0.15) level = 'high';
     else if (claims.total > 0 || margin >= 0.15) level = 'medium';
     else level = 'low';
+    // Hedging language is unverifiable by construction, so it caps confidence
+    // rather than flipping the verdict (#765) — the judge must never report
+    // `high` confidence in a result a stylistic signal had any part in.
+    if (warnings.length && level === 'high') {
+      level = 'medium';
+      basis.push('generic phrasing present');
+    }
     const confidence = { level, basis };
 
-    const result = { score, verdict, reasons, claims, confidence };
+    const result = { score, verdict, reasons, warnings, claims, confidence };
 
     if (opts.learn) {
       const learning = {
@@ -18177,7 +18438,7 @@ __factories["./src/judge/judge-engine"] = function(module, exports) {
     return result;
   }
 
-  module.exports = { groundedness, claimGrounding, judge };
+  module.exports = { groundedness, claimGrounding, judge, scoreTokens, markerRegex, GENERIC_MARKERS, PROSE_STOP };
   
 };
 
@@ -21063,7 +21324,7 @@ __factories["./src/mcp/server"] = function(module, exports) {
 
   const SERVER_INFO = {
     name: 'sigmap',
-    version: '8.53.0',
+    version: '8.54.0',
     description: 'SigMap MCP server — code signatures on demand',
   };
 
@@ -27907,7 +28168,7 @@ function __tryGit(args, opts = {}) {
   catch (_) { return ''; }
 }
 
-const VERSION = '8.53.0';
+const VERSION = '8.54.0';
 const MARKER = '\n\n## Auto-generated signatures\n<!-- Updated by gen-context.js -->\n';
 
 function requireSourceOrBundled(key) {
@@ -30545,7 +30806,7 @@ Usage:
   ${cmd} verify <answer.md> --report       Write a standalone HTML report (red/amber/green)
   ${cmd} verify-ai-output <answer.md>      Full command name for ${cmd} verify
   ${cmd} validate                          Check config + index coverage; --query "<text>" also probes retrieval (--json)
-  ${cmd} judge --response <f> --context <f>   Score an AI answer's groundedness (--json, --threshold <n>, --learn)
+  ${cmd} judge [--response <f>|-] [--context <f>]  Score an AI answer's groundedness (stdin ok; --json, --threshold <n>, --learn)
   ${cmd} conventions                       Extract repo file-naming/export/test conventions (--conflicts, --inject, --report, --fix)
   ${cmd} scaffold "<name>"                 Propose a convention-matched file/dir scaffold (--ext, --threshold, --force, --json)
   ${cmd} verify-plan <plan.md|->           Check a plan vs the live index — files/symbols exist, blast radius, scope (--json)
@@ -32085,31 +32346,84 @@ function main() {
 
   // v5.0: `sigmap judge --response <file> --context <file>` — groundedness scoring
   if (args[0] === 'judge') {
+    const USAGE = '[sigmap] Usage: sigmap judge [--response <file>|-] [--context <file>] [--json] [--threshold 0.25] [--learn]';
     const respIdx = args.indexOf('--response');
     const ctxIdx  = args.indexOf('--context');
+    const _ctxSource = requireSourceOrBundled('./src/judge/context-source');
+    // Exit codes (#766): 0 pass · 1 fail or usage error · 2 nothing to judge.
+    // `pass`/`fail` are unchanged so existing CI gates keep working.
+    const EXIT_INCONCLUSIVE = 2;
 
-    if (respIdx < 0 || ctxIdx < 0) {
-      console.error('[sigmap] Usage: sigmap judge --response <file> --context <file> [--json] [--threshold 0.25] [--learn]');
+    const respArg = respIdx >= 0 ? (args[respIdx + 1] || '').trim() : '';
+    if (respIdx >= 0 && (!respArg || (respArg.startsWith('--')))) {
+      console.error('[sigmap] --response requires a file path or `-` for stdin');
       process.exit(1);
     }
 
-    const respFile = (args[respIdx + 1] || '').trim();
-    const ctxFile  = (args[ctxIdx + 1]  || '').trim();
-
-    if (!respFile || respFile.startsWith('--') || !ctxFile || ctxFile.startsWith('--')) {
-      console.error('[sigmap] --response and --context require file paths');
+    // stdin support (#780): `--response -`, or a bare pipe with no --response.
+    const wantsStdin = respArg === '-' || (respIdx < 0 && !process.stdin.isTTY);
+    let responseText = '';
+    let respLabel = respArg;
+    if (wantsStdin) {
+      respLabel = 'stdin';
+      try { responseText = fs.readFileSync(0, 'utf8'); }
+      catch (_) { responseText = ''; }
+      // An explicit `-` asks for stdin and gets exit 2 when it is empty; a bare
+      // invocation with nothing piped in simply supplied no response at all.
+      if (!responseText.trim() && respIdx < 0) {
+        console.error(USAGE);
+        process.exit(1);
+      }
+    } else if (respIdx < 0) {
+      console.error(USAGE);
       process.exit(1);
+    } else {
+      try { responseText = fs.readFileSync(path.resolve(cwd, respArg), 'utf8'); }
+      catch (e) { console.error(`[sigmap] cannot read --response file: ${e.message}`); process.exit(1); }
     }
-
-    let responseText = '', contextText = '';
-    try { responseText = fs.readFileSync(path.resolve(cwd, respFile), 'utf8'); }
-    catch (e) { console.error(`[sigmap] cannot read --response file: ${e.message}`); process.exit(1); }
-    try { contextText = fs.readFileSync(path.resolve(cwd, ctxFile), 'utf8'); }
-    catch (e) { console.error(`[sigmap] cannot read --context file: ${e.message}`); process.exit(1); }
 
     // Config-driven defaults (J2): judge.threshold / learnBoostAbove /
     // learnPenalizeBelow from gen-context.config.json; --threshold overrides.
-    const judgeCfg = (loadConfig(cwd) || {}).judge || {};
+    const _judgeConfig = loadConfig(cwd) || {};
+
+    // `--context` is optional (#780): default to the context this repo already
+    // generated, and name it, so the common case needs no path at all.
+    let ctxFile = ctxIdx >= 0 ? (args[ctxIdx + 1] || '').trim() : '';
+    if (ctxIdx >= 0 && (!ctxFile || ctxFile.startsWith('--'))) {
+      console.error('[sigmap] --context requires a file path');
+      process.exit(1);
+    }
+    let ctxPath, ctxDefaulted = false;
+    if (ctxFile) {
+      ctxPath = path.resolve(cwd, ctxFile);
+    } else {
+      ctxPath = _ctxSource.resolveContextFile(cwd);
+      ctxDefaulted = true;
+      if (!ctxPath) {
+        console.error('[sigmap] no generated context found — run `sigmap` first, or pass --context <file>');
+        process.exit(1);
+      }
+      ctxFile = path.relative(cwd, ctxPath) || ctxPath;
+    }
+
+    let contextText = '';
+    try { contextText = fs.readFileSync(ctxPath, 'utf8'); }
+    catch (e) { console.error(`[sigmap] cannot read --context file: ${e.message}`); process.exit(1); }
+
+    // Empty input is an input problem, not a judgement (#766).
+    if (!responseText.trim()) {
+      console.error(`[sigmap] response is empty: ${respLabel} — nothing to judge`);
+    }
+    if (!contextText.trim()) {
+      console.error(`[sigmap] context is empty: ${ctxFile} — nothing to judge against`);
+    }
+
+    // Stale-context warning (#780): an answer judged against a context older
+    // than the sources it describes is judged on ground that has moved.
+    const _staleness = _ctxSource.contextStaleness(ctxPath, cwd, _judgeConfig);
+    const _staleWarning = _ctxSource.stalenessWarning(_staleness);
+
+    const judgeCfg = _judgeConfig.judge || {};
     const judgeOpts = {};
     if (typeof judgeCfg.threshold === 'number') judgeOpts.threshold = judgeCfg.threshold;
     if (typeof judgeCfg.learnBoostAbove === 'number') judgeOpts.learnBoostAbove = judgeCfg.learnBoostAbove;
@@ -32125,26 +32439,42 @@ function main() {
     const { judge: runJudge } = requireSourceOrBundled('./src/judge/judge-engine');
     const result = runJudge(responseText, contextText, judgeOpts);
 
+    // Surface the context provenance and freshness alongside the engine's own
+    // warnings, so `--json` consumers see why a verdict may be untrustworthy.
+    result.context = { file: ctxFile, defaulted: ctxDefaulted, stale: !!(_staleness && _staleness.stale) };
+    if (_staleWarning) result.warnings = (result.warnings || []).concat(_staleWarning);
+
     if (args.includes('--json')) {
       process.stdout.write(JSON.stringify(result) + '\n');
     } else {
       const bar = '─'.repeat(44);
+      // Per-claim detail (#780): on anything but a clean pass the reader needs
+      // to see WHICH claim was checked and how it resolved, without re-running
+      // the command with --json.
+      const showClaims = result.verdict !== 'pass' && result.claims && result.claims.checked.length > 0;
+      const claimLines = showClaims
+        ? ` Checked   :\n${result.claims.checked.map((c) => `   ${c.grounded ? '✓' : '✗'} ${c.kind.padEnd(6)} ${c.value}${c.kind === 'symbol' ? '()' : ''} — ${c.via || 'not grounded'}`).join('\n')}`
+        : null;
       console.log([
         bar,
         ` sigmap judge`,
         ` Score     : ${result.score}`,
         ` Verdict   : ${result.verdict}`,
         result.confidence ? ` Confidence: ${result.confidence.level} (${result.confidence.basis.join(' · ')})` : null,
+        ` Context   : ${ctxFile}${ctxDefaulted ? ' (default — no --context given)' : ''}`,
         result.claims && result.claims.total > 0
           ? ` Claims    : ${result.claims.grounded}/${result.claims.total} grounded (${result.claims.checked.filter((c) => c.via === 'context').length} context, ${result.claims.checked.filter((c) => c.via === 'repo').length} repo)`
           : null,
+        claimLines,
         result.reasons.length ? ` Reasons   :\n   ${result.reasons.join('\n   ')}` : ` Reasons   : none`,
+        result.warnings && result.warnings.length ? ` Warnings  :\n   ${result.warnings.join('\n   ')}` : null,
         result.learning
           ? ` Learning  : ${result.learning.applied ? result.learning.action : 'skipped'}${result.learning.files.length ? ` (${result.learning.files.join(', ')})` : ''}${result.learning.reason ? ` — ${result.learning.reason}` : ''}`
           : null,
         bar,
       ].filter(Boolean).join('\n'));
     }
+    if (result.verdict === 'inconclusive') process.exit(EXIT_INCONCLUSIVE);
     process.exit(result.verdict === 'pass' ? 0 : 1);
   }
 
