@@ -440,6 +440,241 @@ test('sigmap judge: human output shows Confidence + Claims; --json is additive (
   assert.ok(Array.isArray(parsed.claims.checked) && parsed.claims.checked[0].via === 'repo', JSON.stringify(parsed.claims));
 });
 
+// ── #795: score technical content, not English (closes #779/#765/#766/#780) ──
+
+const { scoreTokens, markerRegex } = require('../../../src/judge/judge-engine');
+const ctxSource = require('../../../src/judge/context-source');
+
+const SCAN_CTX = '## src/security/scanner.js\nfunction scan(signatures, filePath)  :14-38\n';
+
+// 18. #779: filler prose no longer dilutes a fully-grounded answer below threshold
+test('judge #779: prose-heavy grounded answer scores above threshold and passes', () => {
+  const response = 'The scan function lives in src/security/scanner.js and takes signatures and '
+    + 'filePath. You should probably first look there, then decide whether you want to change '
+    + 'anything, because there are quite a few places where this could matter later on when '
+    + 'things get complicated.';
+  const score = groundedness(response, SCAN_CTX);
+  assert.ok(score > 0.25, `expected > 0.25 (was 0.212 before the fix), got ${score}`);
+  const r = judge(response, SCAN_CTX);
+  assert.strictEqual(r.verdict, 'pass', `expected pass, got ${r.verdict}: ${JSON.stringify(r.reasons)}`);
+});
+
+// 19. #779: judge and ranker share one tokenizer — identifier vs split identifier
+test('judge #779: identifier and split-identifier forms score within 0.05', () => {
+  const context = 'function buildEvidencePack(query, cwd, opts) builds an evidence pack';
+  const ident = groundedness('call buildEvidencePack with query and cwd', context);
+  const split = groundedness('call build evidence pack with query and cwd', context);
+  assert.ok(Math.abs(ident - split) <= 0.05,
+    `identifier ${ident} vs split ${split} must agree (was 0.750 vs 0.333)`);
+  assert.ok(ident > 0.25 && split > 0.25, `both forms must clear threshold: ${ident} / ${split}`);
+});
+
+// 20. #779: the judge tokenizer is the ranker's tokenizer
+test('judge #779: scoreTokens splits camelCase like the ranker', () => {
+  const toks = scoreTokens('buildEvidencePack');
+  assert.ok(toks.length >= 3, `expected a split identifier, got ${JSON.stringify(toks)}`);
+  assert.ok(toks.includes('build'), `expected "build" among ${JSON.stringify(toks)}`);
+});
+
+// 21. #765: a generic phrase is a warning, not a verdict
+test('judge #765: generic phrase warns but does not flip the verdict', () => {
+  const grounded = 'The scan function lives in src/security/scanner.js and takes signatures and filePath.';
+  const hedged = grounded + ' Typically, it redacts secrets.';
+  const a = judge(grounded, SCAN_CTX);
+  const b = judge(hedged, SCAN_CTX);
+  assert.strictEqual(a.verdict, 'pass', `control must pass: ${JSON.stringify(a.reasons)}`);
+  assert.strictEqual(b.verdict, 'pass', `hedged answer must still pass: ${JSON.stringify(b.reasons)}`);
+  assert.ok(b.warnings.some((w) => w.includes('typically,')), `expected warning, got ${JSON.stringify(b.warnings)}`);
+  assert.ok(!b.reasons.some((r) => r.includes('generic phrase')), 'generic phrase must not be a reason');
+});
+
+// 22. #765: an ungrounded claim still fails
+test('judge #765: a hallucinated symbol still fails despite the demotion', () => {
+  const r = judge('Call `computeQuantumScore()` — typically, it scans signatures in src/security/scanner.js.', SCAN_CTX);
+  assert.strictEqual(r.verdict, 'fail', `expected fail, got ${r.verdict}`);
+  assert.ok(r.reasons.some((x) => x.includes('computeQuantumScore')), JSON.stringify(r.reasons));
+});
+
+// 23. #765: confidence never reports high when a stylistic warning is present
+test('judge #765: a generic phrase caps confidence below high', () => {
+  const hedged = 'The scan function lives in src/security/scanner.js and takes signatures and filePath. Typically, it redacts secrets.';
+  const r = judge(hedged, SCAN_CTX, { cwd: ROOT });
+  assert.notStrictEqual(r.confidence.level, 'high',
+    `stylistic warning must cap confidence: ${JSON.stringify(r.confidence)}`);
+});
+
+// 24. #765: word-boundary matching — "in general-purpose" is not "in general"
+test('judge #765: generic marker matches on word boundaries only', () => {
+  assert.strictEqual(markerRegex('in general').test('written in general-purpose code'), false);
+  assert.strictEqual(markerRegex('in general').test('this holds in general.'), true);
+});
+
+// 25. #766: empty response is inconclusive, not a genuine failure
+test('judge #766: empty response verdicts inconclusive', () => {
+  const r = judge('', SCAN_CTX);
+  assert.strictEqual(r.verdict, 'inconclusive', `expected inconclusive, got ${r.verdict}`);
+  assert.strictEqual(r.confidence.level, 'low', JSON.stringify(r.confidence));
+  assert.strictEqual(r.claims.total, 0);
+});
+
+// 26. #766: empty context is inconclusive
+test('judge #766: empty context verdicts inconclusive', () => {
+  const r = judge('The scan function reads signatures.', '   \n  ');
+  assert.strictEqual(r.verdict, 'inconclusive', `expected inconclusive, got ${r.verdict}`);
+});
+
+// 27. #766: an unrelated-but-substantive answer is still a genuine fail
+test('judge #766: unrelated response still fails rather than going inconclusive', () => {
+  const r = judge('The weather in Paris today is sunny and warm.', SCAN_CTX);
+  assert.strictEqual(r.verdict, 'fail', `expected fail, got ${r.verdict}`);
+});
+
+// 28. #766: --learn never learns from an inconclusive verdict
+test('judge #766: inconclusive verdict skips the weights feedback loop', () => {
+  const dir = learnFixture();
+  const r = judge('', '## src/a.js\nfunction rank sorts results', { learn: true, cwd: dir });
+  assert.strictEqual(r.verdict, 'inconclusive');
+  assert.strictEqual(r.learning.applied, false, JSON.stringify(r.learning));
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+// ── CLI surface for the same four fixes ──────────────────────────────────────
+
+const cliDir  = fs.mkdtempSync(path.join(os.tmpdir(), 'sigmap-judge-795-'));
+const cliCtx  = path.join(cliDir, 'ctx.md');
+const cliResp = path.join(cliDir, 'resp.md');
+const cliEmpty = path.join(cliDir, 'empty.md');
+const cliBad  = path.join(cliDir, 'bad.md');
+fs.writeFileSync(cliCtx, SCAN_CTX);
+fs.writeFileSync(cliResp, 'The scan function lives in src/security/scanner.js and takes signatures and filePath. Typically, it redacts secrets.\n');
+fs.writeFileSync(cliEmpty, '');
+fs.writeFileSync(cliBad, 'Call `computeQuantumScore()` to scan signatures in src/security/scanner.js.\n');
+
+// 29. #766: empty --response exits 2 and names the file
+test('sigmap judge #766: empty --response exits 2 naming the file', () => {
+  const r = spawnSync(process.execPath, [SCRIPT, 'judge', '--response', cliEmpty, '--context', cliCtx], {
+    encoding: 'utf8', cwd: cliDir, timeout: 120000,
+  });
+  assert.strictEqual(r.status, 2, `expected exit 2, got ${r.status}\n${r.stdout}${r.stderr}`);
+  assert.ok(r.stderr.includes(cliEmpty), `stderr must name the file: ${r.stderr}`);
+});
+
+// 30. #766: empty --context exits 2 and names the file
+test('sigmap judge #766: empty --context exits 2 naming the file', () => {
+  const r = spawnSync(process.execPath, [SCRIPT, 'judge', '--response', cliResp, '--context', cliEmpty], {
+    encoding: 'utf8', cwd: cliDir, timeout: 120000,
+  });
+  assert.strictEqual(r.status, 2, `expected exit 2, got ${r.status}\n${r.stdout}${r.stderr}`);
+  assert.ok(r.stderr.includes(cliEmpty), `stderr must name the file: ${r.stderr}`);
+});
+
+// 31. #766: inconclusive is emitted in --json; pass/fail exit codes unchanged
+test('sigmap judge #766: --json carries inconclusive; pass=0 and fail=1 unchanged', () => {
+  const inc = spawnSync(process.execPath, [SCRIPT, 'judge', '--response', cliEmpty, '--context', cliCtx, '--json'], {
+    encoding: 'utf8', cwd: cliDir, timeout: 120000,
+  });
+  assert.strictEqual(JSON.parse(inc.stdout.trim()).verdict, 'inconclusive', inc.stdout);
+  const pass = spawnSync(process.execPath, [SCRIPT, 'judge', '--response', cliResp, '--context', cliCtx], {
+    encoding: 'utf8', cwd: cliDir, timeout: 120000,
+  });
+  assert.strictEqual(pass.status, 0, `pass must exit 0, got ${pass.status}\n${pass.stdout}`);
+  const fail = spawnSync(process.execPath, [SCRIPT, 'judge', '--response', cliBad, '--context', cliCtx], {
+    encoding: 'utf8', cwd: cliDir, timeout: 120000,
+  });
+  assert.strictEqual(fail.status, 1, `fail must exit 1, got ${fail.status}\n${fail.stdout}`);
+});
+
+// 32. #780: stdin via `--response -` and via a bare pipe
+test('sigmap judge #780: reads the response from stdin', () => {
+  const body = fs.readFileSync(cliResp, 'utf8');
+  const dash = spawnSync(process.execPath, [SCRIPT, 'judge', '--response', '-', '--context', cliCtx, '--json'], {
+    encoding: 'utf8', cwd: cliDir, timeout: 120000, input: body,
+  });
+  assert.strictEqual(JSON.parse(dash.stdout.trim()).verdict, 'pass', dash.stdout + dash.stderr);
+  const bare = spawnSync(process.execPath, [SCRIPT, 'judge', '--context', cliCtx, '--json'], {
+    encoding: 'utf8', cwd: cliDir, timeout: 120000, input: body,
+  });
+  assert.strictEqual(JSON.parse(bare.stdout.trim()).verdict, 'pass', bare.stdout + bare.stderr);
+});
+
+// 33. #780: omitting --context uses the repo's generated context and says so
+test('sigmap judge #780: default --context resolves and is reported', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sigmap-judge-ctxdef-'));
+  fs.writeFileSync(path.join(dir, 'CLAUDE.md'), SCAN_CTX);
+  const resp = path.join(dir, 'r.md');
+  fs.writeFileSync(resp, 'The scan function takes signatures and filePath.\n');
+  const r = spawnSync(process.execPath, [SCRIPT, 'judge', '--response', resp], {
+    encoding: 'utf8', cwd: dir, timeout: 120000,
+  });
+  assert.ok(r.stdout.includes('CLAUDE.md'), `must name the resolved context: ${r.stdout}`);
+  assert.ok(r.stdout.includes('default'), `must flag it as the default: ${r.stdout}`);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+// 34. #780: a context older than its sources warns
+test('sigmap judge #780: stale context produces a visible warning', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sigmap-judge-stale-'));
+  fs.mkdirSync(path.join(dir, 'src'), { recursive: true });
+  const ctxFile = path.join(dir, 'CLAUDE.md');
+  fs.writeFileSync(ctxFile, SCAN_CTX);
+  const old = Date.now() - 1000 * 60 * 60 * 72;
+  fs.utimesSync(ctxFile, old / 1000, old / 1000);
+  fs.writeFileSync(path.join(dir, 'src', 'scanner.js'), 'function scan(signatures, filePath) {}\n');
+
+  const st = ctxSource.contextStaleness(ctxFile, dir, { srcDirs: ['src'] });
+  assert.ok(st && st.stale, `expected stale, got ${JSON.stringify(st)}`);
+  assert.ok(ctxSource.stalenessWarning(st).includes('scanner.js'),
+    `warning must name the newer file: ${ctxSource.stalenessWarning(st)}`);
+
+  const resp = path.join(dir, 'r.md');
+  fs.writeFileSync(resp, 'The scan function takes signatures and filePath.\n');
+  const r = spawnSync(process.execPath, [SCRIPT, 'judge', '--response', resp, '--context', ctxFile], {
+    encoding: 'utf8', cwd: dir, timeout: 120000,
+  });
+  assert.ok(r.stdout.includes('stale ground'), `CLI must surface the stale warning: ${r.stdout}`);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+// 35. #780: a fresh context produces no stale warning
+test('sigmap judge #780: a context newer than its sources does not warn', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sigmap-judge-fresh-'));
+  fs.mkdirSync(path.join(dir, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'src', 'scanner.js'), 'function scan(signatures, filePath) {}\n');
+  const old = Date.now() - 1000 * 60 * 60 * 72;
+  fs.utimesSync(path.join(dir, 'src', 'scanner.js'), old / 1000, old / 1000);
+  const ctxFile = path.join(dir, 'CLAUDE.md');
+  fs.writeFileSync(ctxFile, SCAN_CTX);
+  const st = ctxSource.contextStaleness(ctxFile, dir, { srcDirs: ['src'] });
+  assert.ok(st && !st.stale, `expected fresh, got ${JSON.stringify(st)}`);
+  assert.strictEqual(ctxSource.stalenessWarning(st), null);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+// 36. #780: the human output lists each checked claim on a fail
+test('sigmap judge #780: human output shows the per-claim table on a fail', () => {
+  const r = spawnSync(process.execPath, [SCRIPT, 'judge', '--response', cliBad, '--context', cliCtx], {
+    encoding: 'utf8', cwd: cliDir, timeout: 120000,
+  });
+  assert.strictEqual(r.status, 1, `expected fail: ${r.stdout}`);
+  assert.ok(r.stdout.includes('Checked'), `expected a per-claim table: ${r.stdout}`);
+  assert.ok(r.stdout.includes('computeQuantumScore'), `must name the ungrounded claim: ${r.stdout}`);
+  assert.ok(r.stdout.includes('src/security/scanner.js'), `must name the grounded claim: ${r.stdout}`);
+});
+
+// 37. #765: warnings reach the human output
+test('sigmap judge #765: warnings are printed in the human output', () => {
+  const r = spawnSync(process.execPath, [SCRIPT, 'judge', '--response', cliResp, '--context', cliCtx], {
+    encoding: 'utf8', cwd: cliDir, timeout: 120000,
+  });
+  assert.ok(r.stdout.includes('Warnings'), `expected a warnings block: ${r.stdout}`);
+  assert.ok(r.stdout.includes('typically,'), r.stdout);
+});
+
+// Cleanup
+try {
+  fs.rmSync(cliDir, { recursive: true, force: true });
+} catch (_) {}
+
 // Cleanup
 try {
   fs.rmSync(tmpDir, { recursive: true });

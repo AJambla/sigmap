@@ -4,23 +4,81 @@ const fs = require('fs');
 const path = require('path');
 const { boostFiles, normalizeFile, penalizeFiles } = require('../learning/weights');
 const parsers = require('../verify/parsers');
+const { tokenize: rankTokenize, stem } = require('../retrieval/bm25');
 
-const STOP = new Set([
-  'the','a','an','in','on','at','to','of','for','and','or','but',
-  'is','are','was','were','be','been','being','have','has','had',
-  'do','does','did','will','would','could','should','may','might',
-  'shall','can','not','with','from','by','as','this','that','it',
-]);
+/**
+ * Ordinary-English vocabulary (#779).
+ *
+ * The judge scores how much of an answer's *technical* content the context
+ * grounds — not how much of the answer is English. Before this list existed,
+ * `groundedness` was a raw word-overlap ratio, so five words of hedging prose
+ * dropped a fully-grounded answer below the threshold and failed it. Filler is
+ * removed from BOTH sides, so it can neither inflate nor dilute the score.
+ *
+ * Deliberately excludes words that name things in a repo (`value`, `type`,
+ * `error`, `state`, `class`, `result`, `case`, `file`, `path`, `key`, `index`):
+ * dropping those would hide real vocabulary. Entries are stemmed at load with
+ * the ranker's own stemmer, so surface forms match after tokenization.
+ */
+const PROSE_WORDS = (
+  // pronouns, determiners, quantifiers
+  'i you we they he she it me us them him her my your our their his hers its ' +
+  'this that these those which who whom whose what there here any some all both ' +
+  'each every either neither many much few several other another same such own ' +
+  'most more less least enough none nothing something anything everything ' +
+  // auxiliaries and modals
+  'am is are was were be been being have has had having do does did doing ' +
+  'will would shall should can could may might must ought ' +
+  // conjunctions, prepositions, discourse connectives
+  'and or but if then else because since while when where whether though ' +
+  'although unless until after before during about above below over under ' +
+  'between among through across into onto upon within without along around ' +
+  'beside behind beyond toward towards per via than so yet nor also too only ' +
+  'just even still already again once ever never always often sometimes ' +
+  'however therefore thus hence moreover furthermore additionally instead ' +
+  'otherwise meanwhile overall indeed anyway rather ' +
+  // hedges and intensifiers — the vocabulary of ungrounded prose
+  'usually typically generally normally commonly probably possibly perhaps ' +
+  'maybe likely unlikely actually really quite very fairly somewhat mostly ' +
+  'largely simply basically essentially effectively clearly obviously ' +
+  'certainly definitely particularly specifically especially approximately ' +
+  'roughly slightly nearly almost ' +
+  // generic verbs that carry no repo signal
+  'look see make take give come want need know think say tell find use go ' +
+  'put keep let help try seem become live decide mean work start happen ' +
+  'consider note show tend appear allow provide ensure avoid prefer choose ' +
+  'mention describe explain suggest recommend ' +
+  // generic nouns and adjectives
+  'thing way time place part kind sort lot bit point fact example reason ' +
+  'problem question good bad better best worse worst big small large long ' +
+  'short high low old first last next previous different important useful ' +
+  'helpful easy hard difficult simple complex complicated general specific ' +
+  'common possible sure able right wrong true false yes'
+).split(/\s+/).filter(Boolean);
 
-function tokenize(text) {
-  return (text || '').toLowerCase().match(/\b[a-z][a-z0-9_]{2,}\b/g) || [];
+const PROSE_STOP = new Set(PROSE_WORDS.map(stem));
+
+/**
+ * The tokens a groundedness score is computed over.
+ *
+ * Uses the ranker's tokenizer (`src/retrieval/bm25.js`) so the judge and the
+ * retrieval side agree on what a token is: camelCase and snake_case are split
+ * and stemmed, which is why `buildEvidencePack` and `build evidence pack` now
+ * score the same. The judge's own ad-hoc `/\b[a-z][a-z0-9_]{2,}\b/` regex did
+ * neither, so a bare identifier written out as prose was invisible to it.
+ *
+ * @param {string} text
+ * @returns {string[]}
+ */
+function scoreTokens(text) {
+  return rankTokenize(text).filter((t) => !PROSE_STOP.has(t));
 }
 
 function groundedness(response, context) {
   if (!response || !context) return 0;
-  const ctxTokens = new Set(tokenize(context).filter((t) => !STOP.has(t)));
+  const ctxTokens = new Set(scoreTokens(context));
   if (ctxTokens.size === 0) return 0;
-  const respTokens = tokenize(response).filter((t) => !STOP.has(t));
+  const respTokens = scoreTokens(response);
   if (respTokens.length === 0) return 0;
   const matched = respTokens.filter((t) => ctxTokens.has(t));
   return parseFloat((matched.length / respTokens.length).toFixed(3));
@@ -127,6 +185,13 @@ function claimGrounding(response, context, opts = {}) {
   };
 }
 
+/**
+ * Hedging phrases that signal an answer is reasoning from general knowledge
+ * rather than from the context. These are a *style* signal, never a grounding
+ * one (#765): before this change a fully-grounded answer failed — exit 1, and
+ * reported at `high` confidence — solely because it contained the word
+ * "typically,". They are now reported as warnings and never flip the verdict.
+ */
 const GENERIC_MARKERS = [
   'however, based on my knowledge',
   'generally speaking',
@@ -135,6 +200,18 @@ const GENERIC_MARKERS = [
   'usually,',
   'as a general rule',
 ];
+
+/**
+ * Word-boundary matcher for a generic marker.
+ *
+ * A plain `includes()` matched `in general` inside `in general-purpose code`
+ * (#765). The trailing lookahead rejects a following word character *or*
+ * hyphen, so hyphenated compounds no longer trip the check, while markers that
+ * end in punctuation (`typically,`) still match.
+ */
+function markerRegex(marker) {
+  return new RegExp(`\\b${marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`, 'i');
+}
 
 function extractContextFiles(context, cwd) {
   if (!context || !cwd) return [];
@@ -160,21 +237,60 @@ function extractContextFiles(context, cwd) {
   return files;
 }
 
+/** Empty claim report, for a verdict reached without scoring anything. */
+function emptyClaims() {
+  return { total: 0, grounded: 0, ungrounded: [], structural: false, checked: [], coverage: 0 };
+}
+
+/**
+ * Why this input cannot be judged at all, or null when it can (#766).
+ *
+ * `pass`/`fail` is a judgement about an answer. An empty response file, an
+ * empty context, or an answer with no scoreable vocabulary is not a wrong
+ * answer — it is a missing one, and filing it as `fail` gives CI the same
+ * signal a confidently hallucinated answer produces.
+ */
+function inconclusiveReason(response, context) {
+  if (!response || !response.trim()) return 'response is empty — nothing to judge';
+  if (!context || !context.trim()) return 'context is empty — nothing to judge against';
+  if (scoreTokens(context).length === 0) return 'context has no scoreable tokens — nothing to judge against';
+  if (scoreTokens(response).length === 0) return 'response has no scoreable tokens — nothing to check against the context';
+  return null;
+}
+
 function judge(response, context, opts = {}) {
-  const score = groundedness(response, context);
   const threshold = opts.threshold !== undefined ? opts.threshold : 0.25;
+
+  // Inconclusive short-circuit (#766): nothing was scored, so there is no
+  // verdict to reach and no weights feedback to apply.
+  const blocked = inconclusiveReason(response, context);
+  if (blocked) {
+    const result = {
+      score: 0,
+      verdict: 'inconclusive',
+      reasons: [blocked],
+      warnings: [],
+      claims: emptyClaims(),
+      confidence: { level: 'low', basis: ['nothing to judge'] },
+    };
+    if (opts.learn) {
+      result.learning = { applied: false, action: 'none', files: [], reason: 'verdict inconclusive — no signal to learn from' };
+    }
+    return result;
+  }
+
+  const score = groundedness(response, context);
   const reasons = [];
 
   if (score < threshold) {
     reasons.push(`score ${score} is below threshold ${threshold} — response may not be grounded in context`);
   }
 
-  if (response) {
-    const lower = response.toLowerCase();
-    for (const m of GENERIC_MARKERS) {
-      if (lower.includes(m)) {
-        reasons.push(`response contains generic phrase: "${m}"`);
-      }
+  // Style warnings (#765) — reported, never a verdict input.
+  const warnings = [];
+  for (const m of GENERIC_MARKERS) {
+    if (markerRegex(m).test(response)) {
+      warnings.push(`response contains generic phrase: "${m}"`);
     }
   }
 
@@ -188,7 +304,7 @@ function judge(response, context, opts = {}) {
     reasons.push(`${c.kind} claim not grounded in ${where}: ${c.value}${c.kind === 'symbol' ? '()' : ''}`);
   }
 
-  const verdict = score >= threshold && reasons.length === 0 ? 'pass' : 'fail';
+  const verdict = score >= threshold && claims.ungrounded.length === 0 ? 'pass' : 'fail';
 
   // Confidence in the verdict (J4, #653) — a deterministic level with an
   // auditable basis, aligned with the Evidence Pack's confidence vocabulary:
@@ -207,9 +323,16 @@ function judge(response, context, opts = {}) {
   if (claims.structural && claims.total > 0 && claims.ungrounded.length === 0 && margin >= 0.15) level = 'high';
   else if (claims.total > 0 || margin >= 0.15) level = 'medium';
   else level = 'low';
+  // Hedging language is unverifiable by construction, so it caps confidence
+  // rather than flipping the verdict (#765) — the judge must never report
+  // `high` confidence in a result a stylistic signal had any part in.
+  if (warnings.length && level === 'high') {
+    level = 'medium';
+    basis.push('generic phrasing present');
+  }
   const confidence = { level, basis };
 
-  const result = { score, verdict, reasons, claims, confidence };
+  const result = { score, verdict, reasons, warnings, claims, confidence };
 
   if (opts.learn) {
     const learning = {
@@ -253,4 +376,4 @@ function judge(response, context, opts = {}) {
   return result;
 }
 
-module.exports = { groundedness, claimGrounding, judge };
+module.exports = { groundedness, claimGrounding, judge, scoreTokens, markerRegex, GENERIC_MARKERS, PROSE_STOP };
