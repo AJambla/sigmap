@@ -38,6 +38,33 @@ const PATTERNS = [
     name: 'Stripe Key',
     regex: /sk_(live|test)_[0-9a-zA-Z]{24,}/,
   },
+  // The `sk-` family (#771). `sk_live_`/`sk_test_` above uses an UNDERSCORE;
+  // OpenAI and Anthropic use a HYPHEN, so the Stripe pattern never covered
+  // them and five of seven credential shapes passed through untouched. The
+  // leading `\b` matters: without it `sk-` matches inside `risk-…`.
+  // Anthropic and the OpenAI project form come first — both contain hyphens
+  // after `sk-`, so the legacy alphanumeric-only pattern cannot claim them,
+  // but ordering keeps the reported name right if either format widens.
+  {
+    name: 'Anthropic API Key',
+    regex: /\bsk-ant-[A-Za-z0-9_-]{20,}/,
+  },
+  {
+    name: 'OpenAI API Key',
+    regex: /\bsk-proj-[A-Za-z0-9_-]{20,}/,
+  },
+  {
+    name: 'OpenAI API Key (legacy)',
+    regex: /\bsk-[A-Za-z0-9]{32,}/,
+  },
+  {
+    name: 'Slack Token',
+    regex: /\bxox[baprs]-[A-Za-z0-9-]{10,}/,
+  },
+  {
+    name: 'Slack Webhook',
+    regex: /https:\/\/hooks\.slack\.com\/services\/T[A-Za-z0-9]+\/B[A-Za-z0-9]+\/[A-Za-z0-9]+/,
+  },
   {
     name: 'Twilio Key',
     regex: /SK[0-9a-fA-F]{32}/,

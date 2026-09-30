@@ -98,14 +98,62 @@ function closestMatch(target, candidates, opts = {}) {
 }
 
 /**
+ * File extensions whose symbols are worth suggesting.
+ *
+ * A "did you mean?" for a *called function* only makes sense when the
+ * candidate is itself a callable definition. `CODE_EXTS` (used for coverage)
+ * is deliberately NOT reused here: it includes `.tf`, `.sql`, `.graphql`,
+ * `.proto` and `.css`, whose top-level names are resources, tables, schema
+ * fields and selectors. That is how `debounce()` came to be answered with
+ * "did you mean `resource()` in test/fixtures/main.tf?" (#777).
+ */
+const SUGGESTIBLE_EXTS = new Set([
+  '.js', '.jsx', '.mjs', '.cjs', '.ts', '.tsx', '.py', '.go', '.rs',
+  '.java', '.kt', '.scala', '.swift', '.rb', '.php', '.cs', '.dart',
+  '.c', '.cpp', '.h', '.hpp', '.lua', '.ex', '.exs', '.r', '.jl',
+  '.sh', '.bash', '.zsh', '.ps1', '.vue', '.svelte',
+]);
+
+/**
+ * Test and fixture paths, which must never source a suggestion (#777).
+ *
+ * Applying a suggestion is a code edit, so a name that only exists in a test
+ * or a fixture would corrupt the answer it claims to correct — `structuredClone`
+ * was answered with `structuralFixture()` from a test file.
+ */
+const NON_SUGGESTIBLE_PATH_RE = new RegExp([
+  '(?:^|/)(?:tests?|spec|specs|__tests__|__mocks__|__fixtures__|fixtures?|mocks?|e2e|benchmarks?)/',
+  '\\.(?:test|spec)\\.[mc]?[jt]sx?$',
+  '(?:^|/)test_[^/]+\\.py$',
+  '_test\\.(?:py|go)$',
+  '(?:Test|Tests|Spec|Specs)\\.(?:java|kt|scala|cs|swift)$',
+].join('|'), 'i');
+
+/** Whether a file may source a closest-match suggestion. */
+function isSuggestibleFile(file) {
+  const f = String(file).replace(/\\/g, '/');
+  if (NON_SUGGESTIBLE_PATH_RE.test(f)) return false;
+  const dot = f.lastIndexOf('.');
+  if (dot < 0) return false;
+  return SUGGESTIBLE_EXTS.has(f.slice(dot).toLowerCase());
+}
+
+/**
  * Build `[{ name, file, line }]` symbol candidates from a SigMap signature
  * index (`Map<file, string[]>` whose entries may carry a `:start-end` anchor).
+ *
+ * Files that cannot source a useful suggestion are skipped by default; pass
+ * `{ includeAll: true }` for the unfiltered pool.
  */
-function buildSymbolCandidates(sigIndex) {
+function buildSymbolCandidates(sigIndex, opts = {}) {
   const out = [];
   const seen = new Set();
   if (!sigIndex) return out;
+  // `includeAll` keeps the unfiltered pool available for callers that want it;
+  // suggestions default to the filtered pool.
+  const keep = opts.includeAll ? () => true : isSuggestibleFile;
   for (const [file, sigs] of sigIndex) {
+    if (!keep(file)) continue;
     for (const sig of sigs) {
       const s = String(sig);
       const lineM = s.match(/:(\d+)(?:-\d+)?\s*$/);
@@ -140,6 +188,8 @@ module.exports = {
   levenshtein,
   closestMatch,
   buildSymbolCandidates,
+  isSuggestibleFile,
+  SUGGESTIBLE_EXTS,
   suggestionConfidence,
   formatSuggestion,
 };

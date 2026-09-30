@@ -44,19 +44,10 @@ const PY_BUILTINS = new Set([
   'copy', 'hashlib', 'threading', 'string', 'csv', 'glob', 'shutil', 'tempfile',
 ]);
 
-const LANG_GLOBALS = new Set([
-  // JS
-  'console', 'require', 'module', 'exports', 'process', 'Object', 'Array',
-  'String', 'Number', 'Boolean', 'Math', 'JSON', 'Date', 'Promise', 'Map',
-  'Set', 'WeakMap', 'WeakSet', 'RegExp', 'Error', 'Symbol', 'parseInt',
-  'parseFloat', 'isNaN', 'setTimeout', 'setInterval', 'clearTimeout', 'fetch',
-  'Buffer', 'Function', 'eval', 'encodeURIComponent', 'decodeURIComponent',
-  // Python
-  'print', 'len', 'range', 'str', 'int', 'float', 'dict', 'list', 'tuple',
-  'set', 'bool', 'open', 'enumerate', 'zip', 'map', 'filter', 'sorted',
-  'sum', 'min', 'max', 'abs', 'isinstance', 'super', 'type', 'getattr',
-  'setattr', 'hasattr',
-]);
+// Language globals live in ./globals as grouped data (#777). The inline list
+// this replaced stopped at `encodeURIComponent`, so `structuredClone` — a Node
+// and browser global since Node 17 — was reported as a hallucination.
+const { LANG_GLOBALS } = require('./globals');
 
 const REL_EXTS = ['', '.js', '.ts', '.tsx', '.jsx', '.mjs', '.cjs', '.json', '.py', '.r', '.R', '.vue'];
 const REL_INDEX = ['index.js', 'index.ts', 'index.tsx', 'index.jsx', '__init__.py'];
@@ -300,7 +291,12 @@ function verify(answerText, cwd, opts = {}) {
     for (const { name, line } of parsers.extractSymbols(answerText)) {
       if (symbolSet.has(name)) continue;
       if (LANG_GLOBALS.has(name) || NODE_BUILTINS.has(name) || PY_BUILTINS.has(name)) continue;
-      const match = closestMatch(name, symbolCandidates, { minLen: 4 });
+      // Similarity floor (#777): the default 0.5 ratio let `low`-confidence
+      // matches through, so `debounce()` was answered with `drone()` — a
+      // suggestion that would corrupt the answer if applied. 0.34 keeps the
+      // high/medium band (`buildEvidencPack` → `buildEvidencePack`, `scanx` →
+      // `scan`) and drops the rest, since no suggestion beats a wrong one.
+      const match = closestMatch(name, symbolCandidates, { minLen: 4, maxRatio: 0.34 });
       add({
         type: 'fake-symbol',
         value: name,
