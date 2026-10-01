@@ -1,6 +1,6 @@
 ---
 title: Retrieval benchmark
-description: Latest saved retrieval benchmark for SigMap v8.55.0. 78.6% hit@5 across 105 tasks on 18 repos; the honest grep comparison scores 88.0% vs 40.8% (2.16× lift) on its own 125-task corpus.
+description: Latest saved retrieval benchmark for SigMap v8.56.0. 78.6% hit@5 across 105 tasks on 18 repos; the honest grep comparison scores 88.0% vs 40.8% (2.16× lift) on its own 125-task corpus.
 head:
   - - meta
     - property: og:title
@@ -15,8 +15,8 @@ head:
 
 # Retrieval benchmark
 
-::: info Official v8.55.0 benchmark snapshot
-**Benchmark ID:** sigmap-v8.55-main &nbsp;·&nbsp; **Date:** 2026-09-30 (with R language)
+::: info Official v8.56.0 benchmark snapshot
+**Benchmark ID:** sigmap-v8.56-main &nbsp;·&nbsp; **Date:** 2026-09-30 (with R language)
 
 | Metric | Value |
 |---|---:|
@@ -30,7 +30,7 @@ head:
 | GPT-4o overflow (without → with) | **16/21 → 0/21** |
 :::
 
-Latest saved run: **2026-09-30 (v8.55.0)**
+Latest saved run: **2026-10-01 (v8.56.0)**
 
 The task set, baselines, and the hit@5 definition are documented in [benchmark methodology](/guide/methodology).
 
@@ -122,7 +122,7 @@ happen to share an adjective.
 
 | Corpus | Tasks | hit@5 | Gated on | What it measures |
 |---|---:|:---:|---|---|
-| `hard` | 90 | **72.2%** | 70% floor | Leak-free tasks over **SigMap's own source** |
+| `hard` | 90 | **73.3%** | 70% floor | Leak-free tasks over **SigMap's own source** |
 | `mined` | 23 | **60.9%** | no-regress | Commit subjects + the files that commit touched |
 | `jvm` | 61 | **29.5%** | no-regress | Mined from `spring-petclinic` (32) + `akka` (29) |
 | `easy` | 20 | 90.0% | reference only | Leaky by construction; published for contrast |
@@ -139,14 +139,14 @@ containing one two-assertion test file and no source change scored 75.6% →
 74.4% and failed the gate. Enforcing `hard` against the previous run therefore
 fails honest work and, worse, trains you to ignore the gate.
 
-It is now held to its **70% floor** instead (currently 65/90 tasks pass, 1 task
-= 1.1pp, two tasks of headroom). The floor, the leak assertions, and
+It is now held to its **70% floor** instead (currently 66/90 tasks pass, 1 task
+= 1.1pp, three tasks of headroom). The floor, the leak assertions, and
 `--no-regress` on `mined` and `jvm` are the enforced checks.
 
 ::: warning The committed `hard` baseline does not reproduce (v8.55.0)
 `benchmarks/retrieval-baseline.json` records `hard = 75.6%`, and that figure does
 not reproduce on `develop` today — a **pristine worktree with no changes applied**
-measures 72.2%. This is the drift the floor exists to tolerate, and it is
+measured 72.2% at v8.55.0, and the corpus reads 73.3% at v8.56.0. This is the drift the floor exists to tolerate, and it is
 disclosed here rather than silently re-recorded: refreshing a baseline as a side
 effect of an unrelated change is how a stale number becomes a published one. It
 is re-recorded deliberately with the number-provenance work

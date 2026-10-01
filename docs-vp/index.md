@@ -78,12 +78,12 @@ features:
 
 <div style="max-width:840px;margin:0 auto;padding:18px 24px 0;text-align:center">
 <div style="display:inline-flex;flex-wrap:wrap;gap:.5rem;justify-content:center;background:var(--vp-c-brand-soft,#ede9fe);border:1px solid rgba(124,106,247,.25);border-radius:999px;padding:.55rem .9rem;font-size:.9rem;color:var(--vp-c-text-1)">
-  <span><strong>Release:</strong> v8.55.0</span>
+  <span><strong>Release:</strong> v8.56.0</span>
   <span>·</span>
-  <span><strong>New — a rank is a claim of relevance:</strong> three retrieval defects shared one cause. The ranker kept its own, strictly weaker copy of the file-category rules the token-budget drop order already had right — it recognised only <code>foo.test.js</code> and a <code>test/</code> folder, so Go's <code>routes_test.go</code>, Python's <code>test_foo.py</code> and the JVM's <code>FooTest.java</code> were <strong>never demoted at all</strong>, a root <code>README.md</code> matched no docs folder, and CI files had no category. Asked <em>&quot;how does gin route requests through its middleware chain?&quot;</em>, SigMap answered with two test files and a README above <code>routergroup.go</code>. It also numbered files scoring <strong>exactly 0.00</strong> as ranked matches, and let a token equal to the project name lift files on their path alone. One shared definition now backs both subsystems, zero-score rows are gone, path matches are weighted by how discriminating the token is, and defining a thing outranks mentioning it. New <code>ask --explain</code> shows which query tokens matched nothing, every signal behind each file, why a file was demoted, and the near misses below the cutoff — which is how we found a fourth bug: the stemmer reduced <code>users</code> to <code>us</code>, tripped its own length guard, gave up and returned the original, so <code>users</code> never matched <code>loginUser</code>. 36 languages, zero dependencies, offline, deterministic.</span>
+  <span><strong>New — SigMap now knows the shape of your repo:</strong> two defects of the same class, where SigMap's model of your project was wrong and nothing said so. On a <strong>flat layout</strong> — the normal shape of a Go module — the repo root was <em>never even a candidate</em> source root, because candidate detection only ever looked at directories. A fresh <code>gin</code> clone indexed <code>testdata</code>, a fixture folder the Go tool ignores outright, and left <code>gin.go</code>, <code>routergroup.go</code>, <code>context.go</code> and <code>tree.go</code> invisible. Two structural signals now qualify the root — a <code>go.mod</code> with root-level <code>.go</code> files, which is Go's own model of a module, and a generic 20%-of-the-tree share — chosen by measuring all 43 benchmark repos, where it selects exactly the four Go modules and changes nothing else. The miss is disclosed too: a coverage percentage computed over your <code>srcDirs</code> cannot see a file the detector never picked, which is how the broken case reported a comfortable <em>&quot;indexed 67%&quot;</em> while ten of thirteen files were missing. <code>validate</code> and <code>doctor</code> now report implementation files outside <code>srcDirs</code>, graded on share so a correct setup stays quiet. And the monorepo verdict had <strong>three</strong> detectors that disagreed — <code>roots</code> said no while <code>--monorepo</code> processed two packages — so one detector answers it now and names whether the evidence is a declared workspace or your layout. 36 languages, zero dependencies, offline, deterministic.</span>
 </div>
 <div style="margin-top:.4rem;display:inline-flex;flex-wrap:wrap;gap:.5rem;justify-content:center;background:var(--vp-c-default-soft,#f3f4f6);border:1px solid rgba(0,0,0,.08);border-radius:999px;padding:.55rem .9rem;font-size:.9rem;color:var(--vp-c-text-2)">
-  <span><strong>Benchmark:</strong> sigmap-v8.55-main</span>
+  <span><strong>Benchmark:</strong> sigmap-v8.56-main</span>
   <span>·</span>
   <span>78.6% hit@5 · 95.8% token reduction · 2026-09-30</span>
 </div>
@@ -177,7 +177,7 @@ See the full [end-to-end walkthrough](/guide/walkthrough) to watch this in actio
 | Overall token reduction | — | **95.8%** |
 | GPT-4o overflow repos | 14/21 | **0/21** |
 
-Latest saved benchmark run: **2026-09-30 (v8.55.0)**.
+Latest saved benchmark run: **2026-10-01 (v8.56.0)**.
 
 </div>
 
