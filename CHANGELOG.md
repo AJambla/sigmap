@@ -10,6 +10,33 @@ Format: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [8.57.0] — 2026-10-01
+
+Closes the last two open items of ladder **R1**. Both defects sit in the same four-stage `create` pipeline, and together they meant the grounded-creation loop could neither fail honestly nor succeed at the thing it exists for — so they shipped as one change.
+
+### Fixed
+- **`create` exited 0 having run none of its four guard stages** (#767, PR #823) — `summary.ok` was `failed === 0`, which is **vacuously true over an empty set**. A CI step that shelled out to `create` therefore read success from a run that verified nothing: `0/4 ran · 0 passed · 0 failed · 4 skipped`, `$? = 0`. `ok` is now `!nothingRan && failed === 0`, and the summary carries a `nothingRan` flag so the condition is legible to `--json` consumers rather than inferred from a zero count
+- **Stage 2 rejected the symbols the plan intended to create** (#666, PR #823) — `verify-plan` checked every name in a plan for *existence*, so `create "add a helper to format dates"` → plan names `formatDate` → stage 2 errored on code that, by construction, does not exist yet. The pipeline's **primary use case was unreachable pre-implementation**. A plan has two kinds of name in it, and checking them identically is the bug: references must exist, **introductions must not**
+
+### Added
+- **`Creates:` plan section — introductions, verified in reverse** (#666, PR #823) — names under a `Creates:` section are checked for *absence*, which both unblocks the happy path and adds a **redefinition guard** that did not previously exist: a plan claiming to create something already in the repo is now an error. Introductions are excluded from the existence and blast-radius checks and classified by shape — a `/` or a file extension means a file, anything else a symbol. The label is matched as a heading (`## Creates`, `### Creates new`) or a label line (`Creates:`, `**Creates:**`), inline or as the bulleted/indented lines beneath it
+- **`verify-plan --creates <names>`** (#666, PR #823) — comma-separated introductions for plans carrying no `Creates:` section; merged with the section when both are present. `create --creates` forwards the same list to stage 2
+- **The scaffold stage's proposal is an allowlist for stage 2** (#666, PR #823) — when stage 1 proposes `userWidget.js`, stage 2 is told it is an introduction, so the pipeline no longer rejects the file it just designed. No flag needed: inside `create` the two stages now share what stage 1 decided
+- **`create` exit code `2` — "nothing ran"** (#767, PR #823) — distinct from `1`, which still means *a stage ran and failed*, so a CI gate can tell a clean run from an empty one. It matches `judge`'s existing inconclusive code rather than inventing a third convention. Each stage now carries the input it needs (`STAGE_NEEDS`), printed when nothing ran, so the exit is **actionable** rather than merely non-zero
+- **`verify-plan` reports introductions** — `summary.filesIntroduced` / `summary.symbolsIntroduced`, an `introduces[]` array carrying each name's existence verdict, and a `redefines-existing` issue type
+
+### Changed
+- **`verify-plan` scope counts introduced files too** — the scope figure is the surface the plan touches, and a file it creates is part of that. With no introductions present the count is unchanged, since `extractFilePaths` already dedupes
+- **`create --json` exits on the same code as the human path** — previously `0`/`1` only, so the JSON consumer could not observe the nothing-ran case at all
+
+### Measurement
+- **Behaviour is unchanged without the new section or flag.** Every name stays a reference and standalone `verify-plan` is as strict as before — asserted by a test that runs the *same plan both ways* rather than by inspection
+- The `Creates:` label is deliberately strict — a heading or a colon — so prose like `Creates a new helper for dates.` does not silently adopt the bullets beneath it as introductions. Pinned by its own test
+- **41 tests** across the two suites (19 `create`, 22 `verify-plan`), covering 0-ran, one-ran-passing, mixed pass/fail, exit-code ↔ `summary.ok` agreement in all three outcomes, both redefinition kinds, and the end-to-end create happy path. Full suite **193 integration + 26 unit, 0 failed**
+- **No measured number changes.** This touches the `create`/`verify-plan` guard path, not retrieval or extraction; `latest.json` untouched and `check:metrics` green
+
+---
+
 ## [8.56.0] — 2026-10-01
 
 ### Fixed

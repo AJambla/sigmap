@@ -77,7 +77,7 @@ If you are new to the product, start with the workflow pages first:
 | `verify <answer.md> --report [out.html]` | Write a standalone red/amber/green HTML report of the findings |
 | `review-pr [--base <ref>\|--staged]` | Audit a diff — scope drift, god-node edits, missing tests, security-sensitive files (`--json`; exits 1 on findings) |
 | `review-pr --markdown` | **PR Evidence Report** — branded Markdown (signatures + blast radius + tests to run + risk labels) to post as a PR comment; CI-gateable |
-| `create "<task>"` | Orchestrate the 4-stage grounded-creation pipeline (scaffold → verify-plan → verify-ai-output → review-pr) with `n/4` numbering |
+| `create "<task>"` | Orchestrate the 4-stage grounded-creation pipeline (scaffold → verify-plan → verify-ai-output → review-pr) with `n/4` numbering; exits `2` when no stage had its input (`--creates`, `--json`) |
 | `validate` | Validate config and coverage; optional query symbol check |
 | `learn` | Boost, penalize, or reset learned file ranking weights |
 | `weights` | Show learned file multipliers or emit them as JSON |
@@ -1946,7 +1946,7 @@ sigmap bench --submit --json
  SigMap Community Benchmark Submission
 ────────────────────────────────────────────────────────
  SigMap version : 8.51.2
- Benchmark ID   : sigmap-v8.56-main
+ Benchmark ID   : sigmap-v8.57-main
  Submitted      : 2026-09-13
 ────────────────────────────────────────────────────────
  Canonical metrics (official release):
