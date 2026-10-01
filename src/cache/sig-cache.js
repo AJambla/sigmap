@@ -102,4 +102,29 @@ function updateCacheEntries(cache, extracted) {
   }
 }
 
-module.exports = { loadCache, saveCache, getChangedFiles, updateCacheEntries };
+/**
+ * Drop cache entries whose file no longer exists on disk.
+ *
+ * `saveCache` writes the whole Map back, and `ranker.buildSigIndex` merges the
+ * cache into the retrieval index, so a deleted file stayed in the index until a
+ * version bump busted the cache — which is why `validate`'s "re-run sigmap to
+ * refresh the index" was advice that could not work. Keyed on existence only,
+ * never on the current scope, so a per-package monorepo run cannot evict
+ * another package's entries.
+ *
+ * @param {Map<string, { mtime: number, sigs: string[] }>} cache
+ * @returns {number} entries removed
+ */
+function pruneMissing(cache) {
+  let removed = 0;
+  for (const absPath of [...cache.keys()]) {
+    try {
+      if (fs.statSync(absPath).isFile()) continue;
+    } catch (_) { /* unreadable → treat as gone */ }
+    cache.delete(absPath);
+    removed++;
+  }
+  return removed;
+}
+
+module.exports = { loadCache, saveCache, getChangedFiles, updateCacheEntries, pruneMissing };

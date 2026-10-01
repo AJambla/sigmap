@@ -68,33 +68,14 @@ function _mcpTargets(cwd) {
   ];
 }
 
-/** Count code files under srcDirs modified after the context was generated. */
+/**
+ * Count code files under srcDirs modified after the context was generated.
+ * Delegates to the shared primitive so `status` counts the same population
+ * against the same timestamp (#825).
+ */
 function _countChangedSince(cwd, srcDirs, config, ctxMtime) {
-  const { CODE_EXTS } = require('../analysis/coverage-score');
-  const exclude = new Set(EXCLUDE_DIRS);
-  if (config && Array.isArray(config.exclude)) for (const x of config.exclude) exclude.add(String(x));
-
-  let changed = 0;
-  let seen = 0;
-  const walk = (dir, depth) => {
-    if (depth > 8 || seen > 5000) return;
-    let entries;
-    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return; }
-    for (const e of entries) {
-      if (exclude.has(e.name)) continue;
-      const full = path.join(dir, e.name);
-      if (e.isDirectory()) walk(full, depth + 1);
-      else if (e.isFile() && CODE_EXTS.has(path.extname(e.name).toLowerCase())) {
-        seen++;
-        try { if (fs.statSync(full).mtimeMs > ctxMtime) changed++; } catch (_) {}
-      }
-    }
-  };
-  for (const d of srcDirs) {
-    const abs = path.isAbsolute(d) ? d : path.join(cwd, d);
-    if (fs.existsSync(abs)) walk(abs, 0);
-  }
-  return changed;
+  const { changedSince } = require('../analysis/index-state');
+  return changedSince(cwd, Object.assign({}, config, { srcDirs }), ctxMtime);
 }
 
 /**
@@ -189,25 +170,52 @@ function diagnose(cwd, opts = {}) {
   }
 
   // 4. Signature index
+  //
+  // #825: this printed one bare total ("447 file(s) indexed") over a population
+  // `generate` deliberately widens past srcDirs, so it read as coverage of the
+  // source tree and never surfaced a genuinely stale entry. The classifier owns
+  // the split; the three classes are reported as what they are.
   let indexSize = 0;
+  let indexClass = null;
   try {
     const { buildSigIndex } = require('../retrieval/ranker');
-    indexSize = buildSigIndex(cwd).size;
+    const sigIndex = buildSigIndex(cwd);
+    indexSize = sigIndex.size;
+    const { classifyIndexEntries } = require('../analysis/index-state');
+    indexClass = classifyIndexEntries(cwd, sigIndex.keys(), config);
   } catch (_) {}
   if (indexSize === 0) {
     add('index', 'Signature index', ctxFiles.length === 0 ? 'fail' : 'warn', 'no signatures indexed', 'run: npx sigmap   then: sigmap ask "<query>"');
-  } else {
+  } else if (!indexClass) {
     add('index', 'Signature index', 'ok', `${indexSize} file(s) indexed`);
+  } else {
+    const { formatAugmented, staleRemedies } = require('../analysis/index-state');
+    const parts = [`${indexClass.inScope.length} in-scope file(s) indexed`];
+    if (indexClass.augmented.length) parts.push(`${indexClass.augmented.length} beyond srcDirs (${formatAugmented(indexClass)})`);
+    if (indexClass.stale) parts.push(`${indexClass.stale} stale`);
+    const remedies = staleRemedies(indexClass);
+    add('index', 'Signature index', indexClass.stale ? 'warn' : 'ok', parts.join(' · '), remedies.length ? remedies[0] : null);
   }
 
   // 5. Index freshness
+  //
+  // #825: the timestamp comes from the shared primitive, so `status` cannot
+  // report "never" against the same index this calls up to date. An index
+  // holding stale entries is not up to date either, whatever the mtimes say.
   try {
     if (ctxFiles.length) {
-      const ctxMtime = Math.max(...ctxFiles.map((f) => { try { return fs.statSync(f).mtimeMs; } catch (_) { return 0; } }));
+      const { indexFreshness } = require('../analysis/index-state');
+      const fresh = indexFreshness(cwd);
+      const sinceMs = fresh.ts ? Date.parse(fresh.ts) : NaN;
+      const refMs = Number.isFinite(sinceMs)
+        ? sinceMs
+        : Math.max(...ctxFiles.map((f) => { try { return fs.statSync(f).mtimeMs; } catch (_) { return 0; } }));
       const srcDirs = (config && Array.isArray(config.srcDirs) && config.srcDirs.length) ? config.srcDirs : ['src', 'app', 'lib'];
-      const changed = _countChangedSince(cwd, srcDirs, config, ctxMtime);
-      if (changed > 0) add('freshness', 'Index freshness', 'warn', `${changed} source file(s) changed since last generate`, 'run: sigmap   (or: sigmap --watch to auto-refresh)');
-      else add('freshness', 'Index freshness', 'ok', 'index is up to date with sources');
+      const changed = _countChangedSince(cwd, srcDirs, config, refMs);
+      const from = fresh.source ? ` (from ${fresh.source})` : '';
+      if (changed > 0) add('freshness', 'Index freshness', 'warn', `${changed} source file(s) changed since last generate${from}`, 'run: sigmap   (or: sigmap --watch to auto-refresh)');
+      else if (indexClass && indexClass.stale) add('freshness', 'Index freshness', 'warn', `sources unchanged${from}, but the index holds ${indexClass.stale} stale entry/entries`, 'run: sigmap   (prunes deleted files), then: sigmap validate');
+      else add('freshness', 'Index freshness', 'ok', `index is up to date with sources${from}`);
     }
   } catch (_) {}
 
