@@ -613,10 +613,15 @@ function buildCallGraph(cwd, opts = {}) {
     return null;
   };
 
+  // #768: a zero here means "no edge was found", not "no caller exists". The
+  // two systematic blind spots are counted while scanning so the formatter can
+  // say which, instead of asserting a safety property the graph cannot support.
+  let dynamicLoads = 0;
   for (const f of files) {
     normToAbs.set(normalizePath(path.resolve(f)), path.resolve(f));
     let src;
     try { src = fs.readFileSync(f, 'utf8'); } catch (_) { continue; }
+    dynamicLoads += countDynamicLoads(src);
     const fileDefs = extractDefs(f, src);
     if (!fileDefs) continue;
     perFileDefs.set(f, fileDefs);
@@ -726,7 +731,13 @@ function buildCallGraph(cwd, opts = {}) {
     for (const [k, set] of mapOfSets.entries()) out.set(k, [...set]);
     return out;
   };
-  return { forward: toArr(forward), reverse: toArr(reverse), defs, edgeConfidence };
+  const scopeRoots = opts.files
+    ? ['(explicit file list)']
+    : (opts.srcDirs || _configuredSrcDirs(cwd) || ['src', 'app', 'lib']);
+  return {
+    forward: toArr(forward), reverse: toArr(reverse), defs, edgeConfidence,
+    scope: { roots: scopeRoots, files: files.length, dynamicLoads },
+  };
 }
 
 /**
@@ -803,9 +814,28 @@ function _bfs(seedIds, graph, maxDepth) {
 function methodImpact(symbol, cwd, opts = {}) {
   const graph = opts.graph || buildCallGraph(cwd, opts);
   const ids = _resolveSymbol(symbol, graph.defs);
-  if (ids.length === 0) return { symbol, resolved: [], direct: [], transitive: [], total: 0, unresolved: true };
+  const scope = graph.scope || null;
+  if (ids.length === 0) return { symbol, resolved: [], direct: [], transitive: [], total: 0, unresolved: true, scope };
   const { direct, transitive } = _bfs(ids, graph.reverse, opts.depth || 0);
-  return { symbol, resolved: ids, direct, transitive, total: direct.length + transitive.length, unresolved: false };
+  return { symbol, resolved: ids, direct, transitive, total: direct.length + transitive.length, unresolved: false, scope };
+}
+
+/**
+ * Module loads the import graph cannot follow, per file.
+ *
+ * Two forms, both common in this codebase: a `require()` whose argument is not
+ * a static string literal, and the bundle-safe wrappers (`requireSourceOrBundled`,
+ * `__require`) that take a literal but are invisible to a resolver looking for
+ * `require`/`import`. Each one is a caller edge that may exist and was not seen.
+ */
+function countDynamicLoads(src) {
+  if (!src) return 0;
+  let n = 0;
+  const dynamicRequire = /\brequire\s*\(\s*(?!['"`])/g;
+  const wrappers = /\b(?:requireSourceOrBundled|__require)\s*\(/g;
+  while (dynamicRequire.exec(src)) n++;
+  while (wrappers.exec(src)) n++;
+  return n;
 }
 
 /**
@@ -815,21 +845,47 @@ function methodImpact(symbol, cwd, opts = {}) {
 function methodCallees(symbol, cwd, opts = {}) {
   const graph = opts.graph || buildCallGraph(cwd, opts);
   const ids = _resolveSymbol(symbol, graph.defs);
-  if (ids.length === 0) return { symbol, resolved: [], direct: [], transitive: [], total: 0, unresolved: true };
+  const scope = graph.scope || null;
+  if (ids.length === 0) return { symbol, resolved: [], direct: [], transitive: [], total: 0, unresolved: true, scope };
   const { direct, transitive } = _bfs(ids, graph.forward, opts.depth || 0);
-  return { symbol, resolved: ids, direct, transitive, total: direct.length + transitive.length, unresolved: false };
+  return { symbol, resolved: ids, direct, transitive, total: direct.length + transitive.length, unresolved: false, scope };
 }
 
 // ── Formatters ───────────────────────────────────────────────────────────────
+/**
+ * What the search actually covered, as a human clause (#768).
+ *
+ * `--callers` printed `zero method blast radius` — an affirmative safety claim
+ * — for symbols that are demonstrably called, because the graph walks srcDirs
+ * only and cannot follow dynamic module loads. It could not distinguish "no
+ * caller exists" from "no edge was found here", and that is precisely the
+ * claim a developer leans on before changing a signature. `--impact` already
+ * labels itself a lower bound; this brings the stronger claim into line.
+ */
+function _scopeClause(scope) {
+  if (!scope) return 'lower bound — out-of-scope and dynamically-loaded callers are not resolved';
+  const roots = (scope.roots || []).join(', ') || 'the configured source roots';
+  const parts = [`searched ${roots}`];
+  if (scope.files) parts.push(`${scope.files} file(s)`);
+  let clause = `lower bound — ${parts.join(', ')}`;
+  if (scope.dynamicLoads > 0) {
+    clause += `; ${scope.dynamicLoads} dynamic module load(s) could not be followed`;
+  }
+  return clause;
+}
+
 function formatCallGraph(result, kind) {
   const verb = kind === 'callees' ? 'calls' : 'callers of';
   const lines = [`## ${kind === 'callees' ? 'Callees' : 'Callers'}: \`${result.symbol}\``, ''];
   if (result.unresolved) { lines.push('_symbol not found in the call-graph._'); return lines.join('\n'); }
+  const qualifier = _scopeClause(result.scope);
   if (result.total === 0) {
-    lines.push(kind === 'callees' ? '_calls no repo-defined symbols._' : '_no repo symbol calls this — zero method blast radius._');
+    lines.push(kind === 'callees'
+      ? `_no repo-defined callee found (${qualifier})._`
+      : `_no caller found (${qualifier})._`);
     return lines.join('\n');
   }
-  lines.push(`**Total ${verb}:** ${result.total}`, '');
+  lines.push(`**Total ${verb}:** ${result.total} _(${qualifier})_`, '');
   if (result.direct.length) { lines.push(`### Direct`); for (const id of result.direct) lines.push(`- \`${id}\``); lines.push(''); }
   if (result.transitive.length) { lines.push(`### Transitive`); for (const id of result.transitive) lines.push(`- \`${id}\``); lines.push(''); }
   return lines.join('\n');
@@ -844,6 +900,10 @@ function formatCallGraphJSON(result, kind) {
     transitive: result.transitive,
     total: result.total,
     unresolved: result.unresolved,
+    // The same qualification the human output carries, so a machine consumer
+    // cannot read an unqualified zero either (#768).
+    lowerBound: true,
+    scope: result.scope || null,
   };
 }
 

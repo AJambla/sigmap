@@ -78,12 +78,12 @@ features:
 
 <div style="max-width:840px;margin:0 auto;padding:18px 24px 0;text-align:center">
 <div style="display:inline-flex;flex-wrap:wrap;gap:.5rem;justify-content:center;background:var(--vp-c-brand-soft,#ede9fe);border:1px solid rgba(124,106,247,.25);border-radius:999px;padding:.55rem .9rem;font-size:.9rem;color:var(--vp-c-text-1)">
-  <span><strong>Release:</strong> v8.59.0</span>
+  <span><strong>Release:</strong> v8.60.0</span>
   <span>·</span>
-  <span><strong>New — the dashboard owns neither its path nor its language list:</strong> <code>--dashboard</code> wrote into <code>benchmarks/reports/</code>, a directory SigMap does not own — in a consumer repo it either does not exist, so SigMap created it, or it means something else entirely, and either way the file landed outside the <code>.context/</code> line <code>--init</code> gitignores. It now writes <code>.context/dashboard.html</code>, with <code>--out &lt;path&gt;</code> for an explicit destination; an audit confirmed this was the <strong>only</strong> SigMap command writing outside <code>.context/</code>. Separately the coverage panel graded against a hardcoded 21-entry language list while the project ships <strong>36</strong>, so a repo written in Elixir, Lua, R, GDScript, Astro, TOML or Terraform read as uncovered. The denominator was only half of it: detection was a <em>second</em> extension map covering the same 21, so the numerator could never reach a widened denominator — raising it 21 &rarr; 36 alone would have moved this repo from 2/21 to 2/36, making the published figure <em>worse</em>. Both sides now come from one module, whose exported language list reproduces the derived list behind <code>version.json</code> exactly. A third copy fell out with it — the chart's 21 positional label abbreviations, replaced by the languages actually present. On a repo using Elixir, Lua, R and Terraform the figure moves <strong>0/21 &rarr; 4/36</strong>. 36 languages, zero dependencies, offline, deterministic.</span>
+  <span><strong>New — say what was actually searched:</strong> two commands reported a narrower scope than they claimed, and neither said so. <code>--diff &lt;ref&gt;</code> ran <code>git diff &lt;ref&gt;..HEAD</code> — ref vs <em>HEAD</em>, which excludes the working tree — while the flag is documented as "changes since <code>&lt;ref&gt;</code>". A developer with local edits got a diff that omitted exactly the files they were editing; on a fixture holding one committed and one uncommitted change it reported a single file. The same wrong range existed <strong>twice</strong>, in the CLI and in the <code>get_diff_context</code> MCP tool, so one helper now owns all three ranges and the two surfaces cannot disagree about what "since <code>&lt;ref&gt;</code>" means. Separately <code>--callers</code> printed <code>zero method blast radius</code> for symbols that are demonstrably called: the call graph walks <code>srcDirs</code> only, so a repo's root-level CLI entry point — the largest caller of every module beneath it — contributes no edges, and the bundle-safe require wrapper is a module load the resolver cannot follow. It could not tell <em>no caller exists</em> from <em>no edge was found</em>, which is precisely the claim you lean on before deleting or changing a signature. Every result now names the scope it searched and counts what it could not follow — in the human output, in <code>--json</code>, and for <code>--callees</code> on the same reasoning. 36 languages, zero dependencies, offline, deterministic.</span>
 </div>
 <div style="margin-top:.4rem;display:inline-flex;flex-wrap:wrap;gap:.5rem;justify-content:center;background:var(--vp-c-default-soft,#f3f4f6);border:1px solid rgba(0,0,0,.08);border-radius:999px;padding:.55rem .9rem;font-size:.9rem;color:var(--vp-c-text-2)">
-  <span><strong>Benchmark:</strong> sigmap-v8.59-main</span>
+  <span><strong>Benchmark:</strong> sigmap-v8.60-main</span>
   <span>·</span>
   <span>78.6% hit@5 · 95.8% token reduction · 2026-10-01</span>
 </div>
@@ -177,7 +177,7 @@ See the full [end-to-end walkthrough](/guide/walkthrough) to watch this in actio
 | Overall token reduction | — | **95.8%** |
 | GPT-4o overflow repos | 14/21 | **0/21** |
 
-Latest saved benchmark run: **2026-10-01 (v8.59.0)**.
+Latest saved benchmark run: **2026-10-01 (v8.60.0)**.
 
 </div>
 
