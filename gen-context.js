@@ -1008,17 +1008,24 @@ __factories["./src/analysis/coverage-score"] = function(module, exports) {
 
     const includedSet = new Set((fileEntries || []).map(f => f.filePath));
 
-    // Walk srcDirs: separate code files from non-code files
+    // Walk srcDirs: separate code files from non-code files. srcDirs can overlap
+    // (monorepo packages scan ['src', 'lib', 'app', '.'] — '.' re-walks everything),
+    // so dedupe by absolute path: a file counted twice inflated `total` past the
+    // real file count and contradicted the box's "Files scanned" line (#669).
     const allFiles  = [];
     const allSource = [];
     for (const relDir of srcDirs) {
       const absDir = path.resolve(cwd, relDir);
       if (fs.existsSync(absDir)) _walk(absDir, excludeSet, allFiles);
     }
+    let nonCodeSkipped = 0;
+    const seen = new Set();
     for (const f of allFiles) {
+      if (seen.has(f)) continue;
+      seen.add(f);
       if (CODE_EXTS.has(path.extname(f).toLowerCase())) allSource.push(f);
+      else nonCodeSkipped++;
     }
-    const nonCodeSkipped = allFiles.length - allSource.length;
 
     const total    = allSource.length;
     const included = allSource.filter(f => includedSet.has(f)).length;
@@ -32133,8 +32140,10 @@ function runGenerate(cwd, config, reportMode, reportJson = false) {
     && !process.argv.includes('--quiet')) {
     const bar  = '\u2500'.repeat(43);
     const syms = fileEntries.reduce((n, f) => n + (f.sigs ? f.sigs.length : 0), 0);
+    // Clamp at 0: on tiny packages the output header can exceed the raw input,
+    // and "Token reduction: −366%" reads as a bug rather than a measurement (#669).
     const pct  = result.inputTokenTotal > 0
-      ? Math.round((1 - result.finalTokens / result.inputTokenTotal) * 100)
+      ? Math.max(0, Math.round((1 - result.finalTokens / result.inputTokenTotal) * 100))
       : 0;
     // v4.0: coverage score in post-run summary
     let coverageLine = '';

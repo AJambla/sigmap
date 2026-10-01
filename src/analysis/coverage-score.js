@@ -56,17 +56,24 @@ function coverageScore(cwd, fileEntries, config) {
 
   const includedSet = new Set((fileEntries || []).map(f => f.filePath));
 
-  // Walk srcDirs: separate code files from non-code files
+  // Walk srcDirs: separate code files from non-code files. srcDirs can overlap
+  // (monorepo packages scan ['src', 'lib', 'app', '.'] — '.' re-walks everything),
+  // so dedupe by absolute path: a file counted twice inflated `total` past the
+  // real file count and contradicted the box's "Files scanned" line (#669).
   const allFiles  = [];
   const allSource = [];
   for (const relDir of srcDirs) {
     const absDir = path.resolve(cwd, relDir);
     if (fs.existsSync(absDir)) _walk(absDir, excludeSet, allFiles);
   }
+  let nonCodeSkipped = 0;
+  const seen = new Set();
   for (const f of allFiles) {
+    if (seen.has(f)) continue;
+    seen.add(f);
     if (CODE_EXTS.has(path.extname(f).toLowerCase())) allSource.push(f);
+    else nonCodeSkipped++;
   }
-  const nonCodeSkipped = allFiles.length - allSource.length;
 
   const total    = allSource.length;
   const included = allSource.filter(f => includedSet.has(f)).length;
