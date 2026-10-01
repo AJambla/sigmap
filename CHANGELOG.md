@@ -8,6 +8,9 @@ Format: [Semantic Versioning](https://semver.org/)
 
 ## [Unreleased]
 
+### Fixed
+- CLI polish batch from the v8.48 audit (#669) by @AJambla — the post-run summary box's `Output:` line names the adapter's actual product instead of a hardcoded `copilot-instructions.md`; `Token reduction` clamps at 0% instead of printing negative percentages on tiny packages; `coverageScore` dedupes overlapping `srcDirs` (monorepo packages scan `['src','lib','app','.']`, so `'.'` double-counted every file); squeeze stack-trace enrichment prefers the enclosing function's anchored signature over a wide `module.exports` sig; `review-pr` excludes generated artifacts (`.context/`, adapter outputs, `dist/`-style build dirs) from missing-tests/god-node/scope-drift and labels them `generated` instead of `source`; the `--setup` post-commit hook uses the documented bare invocation instead of the undocumented `--generate` flag; stale MCP tool-count comments corrected to 22
+
 ---
 
 ## [8.60.0] — 2026-10-01
