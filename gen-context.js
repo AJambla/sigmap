@@ -8538,6 +8538,22 @@ __factories["./src/extractors/dispatch"] = function(module, exports) {
     '.md': 'markdown',
   };
 
+  /**
+   * Languages SigMap can extract, resolved from the one map above plus the two
+   * that `langFor` routes by FILENAME rather than extension.
+   *
+   * `dashboard.js` kept a private 21-entry list and graded coverage against it,
+   * so a repo written in Elixir, Lua, R, GDScript or Terraform was reported as
+   * 9.5% covered against a denominator that had drifted from reality (#663). The
+   * set is derived here instead, so adding an extractor cannot leave a second
+   * copy stale. It reproduces `scripts/lib/source-meta.mjs` `deriveLanguages()`
+   * exactly — the list `version.json` publishes and `check-doc-counts` gates —
+   * which is why `typescript_react` is its own entry here as it is there.
+   *
+   * @type {string[]} sorted, deduplicated
+   */
+  const LANGUAGES = [...new Set([...Object.values(EXT_MAP), 'dockerfile', 'pipeline'])].sort();
+
   /** Resolve a language key from a file path/name. */
   function langFor(filePathOrName) {
     const raw = String(filePathOrName || '');
@@ -8583,7 +8599,7 @@ __factories["./src/extractors/dispatch"] = function(module, exports) {
     }
   }
 
-  module.exports = { extractFile, langFor, EXT_MAP };
+  module.exports = { extractFile, langFor, EXT_MAP, LANGUAGES };
   
 };
 
@@ -15327,12 +15343,6 @@ __factories["./src/format/dashboard"] = function(module, exports) {
   const path = require('path');
   const { readLog } = __require('./src/tracking/logger');
 
-  const LANGUAGE_KEYS = [
-    'typescript', 'javascript', 'python', 'java', 'kotlin', 'go', 'rust',
-    'csharp', 'cpp', 'ruby', 'php', 'swift', 'dart', 'scala', 'vue',
-    'svelte', 'html', 'css', 'yaml', 'shell', 'dockerfile',
-  ];
-
   function toNumber(v) {
     const n = Number(v);
     return Number.isFinite(n) ? n : null;
@@ -15381,31 +15391,21 @@ __factories["./src/format/dashboard"] = function(module, exports) {
     return false;
   }
 
+  /**
+   * Resolve a file to a language key.
+   *
+   * This was a second extension map covering the same 21 languages as the old
+   * `LANGUAGE_KEYS`, which is why widening only the denominator would have made
+   * the figure worse: the numerator could never reach it. Detection and the
+   * supported set now come from the same module (#663).
+   */
   function detectLanguage(filePath) {
-    const base = path.basename(filePath);
-    const ext = path.extname(filePath).toLowerCase();
-    if (base === 'Dockerfile' || /^Dockerfile\./.test(base)) return 'dockerfile';
-    if (ext === '.ts' || ext === '.tsx') return 'typescript';
-    if (ext === '.js' || ext === '.jsx' || ext === '.mjs' || ext === '.cjs') return 'javascript';
-    if (ext === '.py' || ext === '.pyw') return 'python';
-    if (ext === '.java') return 'java';
-    if (ext === '.kt' || ext === '.kts') return 'kotlin';
-    if (ext === '.go') return 'go';
-    if (ext === '.rs') return 'rust';
-    if (ext === '.cs') return 'csharp';
-    if (ext === '.cpp' || ext === '.c' || ext === '.h' || ext === '.hpp' || ext === '.cc') return 'cpp';
-    if (ext === '.rb' || ext === '.rake') return 'ruby';
-    if (ext === '.php') return 'php';
-    if (ext === '.swift') return 'swift';
-    if (ext === '.dart') return 'dart';
-    if (ext === '.scala' || ext === '.sc') return 'scala';
-    if (ext === '.vue') return 'vue';
-    if (ext === '.svelte') return 'svelte';
-    if (ext === '.html' || ext === '.htm') return 'html';
-    if (ext === '.css' || ext === '.scss' || ext === '.sass' || ext === '.less') return 'css';
-    if (ext === '.yml' || ext === '.yaml') return 'yaml';
-    if (ext === '.sh' || ext === '.bash' || ext === '.zsh' || ext === '.fish') return 'shell';
-    return null;
+    try {
+      const { langFor } = __require('./src/extractors/dispatch');
+      return langFor(filePath);
+    } catch (_) {
+      return null;
+    }
   }
 
   function walkFiles(dir, maxDepth, depth, out, excludeSet) {
@@ -15441,8 +15441,11 @@ __factories["./src/format/dashboard"] = function(module, exports) {
       for (const item of cfg.exclude) exclude.add(String(item));
     }
 
+    let languages = [];
+    try { ({ LANGUAGES: languages } = __require('./src/extractors/dispatch')); } catch (_) { languages = []; }
+
     const counts = {};
-    for (const key of LANGUAGE_KEYS) counts[key] = 0;
+    for (const key of languages) counts[key] = 0;
 
     const files = [];
     for (const relDir of srcDirs) {
@@ -15453,11 +15456,11 @@ __factories["./src/format/dashboard"] = function(module, exports) {
 
     for (const f of files) {
       const lang = detectLanguage(f);
-      if (lang) counts[lang]++;
+      if (lang && counts[lang] !== undefined) counts[lang]++;
     }
 
-    const covered = LANGUAGE_KEYS.filter((k) => counts[k] > 0).length;
-    const supported = LANGUAGE_KEYS.length;
+    const covered = languages.filter((k) => counts[k] > 0).length;
+    const supported = languages.length;
     const pct = supported > 0 ? parseFloat(((covered / supported) * 100).toFixed(1)) : 0;
     return { supported, covered, pct, perLanguage: counts };
   }
@@ -15577,41 +15580,55 @@ __factories["./src/format/dashboard"] = function(module, exports) {
     ].join('');
   }
 
+  /**
+   * Per-language file counts for the languages actually present in this repo.
+   *
+   * This charted a fixed 21 languages against a positionally-aligned list of 21
+   * label abbreviations — a third copy of the language set, after `LANGUAGE_KEYS`
+   * and the private extension map (#663). Charting all 36 supported languages
+   * instead would put 20px between labels and read as noise, and most of them are
+   * zero in any one repo. The chart now shows what is here, busiest first, so it
+   * stays legible however many extractors SigMap ships.
+   */
   function barChartSvg(perLanguage) {
     const width = 760;
     const height = 260;
     const left = 20;
     const top = 34;
     const usableW = width - left * 2;
-    const keys = LANGUAGE_KEYS.slice();
-    const max = Math.max(1, ...keys.map((k) => perLanguage[k] || 0));
-    const barW = usableW / keys.length;
 
-    const bars = [];
-    for (let i = 0; i < keys.length; i++) {
-      const key = keys[i];
-      const v = perLanguage[key] || 0;
-      const h = (v / max) * 160;
-      const x = left + i * barW + 2;
-      const y = top + 160 - h;
-      bars.push(`<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${Math.max(2, barW - 4).toFixed(1)}" height="${h.toFixed(1)}" fill="#7aa2ff" rx="2"/>`);
-    }
+    const present = Object.entries(perLanguage || {})
+      .filter(([, v]) => v > 0)
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
 
-    const labels = ['ts', 'js', 'py', 'java', 'kt', 'go', 'rs', 'cs', 'cpp', 'rb', 'php', 'swift', 'dart', 'scala', 'vue', 'sv', 'html', 'css', 'yaml', 'sh', 'df'];
-    const xLabels = labels.map((lbl, i) => {
-      const x = left + i * barW + barW / 2;
-      return `<text x="${x.toFixed(1)}" y="222" fill="#8ea0d9" font-size="9" font-family="monospace" text-anchor="middle">${lbl}</text>`;
-    });
-
-    return [
+    const frame = (body) => [
       `<svg viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Extractor coverage by language">`,
       '<rect x="0" y="0" width="100%" height="100%" fill="#0f1320" rx="12"/>',
       '<text x="20" y="24" fill="#d7defa" font-size="13" font-family="monospace">Per-language extractor coverage (file counts)</text>',
       '<line x1="20" y1="194" x2="740" y2="194" stroke="#223056" stroke-width="1"/>',
-      bars.join(''),
-      xLabels.join(''),
+      body,
       '</svg>',
     ].join('');
+
+    if (present.length === 0) {
+      return frame('<text x="380" y="120" fill="#8ea0d9" font-size="12" font-family="monospace" text-anchor="middle">no files in a supported language under srcDirs</text>');
+    }
+
+    const max = Math.max(1, ...present.map(([, v]) => v));
+    const barW = usableW / present.length;
+    const bars = [];
+    const xLabels = [];
+    for (let i = 0; i < present.length; i++) {
+      const [key, v] = present[i];
+      const h = (v / max) * 160;
+      const x = left + i * barW + 2;
+      const y = top + 160 - h;
+      bars.push(`<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${Math.max(2, barW - 4).toFixed(1)}" height="${h.toFixed(1)}" fill="#7aa2ff" rx="2"/>`);
+      const cx = left + i * barW + barW / 2;
+      xLabels.push(`<text x="${cx.toFixed(1)}" y="222" fill="#8ea0d9" font-size="9" font-family="monospace" text-anchor="middle">${escapeAttr(key)}</text>`);
+    }
+
+    return frame(bars.join('') + xLabels.join(''));
   }
 
   function sparkline(values) {
@@ -32387,7 +32404,7 @@ Usage:
   ${cmd} --report --json                   Token report as JSON (for CI; exits 1 if over budget)
   ${cmd} --report --history                Print usage log summary from .context/usage.ndjson
   ${cmd} --report --history --chart        Include inline SVG charts + Unicode sparklines
-  ${cmd} --dashboard                       Write benchmarks/reports/dashboard.html
+  ${cmd} --dashboard [--out <path>]        Write .context/dashboard.html (HTML health dashboard)
   ${cmd} --suggest-tool "<task>"           Recommend model tier for a task description
   ${cmd} --suggest-tool "<task>" --json    Machine-readable tier recommendation
   ${cmd} --health                          Print composite health score
@@ -35715,7 +35732,15 @@ function main() {
       const health = score(cwd);
       const { generateDashboardHtml } = requireSourceOrBundled('./src/format/dashboard');
       const out = generateDashboardHtml(cwd, health);
-      const outPath = path.join(cwd, 'benchmarks', 'reports', 'dashboard.html');
+      // #782: this wrote into benchmarks/reports/, a directory SigMap does not
+      // own and which in a consumer repo either does not exist or means
+      // something else — leaving an untracked file outside the `.context/`
+      // line `--init` gitignores. Every other artifact lives under `.context/`.
+      const _outIdx = args.indexOf('--out');
+      const _outArg = _outIdx !== -1 ? (args[_outIdx + 1] || '').trim() : '';
+      const outPath = _outArg && !_outArg.startsWith('--')
+        ? path.resolve(cwd, _outArg)
+        : path.join(cwd, '.context', 'dashboard.html');
       fs.mkdirSync(path.dirname(outPath), { recursive: true });
       fs.writeFileSync(outPath, out.html, 'utf8');
       if (args.includes('--json')) {

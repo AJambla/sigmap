@@ -107,6 +107,22 @@ const EXT_MAP = {
   '.md': 'markdown',
 };
 
+/**
+ * Languages SigMap can extract, resolved from the one map above plus the two
+ * that `langFor` routes by FILENAME rather than extension.
+ *
+ * `dashboard.js` kept a private 21-entry list and graded coverage against it,
+ * so a repo written in Elixir, Lua, R, GDScript or Terraform was reported as
+ * 9.5% covered against a denominator that had drifted from reality (#663). The
+ * set is derived here instead, so adding an extractor cannot leave a second
+ * copy stale. It reproduces `scripts/lib/source-meta.mjs` `deriveLanguages()`
+ * exactly — the list `version.json` publishes and `check-doc-counts` gates —
+ * which is why `typescript_react` is its own entry here as it is there.
+ *
+ * @type {string[]} sorted, deduplicated
+ */
+const LANGUAGES = [...new Set([...Object.values(EXT_MAP), 'dockerfile', 'pipeline'])].sort();
+
 /** Resolve a language key from a file path/name. */
 function langFor(filePathOrName) {
   const raw = String(filePathOrName || '');
@@ -152,4 +168,4 @@ function extractFile(filePathOrName, src) {
   }
 }
 
-module.exports = { extractFile, langFor, EXT_MAP };
+module.exports = { extractFile, langFor, EXT_MAP, LANGUAGES };
