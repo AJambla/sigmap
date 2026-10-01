@@ -120,9 +120,10 @@ sigmap judge [--response <f>|-] [--context <f>]  Score an AI answer's groundedne
 sigmap conventions                       Extract repo file-naming/export/test conventions (--conflicts, --inject, --report, --fix)
 sigmap scaffold "<name>"                 Propose a convention-matched file/dir scaffold (--ext, --threshold, --force, --json)
 sigmap verify-plan <plan.md|->           Check a plan vs the live index — files/symbols exist, blast radius, scope (--json)
+sigmap verify-plan <plan.md> --creates <names>  Mark names the plan INTRODUCES (comma-separated) — checked in reverse: they must not exist yet
 sigmap review-pr                         Audit a diff — scope drift, god-node edits, missing tests, security files (--staged, --base, --json, --markdown)
 sigmap review-pr --markdown              PR Evidence Report — branded Markdown (signatures + blast radius + tests) to post as a PR comment
-sigmap create "<task>"                   Grounded-creation pipeline: scaffold → verify-plan → verify-ai-output → review-pr (--staged)
+sigmap create "<task>"                   Grounded-creation pipeline: scaffold → verify-plan → verify-ai-output → review-pr (--staged, --creates)
 sigmap wiki                              Deterministic architecture wiki from signatures + graph — no LLM (--json, --out <path>)
 sigmap squeeze <file|->                  Minimize a pasted stacktrace/CI-log/JSON blob (--json for stats)
 sigmap squeeze --response <file|->       Minimize an agent/tool response (same engine; also exposed as the squeeze_output MCP tool)
