@@ -71,7 +71,7 @@ If you are new to the product, start with the workflow pages first:
 | `scaffold <name>` | Propose a convention-matched structure (filename, export style, test file) for a new module — refuses below the confidence floor |
 | `plan "<goal>"` | Analyze change impact and plan modifications — returns files grouped by confidence |
 | `judge [--response <f>\|-] [--context <f>]` | Rule-based groundedness scoring for LLM responses (stdin ok; `--context` defaults to the generated one) |
-| `verify-plan <plan.md>` | Check a plan against the live index before execution — referenced files/symbols exist, blast radius, scope (`--json`; stdin via `-`) |
+| `verify-plan <plan.md>` | Check a plan against the live index before execution — referenced files/symbols exist, blast radius, scope; `Creates:` / `--creates` marks names the plan introduces (`--json`; stdin via `-`) |
 | `verify <answer.md>` | **Flagship** grounding guard — flag fake files, test files, imports, symbols, and npm scripts in an AI answer (deterministic, offline). Short alias of `verify-ai-output` |
 | `verify-ai-output <answer.md>` | Full command name for `verify` — identical behaviour, flags, and exit codes |
 | `verify <answer.md> --report [out.html]` | Write a standalone red/amber/green HTML report of the findings |
@@ -628,6 +628,7 @@ Check a plan against the **live index** *before* the agent executes it — step 
 sigmap verify-plan plan.md            # check a plan file
 cat plan.md | sigmap verify-plan -    # or from stdin
 sigmap verify-plan plan.md --json     # machine-readable result
+sigmap verify-plan plan.md --creates formatDate,src/util/date.js   # names the plan introduces
 ```
 
 ```
@@ -645,13 +646,44 @@ It checks three things:
 |-------|-------|
 | **Existence** | referenced files that don't exist · symbols not in the live index (with a closest-match suggestion) — both **errors** |
 | **Blast radius** | each referenced file's transitive dependents (via the impact graph); files above the threshold are a **warning** |
-| **Scope** | plans referencing more distinct files than the scope threshold — a **warning** |
+| **Scope** | plans touching more distinct files than the scope threshold — a **warning** |
+
+### References vs introductions — the `Creates:` section (v8.57.0+, #666)
+
+A plan has two kinds of name in it, and checking them the same way makes the
+creation path unreachable: a plan that *introduces* `formatDate` would fail for
+naming a symbol that, by construction, does not exist yet.
+
+So a **`Creates:` section** marks the names the plan will introduce. They are
+verified in **reverse** — they must **not** exist — which is the redefinition
+guard: a plan that claims to create something already in the repo is flagged.
+Introductions are also excluded from the existence and blast-radius checks.
+
+```markdown
+# Add a date helper
+
+## Creates
+- `formatDate(date)`
+- `src/util/date.js`
+
+Wire it into `src/core.js` next to `renderRow(...)`.
+```
+
+The label is matched as a heading (`## Creates`, `### Creates new`) or a label
+line (`Creates:`, `**Creates:**`), inline (`Creates: a, b`) or as the bulleted /
+indented lines beneath it. An entry with a `/` or a file extension is a **file**;
+anything else is a **symbol**. Prose that merely begins with the word — `Creates
+a new helper for dates.` — is **not** a section.
+
+With no section and no `--creates`, every name is a reference and behaviour is
+exactly as before.
 
 | Option | Description |
 |--------|-------------|
-| `--json` | Emit `{ issues, blast, scope, summary }` |
+| `--creates <names>` | Comma-separated names the plan introduces, for plans carrying no `Creates:` section. Merged with the section when both are present |
+| `--json` | Emit `{ issues, blast, scope, introduces, summary }` |
 
-A plan with any **error** exits non-zero (useful as a gate before execution); warnings do not fail. `sigmap create` orchestration and `review-pr` are planned follow-ups.
+A plan with any **error** exits non-zero (useful as a gate before execution); warnings do not fail.
 
 ---
 
@@ -791,7 +823,7 @@ The report carries **no wall-clock timestamp**, so it is byte-stable given a fix
 
 ## create
 
-Orchestrate the full **grounded-creation pipeline** in one command: `scaffold` → `verify-plan` → `verify-ai-output` → `review-pr`, with `1/4`…`4/4` numbering and a single pass/fail summary. You do the LLM writing between stages; `create` runs the deterministic guards it owns. Each stage runs **only when its input is present** — a stage with no input is *skipped* and never fails the run.
+Orchestrate the full **grounded-creation pipeline** in one command: `scaffold` → `verify-plan` → `verify-ai-output` → `review-pr`, with `1/4`…`4/4` numbering and a single pass/fail summary. You do the LLM writing between stages; `create` runs the deterministic guards it owns. Each stage runs **only when its input is present** — a stage with no input is *skipped* and never fails the run. A run where *no* stage had its input exits `2`, not `0` (see [Exit codes](#exit-codes) below).
 
 ```bash
 sigmap create "add login rate-limiting" \
@@ -823,11 +855,38 @@ sigmap create "demo" --name thing --json
 |--------|-------------|
 | `--name <n>` | Module name → enables the scaffold stage |
 | `--plan <f>` | Plan markdown file → enables verify-plan |
+| `--creates <names>` | Comma-separated names the plan introduces, forwarded to [verify-plan](#verify-plan) |
 | `--answer <f>` | AI answer markdown file → enables verify-ai-output |
 | `--base <ref>` / `--staged` | Diff source for review-pr (default: merge-base with `main`/`develop`) |
 | `--json` | Emit `{ task, steps, summary }` |
 
-`create` exits non-zero when any *ran* stage fails (skipped stages don't count), so it works as a single CI gate for the whole pipeline.
+When stage 1 proposes a scaffold, its proposed filenames are handed to stage 2
+as introductions automatically — so a plan naming the file `scaffold` just
+designed reaches a passing `verify-plan` instead of failing on it (#666).
+
+### Exit codes
+
+| Code | Meaning |
+|------|---------|
+| `0` | At least one stage ran, and every stage that ran passed |
+| `1` | A stage ran and **failed** |
+| `2` | **Nothing ran** — no stage had its input, so the run verified nothing (v8.57.0+, #767) |
+
+Exit `2` matters in CI: `failed === 0` is vacuously true over an empty set, so
+`create` with no inputs previously exited **0** and a pipeline step read success
+from a run that checked nothing. It now prints what each stage needed:
+
+```
+  0/4 ran · 0 passed · 0 failed · 4 skipped
+
+  nothing ran — create verifies the inputs you give it:
+    scaffold          needs --name <module> (plus a detectable file-naming convention)
+    verify-plan       needs --plan <plan.md>
+    verify-ai-output  needs --answer <answer.md>
+    review-pr         needs --staged, or commits since --base
+```
+
+Skipped stages still never *fail* the run — but they can no longer be the whole run.
 
 ---
 

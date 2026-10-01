@@ -8,6 +8,13 @@
  * scope in bounds? Catches Cause 1+2 at plan time — cheaper than after the
  * code is written. Reuses the verify primitives + the impact graph.
  * Zero-dependency, bundle-safe.
+ *
+ * A plan has two kinds of name in it, and checking them the same way makes the
+ * creation path unreachable (#666): a plan that *introduces* `formatDate` fails
+ * stage 2 for naming a symbol that, by construction, does not exist yet. So a
+ * `Creates:` section (or `--creates`) marks introductions, which are verified in
+ * REVERSE — they must NOT exist — and excluded from the reference checks. With
+ * neither present, nothing changes: every name is a reference, as before.
  */
 
 const fs = require('fs');
@@ -20,6 +27,14 @@ const { analyzeImpact } = require('../graph/impact');
 const DEFAULT_BLAST_THRESHOLD = 20; // transitive+direct dependents → "high blast radius"
 const DEFAULT_SCOPE_THRESHOLD = 10; // distinct referenced files → "broad scope"
 
+/**
+ * Heading/label that opens an introductions block, e.g. `## Creates`,
+ * `**Creates:**`, `Creates:` — the plan format documented in cli.md.
+ */
+const CREATES_RE = /^\s*(#{1,6}\s+)?\*{0,2}creates(?:\s+new)?\*{0,2}\s*(:)?\*{0,2}\s*(.*)$/i;
+/** Any other heading/label line closes the block. */
+const SECTION_END_RE = /^\s*(?:#{1,6}\s|(?:\*\*)?[A-Za-z][\w \t-]{0,40}(?:\*\*)?\s*:\s*$)/;
+
 /** Resolve a referenced path against cwd (handles a leading "./"). */
 function _fileExists(cwd, ref) {
   const clean = ref.replace(/^\.\//, '');
@@ -29,6 +44,55 @@ function _fileExists(cwd, ref) {
   return false;
 }
 
+/** Strip markdown list bullets, backticks, call parens and trailing prose. */
+function _cleanEntry(raw) {
+  let s = String(raw || '').trim();
+  s = s.replace(/^[-*+]\s+/, '').replace(/^\d+[.)]\s+/, '');
+  const ticked = s.match(/`([^`]+)`/);
+  if (ticked) s = ticked[1];
+  s = s.split(/\s+[—–-]\s+/)[0];           // "foo() — does a thing"
+  s = s.trim().replace(/\s*\([^)]*\)\s*$/, '').replace(/[,;.]+$/, '');
+  return s.trim();
+}
+
+/**
+ * Names a plan declares it will introduce.
+ *
+ * Reads a `Creates:` section — an inline list on the label line, the indented /
+ * bulleted lines under it, or both — and stops at the next heading or label.
+ * @param {string} text the plan as markdown
+ * @returns {{ name: string, line: number }[]} deduped, first-seen line kept
+ */
+function extractIntroductions(text) {
+  const lines = String(text || '').split('\n');
+  const seen = new Map();
+  const add = (raw, line) => {
+    const name = _cleanEntry(raw);
+    if (!name || /\s/.test(name) || !/[A-Za-z0-9]/.test(name)) return;  // prose, not a name
+    if (!seen.has(name)) seen.set(name, line);
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const m = CREATES_RE.exec(lines[i]);
+    if (!m || (!m[1] && !m[2])) continue;   // a label or heading, never prose
+    for (const part of String(m[3] || '').split(',')) add(part, i + 1);
+    for (let j = i + 1; j < lines.length; j++) {
+      const line = lines[j];
+      if (line.trim() === '') continue;
+      if (SECTION_END_RE.test(line) && !/^[\s]*[-*+]/.test(line)) { i = j - 1; break; }
+      if (!/^\s*(?:[-*+]|\d+[.)])\s+/.test(line) && !/^\s{2,}\S/.test(line)) { i = j - 1; break; }
+      for (const part of line.split(',')) add(part, j + 1);
+      i = j;
+    }
+  }
+  return [...seen.entries()].map(([name, line]) => ({ name, line }));
+}
+
+/** True when an introduction names a file rather than a symbol. */
+function _isPathLike(name) {
+  return name.includes('/') || /\.[A-Za-z][A-Za-z0-9]*$/.test(name);
+}
+
 /**
  * Verify a plan against the live index.
  * @param {string} planText the plan as markdown
@@ -36,8 +100,10 @@ function _fileExists(cwd, ref) {
  * @param {object} [opts]
  * @param {number} [opts.blastThreshold=20]
  * @param {number} [opts.scopeThreshold=10]
+ * @param {string[]} [opts.creates] names the plan introduces, in addition to
+ *   any `Creates:` section — files (by path) or symbols (bare names)
  * @param {(ref:string)=>boolean} [opts.fileExists] override for testing
- * @returns {{ issues: object[], blast: object[], scope: object, summary: object }}
+ * @returns {{ issues: object[], blast: object[], scope: object, introduces: object[], summary: object }}
  */
 function verifyPlan(planText, cwd, opts = {}) {
   const blastThreshold = opts.blastThreshold != null ? opts.blastThreshold : DEFAULT_BLAST_THRESHOLD;
@@ -49,17 +115,44 @@ function verifyPlan(planText, cwd, opts = {}) {
   const symbolsRef = extractSymbols(text);   // [{ name, line }]
   const { set: symbolSet, symbolCandidates } = buildSymbolSet(cwd);
 
+  // Introductions: the `Creates:` section plus any `--creates` names. Both are
+  // explicit author intent, so they are merged into one list.
+  const intro = new Map();
+  for (const { name, line } of extractIntroductions(text)) intro.set(name, line);
+  for (const raw of (opts.creates || [])) {
+    const name = _cleanEntry(raw);
+    if (name && !intro.has(name)) intro.set(name, null);
+  }
+  const introFiles = new Set();
+  const introSymbols = new Set();
+  for (const name of intro.keys()) (_isPathLike(name) ? introFiles : introSymbols).add(name);
+
   const issues = [];
 
-  // 1. Referenced files must exist.
+  // 0. Introductions must NOT exist yet — the redefinition guard. Verified from
+  // the declaration itself, so an introduction the plan never mentions again is
+  // still checked.
+  const introduces = [];
+  for (const [name, line] of intro) {
+    const kind = introFiles.has(name) ? 'file' : 'symbol';
+    const exists = kind === 'file' ? fileExists(name) : symbolSet.has(name);
+    introduces.push({ name, kind, line, exists });
+    if (exists) {
+      issues.push({ type: 'redefines-existing', ref: name, kind, line, severity: 'error' });
+    }
+  }
+
+  // 1. Referenced files must exist — unless the plan says it creates them.
   const existingFiles = [];
   for (const f of filesRef) {
+    if (introFiles.has(f.path)) continue;
     if (fileExists(f.path)) existingFiles.push(f.path);
     else issues.push({ type: 'missing-file', ref: f.path, line: f.line, severity: 'error' });
   }
 
   // 2. Referenced symbols must exist in the live index (suggest a near match).
   for (const s of symbolsRef) {
+    if (introSymbols.has(s.name)) continue;
     if (symbolSet.has(s.name)) continue;
     const match = closestMatch(s.name, symbolCandidates);
     issues.push({
@@ -83,10 +176,11 @@ function verifyPlan(planText, cwd, opts = {}) {
     blast.sort((a, b) => b.totalImpact - a.totalImpact);
   }
 
-  // 4. Scope.
-  const scope = { files: filesRef.length, symbols: symbolsRef.length, threshold: scopeThreshold };
-  if (filesRef.length > scopeThreshold) {
-    issues.push({ type: 'broad-scope', count: filesRef.length, threshold: scopeThreshold, severity: 'warn' });
+  // 4. Scope — counted over files the plan touches, introduced or referenced.
+  const scopeFiles = new Set([...filesRef.map((f) => f.path), ...introFiles]);
+  const scope = { files: scopeFiles.size, symbols: symbolsRef.length, threshold: scopeThreshold };
+  if (scopeFiles.size > scopeThreshold) {
+    issues.push({ type: 'broad-scope', count: scopeFiles.size, threshold: scopeThreshold, severity: 'warn' });
   }
 
   const errors = issues.filter((i) => i.severity === 'error').length;
@@ -95,9 +189,12 @@ function verifyPlan(planText, cwd, opts = {}) {
     issues,
     blast,
     scope,
+    introduces,
     summary: {
       filesReferenced: filesRef.length,
       symbolsReferenced: symbolsRef.length,
+      filesIntroduced: introFiles.size,
+      symbolsIntroduced: introSymbols.size,
       errors,
       warnings,
       ok: errors === 0,
@@ -105,4 +202,4 @@ function verifyPlan(planText, cwd, opts = {}) {
   };
 }
 
-module.exports = { verifyPlan, DEFAULT_BLAST_THRESHOLD, DEFAULT_SCOPE_THRESHOLD };
+module.exports = { verifyPlan, extractIntroductions, DEFAULT_BLAST_THRESHOLD, DEFAULT_SCOPE_THRESHOLD };
