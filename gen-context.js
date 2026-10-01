@@ -22197,7 +22197,7 @@ __factories["./src/mcp/server"] = function(module, exports) {
    *
    * Supported methods:
    *   initialize        → serverInfo + capabilities + negotiated protocolVersion
-   *   tools/list        → 21 tool definitions
+   *   tools/list        → 22 tool definitions
    *   tools/call        → dispatch to handler, return result
    */
 
@@ -22379,12 +22379,13 @@ __factories["./src/mcp/server"] = function(module, exports) {
 __factories["./src/mcp/tools"] = function(module, exports) {
   
   /**
-   * MCP tool definitions for SigMap (20 tools).
+   * MCP tool definitions for SigMap (22 tools).
    * read_context, search_signatures, get_map, create_checkpoint, get_routing,
    * explain_file, list_modules, query_context, get_method_impact, get_impact,
    * get_lines, read_memory, get_callee_signatures, sigmap_notify_file_created,
    * sigmap_notify_symbol_added, sigmap_notify_file_deleted, get_diff_context,
-   * get_architecture_overview, verify_suggestion, squeeze_output.
+   * get_architecture_overview, verify_suggestion, squeeze_output, get_budget,
+   * query_knowledge_map.
    */
 
   const TOOLS = [
