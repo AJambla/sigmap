@@ -11,13 +11,13 @@ ranking keeps the relevant context in scope (cutting tokens ~97% as a side
 effect), with no LLM calls, embeddings, or vector database. Works with Claude,
 Cursor, GitHub Copilot, Aider, Windsurf, local LLMs, and MCP.
 
-# Version: 8.58.0 | Benchmark: sigmap-v8.58-main (2026-10-01)
+# Version: 8.59.0 | Benchmark: sigmap-v8.59-main (2026-10-01)
 # Source: auto-generated from package.json, version.json, benchmarks/latest.json, src/mcp/tools.js, src/config/defaults.js
 # Regenerate: npm run generate:llms   |   Validate: npm run validate:llms
 
 ---
 
-## Core metrics (benchmark: sigmap-v8.58-main, 2026-10-01)
+## Core metrics (benchmark: sigmap-v8.59-main, 2026-10-01)
 
 | Metric | Without SigMap | With SigMap |
 |--------|----------------|-------------|
@@ -67,7 +67,7 @@ sigmap --report                          Token reduction stats to stdout (exits 
 sigmap --report --json                   Token report as JSON (for CI; exits 1 if over budget)
 sigmap --report --history                Print usage log summary from .context/usage.ndjson
 sigmap --report --history --chart        Include inline SVG charts + Unicode sparklines
-sigmap --dashboard                       Write benchmarks/reports/dashboard.html
+sigmap --dashboard [--out <path>]        Write .context/dashboard.html (HTML health dashboard)
 sigmap --suggest-tool "<task>"           Recommend model tier for a task description
 sigmap --suggest-tool "<task>" --json    Machine-readable tier recommendation
 sigmap --health                          Print composite health score

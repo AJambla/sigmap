@@ -1,13 +1,13 @@
 ---
 title: CLI reference
-description: Complete SigMap CLI reference. All commands and flags with examples — ask, evidence, deps, sbom, budget, redact, tune, skills, squeeze, conventions, plan, bench, judge, verify, verify-ai-output, verify-plan, review-pr, create, memory, lines, note, status, doctor, validate, roots, daemon, history, --package, --global, --ci, --cost, --coverage, --watch, --diff, --callers, --callees, --explain, --mcp, --report, --health, weights --export/--import and more.
+description: Complete SigMap CLI reference. All commands and flags with examples — ask, evidence, deps, sbom, budget, redact, tune, skills, squeeze, conventions, plan, bench, judge, verify, verify-ai-output, verify-plan, review-pr, create, memory, lines, note, status, doctor, validate, roots, daemon, history, --package, --global, --ci, --cost, --coverage, --watch, --diff, --callers, --callees, --explain, --mcp, --report, --health, --dashboard, weights --export/--import and more.
 head:
   - - meta
     - property: og:title
       content: "SigMap CLI Reference — every command and flag with examples"
   - - meta
     - property: og:description
-      content: "All 101 SigMap commands and flags documented with examples. ask, evidence, deps, sbom, gain, budget, redact, squeeze, conventions, scaffold, plan, bench, judge, verify, verify-ai-output, verify-plan, review-pr, create, note, status, doctor, validate, roots, daemon, history, --ci, --cost, --coverage, --watch, --diff, --callers, --callees, --explain, --mcp, --report, --health, weights --export/--import and more."
+      content: "All 101 SigMap commands and flags documented with examples. ask, evidence, deps, sbom, gain, budget, redact, squeeze, conventions, scaffold, plan, bench, judge, verify, verify-ai-output, verify-plan, review-pr, create, note, status, doctor, validate, roots, daemon, history, --ci, --cost, --coverage, --watch, --diff, --callers, --callees, --explain, --mcp, --report, --health, --dashboard, weights --export/--import and more."
   - - meta
     - property: og:url
       content: "https://sigmap.io/guide/cli"
@@ -19,7 +19,7 @@ head:
       content: "SigMap CLI Reference — every command and flag with examples"
   - - meta
     - name: twitter:description
-      content: "All 101 SigMap commands and flags documented with examples. ask, evidence, deps, sbom, gain, budget, redact, squeeze, conventions, scaffold, plan, bench, judge, verify, verify-ai-output, verify-plan, review-pr, create, note, status, doctor, validate, daemon, history, --ci, --cost, --coverage, --watch, --diff, --callers, --callees, --explain, --mcp, --report, --health, weights --export/--import and more."
+      content: "All 101 SigMap commands and flags documented with examples. ask, evidence, deps, sbom, gain, budget, redact, squeeze, conventions, scaffold, plan, bench, judge, verify, verify-ai-output, verify-plan, review-pr, create, note, status, doctor, validate, daemon, history, --ci, --cost, --coverage, --watch, --diff, --callers, --callees, --explain, --mcp, --report, --health, --dashboard, weights --export/--import and more."
   - - meta
     - name: twitter:image:alt
       content: "SigMap CLI Reference"
@@ -127,6 +127,7 @@ If you are new to the product, start with the workflow pages first:
 | `--report --paper` | LaTeX/markdown tables for academic export |
 | `--health` | Composite 0–100 health score + coverage grade |
 | `--health --json` | Machine-readable health output with coverage fields |
+| `--dashboard [--out <path>]` | Self-contained HTML health dashboard → `.context/dashboard.html` (`--json`) |
 | `--monorepo` | Generate a separate context section per package |
 | `--each` | Run a command in each monorepo package |
 | `--routing` | Regenerate with model routing hints embedded in the output |
@@ -1991,7 +1992,7 @@ sigmap bench --submit --json
  SigMap Community Benchmark Submission
 ────────────────────────────────────────────────────────
  SigMap version : 8.51.2
- Benchmark ID   : sigmap-v8.58-main
+ Benchmark ID   : sigmap-v8.59-main
  Submitted      : 2026-09-13
 ────────────────────────────────────────────────────────
  Canonical metrics (official release):
@@ -2443,6 +2444,47 @@ sigmap --suggest-tool "Fix the null pointer in UserService.findById"
 Add `--json` for the machine-readable form.
 
 ---
+
+## --dashboard
+
+Self-contained HTML health dashboard — the `--health` score, token-reduction and hit@5 trends, and per-language extractor coverage, rendered as inline SVG with no external script or stylesheet. Opens straight from disk.
+
+```bash
+sigmap --dashboard
+sigmap --dashboard --out docs/health.html
+sigmap --dashboard --json
+```
+
+```
+[sigmap] dashboard written: .context/dashboard.html
+```
+
+| Option | Description |
+|--------|-------------|
+| `--out <path>` | Write somewhere else; the parent directory is created |
+| `--json` | Emit `{ ok, file, summary }` — `file` is the path actually written |
+
+::: warning It used to write outside `.context/` (v8.59.0)
+Until v8.59.0 this wrote `benchmarks/reports/dashboard.html` — a directory SigMap does not own. In a consumer repo that path either does not exist, so SigMap created it, or it means something else entirely; either way the file landed outside the `.context/` line [`--init`](#init) adds to `.gitignore` ([#782](https://github.com/manojmallick/sigmap/issues/782)).
+
+**Migration:** if you referenced `benchmarks/reports/dashboard.html`, use `.context/dashboard.html` or pass `--out`. This was the only SigMap command that wrote outside `.context/`; every other `benchmarks/` reference is an optional *read* with a graceful fallback.
+:::
+
+::: tip Coverage counts every language SigMap supports (v8.59.0)
+The per-language panel graded against a hardcoded 21-entry list while the project ships **36** languages, so a repo written in Elixir, Lua, R, GDScript, Astro, TOML, Terraform, GraphQL or Protobuf read as uncovered ([#663](https://github.com/manojmallick/sigmap/issues/663)).
+
+The denominator was only half of it. Detection was a *second* extension map covering the same 21, so the numerator could never reach a widened denominator — raising `supported` 21 → 36 alone would have moved this repo from 2/21 to 2/36, making the figure **worse**. Both sides now come from `src/extractors/dispatch.js`, whose `LANGUAGES` reproduces the derived list behind `version.json` exactly.
+
+```
+before   repo languages : 9.5% of supported langs used here    (2/21)
+after    repo languages : 8.3% of supported langs used here    (3/36)
+```
+
+The percentage drops because the denominator is finally honest — the numerator rose at the same time. On a repo using Elixir, Lua, R and Terraform it moves **0/21 → 4/36**. The chart now plots the languages actually present, busiest first, rather than a fixed 21 bars that were mostly zero.
+:::
+
+The figure is **informational, not scored** — it reports which of SigMap's languages this repo uses, which is a property of your codebase, not of your setup. The composite grade comes from staleness, token reduction and over-budget rate; see [`--health`](#health).
+
 
 ## --monorepo
 

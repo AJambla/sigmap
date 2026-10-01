@@ -59,7 +59,7 @@ function withTempProject(fn) {
 
 console.log('\nIntegration tests — dashboard (v2.10)\n');
 
-test('--dashboard creates benchmarks/reports/dashboard.html', () => {
+test('--dashboard creates .context/dashboard.html', () => {
   withTempProject((dir) => {
     execSync(`node "${GEN_CONTEXT}" --dashboard`, {
       cwd: dir,
@@ -67,14 +67,14 @@ test('--dashboard creates benchmarks/reports/dashboard.html', () => {
       timeout: 20000,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
-    assert.ok(fs.existsSync(path.join(dir, 'benchmarks', 'reports', 'dashboard.html')));
+    assert.ok(fs.existsSync(path.join(dir, '.context', 'dashboard.html')));
   });
 });
 
 test('--dashboard html is self-contained (no external script/link)', () => {
   withTempProject((dir) => {
     execSync(`node "${GEN_CONTEXT}" --dashboard`, { cwd: dir, encoding: 'utf8', timeout: 20000, stdio: ['pipe', 'pipe', 'pipe'] });
-    const html = fs.readFileSync(path.join(dir, 'benchmarks', 'reports', 'dashboard.html'), 'utf8');
+    const html = fs.readFileSync(path.join(dir, '.context', 'dashboard.html'), 'utf8');
     assert.ok(!/<script[^>]+src=/i.test(html), 'must not include external script src');
     assert.ok(!/<link[^>]+href=/i.test(html), 'must not include external stylesheet link');
   });
@@ -83,7 +83,7 @@ test('--dashboard html is self-contained (no external script/link)', () => {
 test('--dashboard html includes summary cards', () => {
   withTempProject((dir) => {
     execSync(`node "${GEN_CONTEXT}" --dashboard`, { cwd: dir, encoding: 'utf8', timeout: 20000, stdio: ['pipe', 'pipe', 'pipe'] });
-    const html = fs.readFileSync(path.join(dir, 'benchmarks', 'reports', 'dashboard.html'), 'utf8');
+    const html = fs.readFileSync(path.join(dir, '.context', 'dashboard.html'), 'utf8');
     assert.ok(html.includes('Current grade'));
     assert.ok(html.includes('Days since regen'));
     assert.ok(html.includes('Over-budget %'));
@@ -93,7 +93,7 @@ test('--dashboard html includes summary cards', () => {
 test('--dashboard html includes SVG chart sections', () => {
   withTempProject((dir) => {
     execSync(`node "${GEN_CONTEXT}" --dashboard`, { cwd: dir, encoding: 'utf8', timeout: 20000, stdio: ['pipe', 'pipe', 'pipe'] });
-    const html = fs.readFileSync(path.join(dir, 'benchmarks', 'reports', 'dashboard.html'), 'utf8');
+    const html = fs.readFileSync(path.join(dir, '.context', 'dashboard.html'), 'utf8');
     const svgCount = (html.match(/<svg /g) || []).length;
     assert.ok(svgCount >= 3, `expected >= 3 svg charts, got ${svgCount}`);
   });
@@ -109,7 +109,7 @@ test('--dashboard --json outputs file and summary', () => {
     });
     const parsed = JSON.parse(out.trim());
     assert.strictEqual(parsed.ok, true);
-    assert.ok(typeof parsed.file === 'string' && parsed.file.includes('benchmarks/reports/dashboard.html'));
+    assert.ok(typeof parsed.file === 'string' && parsed.file.replace(/\\/g, '/') === '.context/dashboard.html');
     assert.ok(parsed.summary && typeof parsed.summary === 'object');
   });
 });
