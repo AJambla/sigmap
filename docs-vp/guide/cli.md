@@ -1284,15 +1284,29 @@ sigmap status --json
 [sigmap] status
   Branch:        feat/auth-refresh
   Working tree:  3 files changed
-  Last index:    2h ago (v6.15.0, 412 files) — STALE: 5 files changed since
+  Last index:    2h ago (v8.58.0, 412 files) — from .context/sig-index.json — STALE: 5 files changed since
   Notes:         7 (latest: switched auth to JWT; refresh-token flow still TODO)
 ```
 
-`Last index` reads the usage log and compares the index time against your tracked files' mtimes, so you can see whether the context an agent is using is stale.
+`Last index` compares the index time against your source files' mtimes, so you can see whether the context an agent is using is stale.
+
+::: warning It no longer says `never` just because tracking is off (v8.58.0)
+`Last index` used to come solely from the usage log (`.context/usage.ndjson`), which exists **only** under `--track` / `config.tracking` — so by default `status` reported `never — run: sigmap` about an index [`doctor`](#doctor) was simultaneously calling up to date (#664).
+
+It now resolves through three sources in order, and **says which one it used**:
+
+| Source | When | Carries |
+|---|---|---|
+| `usage log` | tracking on | run timestamp, version, file count |
+| `.context/sig-index.json` | any full run — the default | its own `generated` stamp, version and file count |
+| `context file mtime` | index absent, context file present | timestamp only |
+
+`status` and `doctor` now count changed-since over the same population from the same timestamp, so the two cannot disagree about whether your index is fresh.
+:::
 
 | Option | Description |
 |--------|-------------|
-| `--json` | Emit `{ branch, dirty, lastIndex, indexVersion, indexFiles, changedSinceIndex, notes, lastNote }` |
+| `--json` | Emit `{ branch, dirty, lastIndex, indexSource, indexVersion, indexFiles, changedSinceIndex, notes, lastNote }` |
 
 ---
 
@@ -1352,7 +1366,7 @@ Equivalent to setting `testCoverage: true` in config, but applied only for the c
 
 ## doctor
 
-One-shot setup diagnostic. Runs seven resilient checks — git repository, config & source roots, the generated context file, the signature index, index freshness, coverage, and MCP wiring — and prints an **actionable fix** for anything that is wrong or stale. Use it the moment SigMap "isn't working" or an answer looks thin; it tells you exactly what to run next.
+One-shot setup diagnostic. Runs eight resilient checks — git repository, config & source roots, source files in scope, the generated context file, the signature index, index freshness, coverage, and MCP wiring — and prints an **actionable fix** for anything that is wrong or stale. Use it the moment SigMap "isn't working" or an answer looks thin; it tells you exactly what to run next.
 
 ```bash
 sigmap doctor
@@ -1365,8 +1379,8 @@ sigmap doctor
 ✓ Config & source roots — srcDirs: src, packages
 ✓ Source files in scope — 176 in scope · 4 outside (2%) — 2.js 1.mjs 1.sh in ., public-benchmarks
 ✓ Generated context — 1 file(s): .github/copilot-instructions.md
-✓ Signature index — 131 file(s) indexed
-⚠ Index freshness — 1 source file(s) changed since last generate
+✓ Signature index — 179 in-scope file(s) indexed · 268 beyond srcDirs (256 test, 10 CI, 2 entrypoint)
+⚠ Index freshness — 1 source file(s) changed since last generate (from .context/sig-index.json)
     ↳ run: sigmap   (or: sigmap --watch to auto-refresh)
 ✓ Coverage — in-context 71% (54/76 scoped source files) grade B
 ✓ MCP wiring — registered in .claude/settings.json
@@ -1383,6 +1397,17 @@ It warns only above a **10% share**, and counts implementation only — tests, d
 ⚠ Source files in scope — 10 of 13 implementation file(s) are OUTSIDE srcDirs (77%) — 10.go in .
     ↳ run: sigmap roots --fix   or widen "srcDirs" in gen-context.config.json
 ```
+:::
+
+::: tip The index check splits its population (v8.58.0)
+`Signature index` used to print one bare total — `447 file(s) indexed` — over a population `generate` deliberately widens past `srcDirs`, so it read as coverage of the source tree and never surfaced a genuinely stale entry (#770). It now reports the three classes as what they are, and **warns** when the last is non-empty:
+
+```text
+⚠ Signature index — 179 in-scope file(s) indexed · 268 beyond srcDirs (256 test, 10 CI, 2 entrypoint) · 1 stale
+    ↳ 1 indexed file(s) no longer exist (e.g. src/beta.js) — run: sigmap   (a full run prunes them)
+```
+
+`Index freshness` names the evidence it used (`from .context/sig-index.json`), and will not say *"index is up to date with sources"* while the index holds stale entries, however current the mtimes are. See [`validate`](#validate) for what counts as augmented versus stale.
 :::
 
 ::: tip Coverage figures name their population (v8.52.0)
@@ -1488,19 +1513,39 @@ sigmap validate --query "loginUser validateToken"
 ```
 
 ```
-[sigmap] ⚠  stale index entries: 210 indexed file(s) are no longer in scope — re-run sigmap to refresh the index
-[sigmap] ✓ config valid  coverage: indexed 98% (170/174 files)  — 4 not indexed, 210 stale
+[sigmap] ✓ config valid  coverage: indexed 97% (181/186 files)  — 5 not indexed, 268 beyond srcDirs (256 test, 10 CI, 2 entrypoint)
 [sigmap] ✓ query "login rate limit" → src/rate/limiter.js (score 8.42, confidence high)
 ```
 
 **Coverage is an intersection (v8.49.2).** It is `|indexed ∩ in-scope| / |in-scope|`, so it is bounded at 100% by construction. Earlier releases divided the persisted index size by the current file list — two different populations, since the index can still hold files the config no longer scopes (deletions, `srcDirs` changes, a strategy switch) — which produced impossible figures such as 218%.
 
-The two residuals are reported separately because they mean different things:
+The residuals are reported separately because they mean different things:
 
 | Field | Meaning | What to do |
 |--------|---------|------------|
 | `notIndexed` | In scope, missing from the index | Raise `maxTokens` or widen `srcDirs` — this is missing context |
-| `staleEntries` | Indexed, no longer in scope | Re-run `sigmap` to refresh — this is a stale index, not a coverage problem |
+| `augmentedEntries` | Indexed on purpose from outside `srcDirs` — tests, CI, declared entrypoints | Nothing. This is how `ask` reaches them |
+| `missingEntries` | Indexed, no longer on disk | Re-run `sigmap` — a full run prunes them |
+| `outOfScopeEntries` | On disk, outside `srcDirs`, with no test/CI/entrypoint role | Widen `srcDirs`, or run `sigmap roots --fix` — a re-run will not clear it |
+
+`staleEntries` is `missingEntries + outOfScopeEntries`.
+
+::: warning The index is wider than `srcDirs` — on purpose (v8.58.0)
+`generate` writes the index over an **augmented** population: the `srcDirs` walk, widened by the declared `package.json` entrypoints, every test root (`test/`, `tests/`, `__tests__/`, `spec/`, `e2e/`) and every CI definition. All three widenings are deliberate — they are how [`ask`](#ask) reaches code that lives outside `srcDirs` *by construction*, such as `.github/workflows/`, which is a root dotdir no source-root detector will ever select.
+
+Until v8.58.0 `validate` measured that index against the **un-widened** list, so every widened entry read as stale. On the SigMap repo that was `266 stale` — 256 under `test/`, 10 under `.github/`, **none of them stale** — followed by advice to re-run `sigmap`, which could not change the number because nothing was broken (#770).
+
+Stale is now only what the shared classifier cannot justify, and each class carries the remedy that actually fixes it:
+
+```
+[sigmap] ⚠  stale index entries: 1 indexed file(s) no longer exist (e.g. src/beta.js) — run: sigmap   (a full run prunes them)
+[sigmap] ⚠  stale index entries: 2 indexed file(s) are outside srcDirs with no test/CI/entrypoint role (e.g. scripts/tool.js) — widen "srcDirs" in gen-context.config.json, or run: sigmap roots --fix
+```
+
+The deleted-file case was not merely mis-reported — it was unactionable. `.sigmap-cache.json` was written back whole and never pruned, and the ranker merges that cache into the retrieval index, so a deleted file stayed indexed until a version bump busted the cache. `generate` now prunes it, keyed on **existence only** so a per-package monorepo run cannot evict another package's entries.
+
+[`doctor`](#doctor) and [`status`](#status) read the same primitive (`src/analysis/index-state.js`), which also exports the collector roots `generate` itself imports — so the collector and the classifier cannot drift.
+:::
 
 **The population itself is now checked (v8.56.0).** Coverage is computed *over* `srcDirs`, so it cannot see a file the detector never selected. On a flat Go layout that produced a comfortable `indexed 67% (2/3 files)` while ten of thirteen source files were invisible — the figure was not wrong about its own population; nothing disclosed that the population was wrong (#805). `validate` now reports implementation files that fall **outside** every `srcDir`:
 
@@ -1512,7 +1557,7 @@ The two residuals are reported separately because they mean different things:
 
 It is graded on **share, not raw count**, and counts implementation only: tests, docs, CI, mocks and the conventional tooling directories (`test/`, `scripts/`, `benchmarks/`, `examples/`, …) are routinely and correctly outside `srcDirs`, and are reported as `skipped` rather than as a miss. Below 10% nothing is printed — a couple of root-level entrypoints outside `srcDirs` is an ordinary layout, and a check that fires on a correct configuration teaches you to ignore it. [`doctor`](#doctor) carries the same figure as its `srcdirs-coverage` check.
 
-JSON output includes `valid`, `issues`, `warnings`, `coverage`, `indexedInScope`, `notIndexed`, `staleEntries`, `totalFiles`, `outsideSrcDirs` (`{ total, byExt, dirs, skipped, inScope, share }`), and — when `--query` is given — a `query` report (`{ text, topFile, topScore, confidence }`). Exits `1` when hard issues are found.
+JSON output includes `valid`, `issues`, `warnings`, `coverage`, `indexedInScope`, `notIndexed`, `staleEntries`, `augmentedEntries`, `augmentedByReason` (`{ test, ci, entrypoint }`), `missingEntries`, `outOfScopeEntries`, `totalFiles`, `outsideSrcDirs` (`{ total, byExt, dirs, skipped, inScope, share }`), and — when `--query` is given — a `query` report (`{ text, topFile, topScore, confidence }`). Exits `1` when hard issues are found.
 
 ---
 
@@ -1946,7 +1991,7 @@ sigmap bench --submit --json
  SigMap Community Benchmark Submission
 ────────────────────────────────────────────────────────
  SigMap version : 8.51.2
- Benchmark ID   : sigmap-v8.57-main
+ Benchmark ID   : sigmap-v8.58-main
  Submitted      : 2026-09-13
 ────────────────────────────────────────────────────────
  Canonical metrics (official release):

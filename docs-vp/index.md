@@ -78,12 +78,12 @@ features:
 
 <div style="max-width:840px;margin:0 auto;padding:18px 24px 0;text-align:center">
 <div style="display:inline-flex;flex-wrap:wrap;gap:.5rem;justify-content:center;background:var(--vp-c-brand-soft,#ede9fe);border:1px solid rgba(124,106,247,.25);border-radius:999px;padding:.55rem .9rem;font-size:.9rem;color:var(--vp-c-text-1)">
-  <span><strong>Release:</strong> v8.57.0</span>
+  <span><strong>Release:</strong> v8.58.0</span>
   <span>·</span>
-  <span><strong>New — a guard that verifies nothing is not a guard:</strong> two defects in the same four-stage <code>sigmap create</code> pipeline, which together meant the grounded-creation loop could neither fail honestly nor succeed at the thing it exists for. <code>create</code> exited <strong>0</strong> having run <em>none</em> of its four guard stages — <code>failed === 0</code> is vacuously true over an empty set — so a CI step that shelled out to it read success from a run that checked nothing. It now exits <strong>2</strong>, the &quot;nothing to do&quot; code, and prints the input each stage was missing, so the exit is actionable rather than merely non-zero; <code>1</code> still means a stage ran and <em>failed</em>, which is how a gate tells a clean run from an empty one. The second defect made the happy path unreachable: stage 2 checked every name in a plan for <em>existence</em>, so <code>create &quot;add a helper to format dates&quot;</code> → the plan names <code>formatDate</code> → stage 2 errored on code that, by construction, does not exist yet. A plan has <strong>two kinds of name</strong> in it, and checking them identically is the bug — references must exist, introductions must not. A <code>Creates:</code> section marks the latter, verified in <strong>reverse</strong>, which unblocks the path and adds a redefinition guard that did not previously exist. With neither the section nor <code>--creates</code> present, nothing changes. 36 languages, zero dependencies, offline, deterministic.</span>
+  <span><strong>New — one definition per number:</strong> <code>validate</code>, <code>doctor</code> and <code>status</code> each held a private definition of what the signature index contains and when it was last built, so on a <em>healthy</em> index all three contradicted each other: <code>266 stale entries</code>, <code>447 file(s) indexed · index is up to date</code>, and <code>Last index: never</code>. <code>generate</code> writes the index over an <strong>augmented</strong> population — the <code>srcDirs</code> walk widened by the declared entrypoints, every test root and every CI definition, all three deliberate because they are how <code>ask</code> reaches code that lives outside <code>srcDirs</code> <em>by construction</em>. <code>validate</code> measured it against the <strong>un-widened</strong> list, so every widened entry read as stale — 256 under <code>test/</code>, 10 under <code>.github/</code>, <strong>none of them stale</strong> — and advised a re-run that could not change a number that was never wrong. Two real bugs hid behind that false alarm and both are fixed: the signature cache was written back whole and never pruned, so a genuinely <em>deleted</em> file did survive the full run <code>validate</code> prescribed, and <code>status</code> read only the usage log — which exists only under <code>--track</code> — so by default it reported <code>never</code> about an index <code>doctor</code> was calling up to date. One shared primitive now owns the population and its age, and exports the collector roots <code>generate</code> itself imports, so the two cannot drift. Index size does not move: this is a population <strong>widening</strong>, not a prune. 36 languages, zero dependencies, offline, deterministic.</span>
 </div>
 <div style="margin-top:.4rem;display:inline-flex;flex-wrap:wrap;gap:.5rem;justify-content:center;background:var(--vp-c-default-soft,#f3f4f6);border:1px solid rgba(0,0,0,.08);border-radius:999px;padding:.55rem .9rem;font-size:.9rem;color:var(--vp-c-text-2)">
-  <span><strong>Benchmark:</strong> sigmap-v8.57-main</span>
+  <span><strong>Benchmark:</strong> sigmap-v8.58-main</span>
   <span>·</span>
   <span>78.6% hit@5 · 95.8% token reduction · 2026-10-01</span>
 </div>
@@ -177,7 +177,7 @@ See the full [end-to-end walkthrough](/guide/walkthrough) to watch this in actio
 | Overall token reduction | — | **95.8%** |
 | GPT-4o overflow repos | 14/21 | **0/21** |
 
-Latest saved benchmark run: **2026-10-01 (v8.57.0)**.
+Latest saved benchmark run: **2026-10-01 (v8.58.0)**.
 
 </div>
 
