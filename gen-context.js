@@ -3060,6 +3060,14 @@ __factories["./src/create/orchestrate"] = function(module, exports) {
    * guards it owns. A stage runs only when its input is present (else it is
    * skipped, which does not fail the run). Zero-dependency, bundle-safe; delegates
    * to the real stage modules.
+   *
+   * A run where NOTHING ran is reported as `nothingRan`, not as a pass (#767):
+   * `failed === 0` is vacuously true over an empty set, so a CI step that shelled
+   * out to `create` with no inputs read success from a run that verified nothing.
+   *
+   * The scaffold stage's proposed filenames are handed to verify-plan as
+   * introductions (#666), so the pipeline's own primary use case — a plan for code
+   * that does not exist yet — can reach stage 2 instead of failing on itself.
    */
 
   const { proposeScaffold } = __require('./src/scaffold/propose');
@@ -3069,6 +3077,21 @@ __factories["./src/create/orchestrate"] = function(module, exports) {
 
   const TOTAL = 4;
 
+  /** What each stage needs in order to run — printed when nothing ran (#767). */
+  const STAGE_NEEDS = {
+    scaffold: '--name <module> (plus a detectable file-naming convention)',
+    'verify-plan': '--plan <plan.md>',
+    'verify-ai-output': '--answer <answer.md>',
+    'review-pr': '--staged, or commits since --base',
+  };
+
+  /** Files a successful scaffold proposes — introductions for verify-plan. */
+  function _scaffoldIntroductions(step) {
+    const p = step && step.ran && step.ok && step.detail && step.detail.proposal;
+    if (!p) return [];
+    return [p.filename, p.testFile].filter(Boolean);
+  }
+
   /**
    * Run the create pipeline over whatever inputs are available.
    * @param {object} ctx
@@ -3077,6 +3100,8 @@ __factories["./src/create/orchestrate"] = function(module, exports) {
    * @param {object} [ctx.conventions] an `extractConventions` result (for scaffold)
    * @param {object} [ctx.scaffoldOpts] options forwarded to `proposeScaffold`
    * @param {string} [ctx.plan] plan markdown → enables verify-plan
+   * @param {string[]} [ctx.creates] names the plan introduces, forwarded to
+   *   verify-plan alongside the scaffold's own proposed filenames
    * @param {string} [ctx.answer] AI answer markdown → enables verify-ai-output
    * @param {Array<{path:string,status:string}>} [ctx.changedFiles] → enables review-pr
    * @param {string} cwd repo root
@@ -3084,21 +3109,25 @@ __factories["./src/create/orchestrate"] = function(module, exports) {
    */
   function orchestrate(ctx = {}, cwd) {
     const steps = [];
+    const skip = (n, name, reason) =>
+      ({ n, total: TOTAL, name, ran: false, ok: null, skipped: true, reason, needs: STAGE_NEEDS[name] });
 
     // 1/4 — scaffold (needs a name + conventions)
     if (ctx.name && ctx.conventions) {
       const d = proposeScaffold(ctx.name, ctx.conventions, ctx.scaffoldOpts || {});
       steps.push({ n: 1, total: TOTAL, name: 'scaffold', ran: true, ok: !!d.ok, skipped: false, detail: d });
     } else {
-      steps.push({ n: 1, total: TOTAL, name: 'scaffold', ran: false, ok: null, skipped: true, reason: 'no --name' });
+      steps.push(skip(1, 'scaffold', 'no --name'));
     }
 
-    // 2/4 — verify-plan (needs a plan)
+    // 2/4 — verify-plan (needs a plan). The scaffold's proposed files are
+    // introductions, so stage 2 does not reject the files stage 1 just designed.
     if (ctx.plan != null && String(ctx.plan).trim() !== '') {
-      const r = verifyPlan(ctx.plan, cwd);
+      const creates = [...(ctx.creates || []), ..._scaffoldIntroductions(steps[0])];
+      const r = verifyPlan(ctx.plan, cwd, creates.length ? { creates } : {});
       steps.push({ n: 2, total: TOTAL, name: 'verify-plan', ran: true, ok: !!r.summary.ok, skipped: false, detail: r });
     } else {
-      steps.push({ n: 2, total: TOTAL, name: 'verify-plan', ran: false, ok: null, skipped: true, reason: 'no --plan' });
+      steps.push(skip(2, 'verify-plan', 'no --plan'));
     }
 
     // 3/4 — verify-ai-output (needs an answer)
@@ -3106,7 +3135,7 @@ __factories["./src/create/orchestrate"] = function(module, exports) {
       const r = verify(ctx.answer, cwd);
       steps.push({ n: 3, total: TOTAL, name: 'verify-ai-output', ran: true, ok: r.summary.total === 0, skipped: false, detail: r });
     } else {
-      steps.push({ n: 3, total: TOTAL, name: 'verify-ai-output', ran: false, ok: null, skipped: true, reason: 'no --answer' });
+      steps.push(skip(3, 'verify-ai-output', 'no --answer'));
     }
 
     // 4/4 — review-pr (needs changed files)
@@ -3114,12 +3143,13 @@ __factories["./src/create/orchestrate"] = function(module, exports) {
       const r = reviewPr(ctx.changedFiles, cwd);
       steps.push({ n: 4, total: TOTAL, name: 'review-pr', ran: true, ok: !!r.summary.ok, skipped: false, detail: r });
     } else {
-      steps.push({ n: 4, total: TOTAL, name: 'review-pr', ran: false, ok: null, skipped: true, reason: 'no changes' });
+      steps.push(skip(4, 'review-pr', 'no changes'));
     }
 
     const ran = steps.filter((s) => s.ran);
     const passed = ran.filter((s) => s.ok).length;
     const failed = ran.length - passed;
+    const nothingRan = ran.length === 0;
     return {
       task: ctx.task || null,
       steps,
@@ -3129,12 +3159,15 @@ __factories["./src/create/orchestrate"] = function(module, exports) {
         skipped: steps.length - ran.length,
         passed,
         failed,
-        ok: failed === 0,
+        nothingRan,
+        // A run that verified nothing is not a pass: `failed === 0` is vacuously
+        // true over an empty set, which is exactly the false CI pass of #767.
+        ok: !nothingRan && failed === 0,
       },
     };
   }
 
-  module.exports = { orchestrate, TOTAL };
+  module.exports = { orchestrate, TOTAL, STAGE_NEEDS };
   
 };
 
@@ -21723,7 +21756,7 @@ __factories["./src/mcp/server"] = function(module, exports) {
 
   const SERVER_INFO = {
     name: 'sigmap',
-    version: '8.56.0',
+    version: '8.57.0',
     description: 'SigMap MCP server — code signatures on demand',
   };
 
@@ -22530,6 +22563,13 @@ __factories["./src/plan/verify-plan"] = function(module, exports) {
    * scope in bounds? Catches Cause 1+2 at plan time — cheaper than after the
    * code is written. Reuses the verify primitives + the impact graph.
    * Zero-dependency, bundle-safe.
+   *
+   * A plan has two kinds of name in it, and checking them the same way makes the
+   * creation path unreachable (#666): a plan that *introduces* `formatDate` fails
+   * stage 2 for naming a symbol that, by construction, does not exist yet. So a
+   * `Creates:` section (or `--creates`) marks introductions, which are verified in
+   * REVERSE — they must NOT exist — and excluded from the reference checks. With
+   * neither present, nothing changes: every name is a reference, as before.
    */
 
   const fs = require('fs');
@@ -22542,6 +22582,14 @@ __factories["./src/plan/verify-plan"] = function(module, exports) {
   const DEFAULT_BLAST_THRESHOLD = 20; // transitive+direct dependents → "high blast radius"
   const DEFAULT_SCOPE_THRESHOLD = 10; // distinct referenced files → "broad scope"
 
+  /**
+   * Heading/label that opens an introductions block, e.g. `## Creates`,
+   * `**Creates:**`, `Creates:` — the plan format documented in cli.md.
+   */
+  const CREATES_RE = /^\s*(#{1,6}\s+)?\*{0,2}creates(?:\s+new)?\*{0,2}\s*(:)?\*{0,2}\s*(.*)$/i;
+  /** Any other heading/label line closes the block. */
+  const SECTION_END_RE = /^\s*(?:#{1,6}\s|(?:\*\*)?[A-Za-z][\w \t-]{0,40}(?:\*\*)?\s*:\s*$)/;
+
   /** Resolve a referenced path against cwd (handles a leading "./"). */
   function _fileExists(cwd, ref) {
     const clean = ref.replace(/^\.\//, '');
@@ -22551,6 +22599,55 @@ __factories["./src/plan/verify-plan"] = function(module, exports) {
     return false;
   }
 
+  /** Strip markdown list bullets, backticks, call parens and trailing prose. */
+  function _cleanEntry(raw) {
+    let s = String(raw || '').trim();
+    s = s.replace(/^[-*+]\s+/, '').replace(/^\d+[.)]\s+/, '');
+    const ticked = s.match(/`([^`]+)`/);
+    if (ticked) s = ticked[1];
+    s = s.split(/\s+[—–-]\s+/)[0];           // "foo() — does a thing"
+    s = s.trim().replace(/\s*\([^)]*\)\s*$/, '').replace(/[,;.]+$/, '');
+    return s.trim();
+  }
+
+  /**
+   * Names a plan declares it will introduce.
+   *
+   * Reads a `Creates:` section — an inline list on the label line, the indented /
+   * bulleted lines under it, or both — and stops at the next heading or label.
+   * @param {string} text the plan as markdown
+   * @returns {{ name: string, line: number }[]} deduped, first-seen line kept
+   */
+  function extractIntroductions(text) {
+    const lines = String(text || '').split('\n');
+    const seen = new Map();
+    const add = (raw, line) => {
+      const name = _cleanEntry(raw);
+      if (!name || /\s/.test(name) || !/[A-Za-z0-9]/.test(name)) return;  // prose, not a name
+      if (!seen.has(name)) seen.set(name, line);
+    };
+
+    for (let i = 0; i < lines.length; i++) {
+      const m = CREATES_RE.exec(lines[i]);
+      if (!m || (!m[1] && !m[2])) continue;   // a label or heading, never prose
+      for (const part of String(m[3] || '').split(',')) add(part, i + 1);
+      for (let j = i + 1; j < lines.length; j++) {
+        const line = lines[j];
+        if (line.trim() === '') continue;
+        if (SECTION_END_RE.test(line) && !/^[\s]*[-*+]/.test(line)) { i = j - 1; break; }
+        if (!/^\s*(?:[-*+]|\d+[.)])\s+/.test(line) && !/^\s{2,}\S/.test(line)) { i = j - 1; break; }
+        for (const part of line.split(',')) add(part, j + 1);
+        i = j;
+      }
+    }
+    return [...seen.entries()].map(([name, line]) => ({ name, line }));
+  }
+
+  /** True when an introduction names a file rather than a symbol. */
+  function _isPathLike(name) {
+    return name.includes('/') || /\.[A-Za-z][A-Za-z0-9]*$/.test(name);
+  }
+
   /**
    * Verify a plan against the live index.
    * @param {string} planText the plan as markdown
@@ -22558,8 +22655,10 @@ __factories["./src/plan/verify-plan"] = function(module, exports) {
    * @param {object} [opts]
    * @param {number} [opts.blastThreshold=20]
    * @param {number} [opts.scopeThreshold=10]
+   * @param {string[]} [opts.creates] names the plan introduces, in addition to
+   *   any `Creates:` section — files (by path) or symbols (bare names)
    * @param {(ref:string)=>boolean} [opts.fileExists] override for testing
-   * @returns {{ issues: object[], blast: object[], scope: object, summary: object }}
+   * @returns {{ issues: object[], blast: object[], scope: object, introduces: object[], summary: object }}
    */
   function verifyPlan(planText, cwd, opts = {}) {
     const blastThreshold = opts.blastThreshold != null ? opts.blastThreshold : DEFAULT_BLAST_THRESHOLD;
@@ -22571,17 +22670,44 @@ __factories["./src/plan/verify-plan"] = function(module, exports) {
     const symbolsRef = extractSymbols(text);   // [{ name, line }]
     const { set: symbolSet, symbolCandidates } = buildSymbolSet(cwd);
 
+    // Introductions: the `Creates:` section plus any `--creates` names. Both are
+    // explicit author intent, so they are merged into one list.
+    const intro = new Map();
+    for (const { name, line } of extractIntroductions(text)) intro.set(name, line);
+    for (const raw of (opts.creates || [])) {
+      const name = _cleanEntry(raw);
+      if (name && !intro.has(name)) intro.set(name, null);
+    }
+    const introFiles = new Set();
+    const introSymbols = new Set();
+    for (const name of intro.keys()) (_isPathLike(name) ? introFiles : introSymbols).add(name);
+
     const issues = [];
 
-    // 1. Referenced files must exist.
+    // 0. Introductions must NOT exist yet — the redefinition guard. Verified from
+    // the declaration itself, so an introduction the plan never mentions again is
+    // still checked.
+    const introduces = [];
+    for (const [name, line] of intro) {
+      const kind = introFiles.has(name) ? 'file' : 'symbol';
+      const exists = kind === 'file' ? fileExists(name) : symbolSet.has(name);
+      introduces.push({ name, kind, line, exists });
+      if (exists) {
+        issues.push({ type: 'redefines-existing', ref: name, kind, line, severity: 'error' });
+      }
+    }
+
+    // 1. Referenced files must exist — unless the plan says it creates them.
     const existingFiles = [];
     for (const f of filesRef) {
+      if (introFiles.has(f.path)) continue;
       if (fileExists(f.path)) existingFiles.push(f.path);
       else issues.push({ type: 'missing-file', ref: f.path, line: f.line, severity: 'error' });
     }
 
     // 2. Referenced symbols must exist in the live index (suggest a near match).
     for (const s of symbolsRef) {
+      if (introSymbols.has(s.name)) continue;
       if (symbolSet.has(s.name)) continue;
       const match = closestMatch(s.name, symbolCandidates);
       issues.push({
@@ -22605,10 +22731,11 @@ __factories["./src/plan/verify-plan"] = function(module, exports) {
       blast.sort((a, b) => b.totalImpact - a.totalImpact);
     }
 
-    // 4. Scope.
-    const scope = { files: filesRef.length, symbols: symbolsRef.length, threshold: scopeThreshold };
-    if (filesRef.length > scopeThreshold) {
-      issues.push({ type: 'broad-scope', count: filesRef.length, threshold: scopeThreshold, severity: 'warn' });
+    // 4. Scope — counted over files the plan touches, introduced or referenced.
+    const scopeFiles = new Set([...filesRef.map((f) => f.path), ...introFiles]);
+    const scope = { files: scopeFiles.size, symbols: symbolsRef.length, threshold: scopeThreshold };
+    if (scopeFiles.size > scopeThreshold) {
+      issues.push({ type: 'broad-scope', count: scopeFiles.size, threshold: scopeThreshold, severity: 'warn' });
     }
 
     const errors = issues.filter((i) => i.severity === 'error').length;
@@ -22617,9 +22744,12 @@ __factories["./src/plan/verify-plan"] = function(module, exports) {
       issues,
       blast,
       scope,
+      introduces,
       summary: {
         filesReferenced: filesRef.length,
         symbolsReferenced: symbolsRef.length,
+        filesIntroduced: introFiles.size,
+        symbolsIntroduced: introSymbols.size,
         errors,
         warnings,
         ok: errors === 0,
@@ -22627,7 +22757,7 @@ __factories["./src/plan/verify-plan"] = function(module, exports) {
     };
   }
 
-  module.exports = { verifyPlan, DEFAULT_BLAST_THRESHOLD, DEFAULT_SCOPE_THRESHOLD };
+  module.exports = { verifyPlan, extractIntroductions, DEFAULT_BLAST_THRESHOLD, DEFAULT_SCOPE_THRESHOLD };
   
 };
 
@@ -29272,7 +29402,7 @@ function __tryGit(args, opts = {}) {
   catch (_) { return ''; }
 }
 
-const VERSION = '8.56.0';
+const VERSION = '8.57.0';
 const MARKER = '\n\n## Auto-generated signatures\n<!-- Updated by gen-context.js -->\n';
 
 function requireSourceOrBundled(key) {
@@ -31936,9 +32066,10 @@ Usage:
   ${cmd} conventions                       Extract repo file-naming/export/test conventions (--conflicts, --inject, --report, --fix)
   ${cmd} scaffold "<name>"                 Propose a convention-matched file/dir scaffold (--ext, --threshold, --force, --json)
   ${cmd} verify-plan <plan.md|->           Check a plan vs the live index — files/symbols exist, blast radius, scope (--json)
+  ${cmd} verify-plan <plan.md> --creates <names>  Mark names the plan INTRODUCES (comma-separated) — checked in reverse: they must not exist yet
   ${cmd} review-pr                         Audit a diff — scope drift, god-node edits, missing tests, security files (--staged, --base, --json, --markdown)
   ${cmd} review-pr --markdown              PR Evidence Report — branded Markdown (signatures + blast radius + tests) to post as a PR comment
-  ${cmd} create "<task>"                   Grounded-creation pipeline: scaffold → verify-plan → verify-ai-output → review-pr (--staged)
+  ${cmd} create "<task>"                   Grounded-creation pipeline: scaffold → verify-plan → verify-ai-output → review-pr (--staged, --creates)
   ${cmd} wiki                              Deterministic architecture wiki from signatures + graph — no LLM (--json, --out <path>)
   ${cmd} squeeze <file|->                  Minimize a pasted stacktrace/CI-log/JSON blob (--json for stats)
   ${cmd} squeeze --response <file|->       Minimize an agent/tool response (same engine; also exposed as the squeeze_output MCP tool)
@@ -34743,7 +34874,7 @@ function main() {
     const target = args[1] && !args[1].startsWith('--') ? args[1] : null;
     const jsonOut = args.includes('--json');
     if (!target) {
-      console.error('[sigmap] Usage: sigmap verify-plan <plan.md|-> [--json]');
+      console.error('[sigmap] Usage: sigmap verify-plan <plan.md|-> [--creates <names>] [--json]');
       process.exit(1);
     }
     let planText = '';
@@ -34753,8 +34884,16 @@ function main() {
       console.error(`[sigmap] cannot read plan: ${e.message}`);
       process.exit(1);
     }
+    // #666: names the plan INTRODUCES are verified in reverse — they must not
+    // exist yet. A `Creates:` section in the plan says the same thing; this
+    // flag is for plans that carry no such section.
+    const createsIdx = args.indexOf('--creates');
+    const createsArg = createsIdx !== -1 && args[createsIdx + 1] && !args[createsIdx + 1].startsWith('--')
+      ? args[createsIdx + 1] : null;
+    const creates = createsArg ? createsArg.split(',').map((x) => x.trim()).filter(Boolean) : [];
+
     const { verifyPlan } = requireSourceOrBundled('./src/plan/verify-plan');
-    const result = verifyPlan(planText, cwd);
+    const result = verifyPlan(planText, cwd, creates.length ? { creates } : {});
 
     if (jsonOut) {
       process.stdout.write(JSON.stringify(result) + '\n');
@@ -34762,14 +34901,19 @@ function main() {
     }
 
     const s = result.summary;
-    console.log(`[sigmap] verify-plan — ${s.filesReferenced} file(s), ${s.symbolsReferenced} symbol(s) referenced`);
+    const introCount = s.filesIntroduced + s.symbolsIntroduced;
+    console.log(`[sigmap] verify-plan — ${s.filesReferenced} file(s), ${s.symbolsReferenced} symbol(s) referenced`
+      + (introCount ? `, ${introCount} introduced` : ''));
     if (result.issues.length === 0) {
-      console.log('  ✓ plan checks out — all references exist, blast radius and scope in bounds');
+      console.log(introCount
+        ? '  ✓ plan checks out — references exist, introductions do not yet, blast radius and scope in bounds'
+        : '  ✓ plan checks out — all references exist, blast radius and scope in bounds');
       process.exit(0);
     }
     for (const i of result.issues) {
       const mark = i.severity === 'error' ? '✗' : '⚠';
-      if (i.type === 'missing-file') console.log(`  ${mark} missing file: ${i.ref} (line ${i.line})`);
+      if (i.type === 'redefines-existing') console.log(`  ${mark} already exists: ${i.ref} — the plan lists it under Creates, but this ${i.kind} is already in the repo${i.line ? ` (line ${i.line})` : ''}`);
+      else if (i.type === 'missing-file') console.log(`  ${mark} missing file: ${i.ref} (line ${i.line})`);
       else if (i.type === 'unknown-symbol') console.log(`  ${mark} unknown symbol: ${i.ref}()${i.suggestion ? ` — did you mean ${i.suggestion}()?` : ''} (line ${i.line})`);
       else if (i.type === 'high-blast-radius') console.log(`  ${mark} high blast radius: ${i.ref} → ${i.count} dependents`);
       else if (i.type === 'broad-scope') console.log(`  ${mark} broad scope: ${i.count} files (threshold ${i.threshold})`);
@@ -34905,6 +35049,7 @@ function main() {
   // Gap 2 (capstone): `sigmap create "<task>"` — orchestrate the 4 guard stages
   // (scaffold → verify-plan → verify-ai-output → review-pr) with n/4 numbering.
   if (args[0] === 'create') {
+    const EXIT_NOTHING_RAN = 2;
     const jsonOut = args.includes('--json');
     const task = args[1] && !args[1].startsWith('--') ? args[1] : null;
     const flagVal = (flag) => { const i = args.indexOf(flag); return i !== -1 && args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : null; };
@@ -34913,8 +35058,10 @@ function main() {
     const answerFile = flagVal('--answer');
     const staged = args.includes('--staged');
     const baseArg = flagVal('--base');
+    const createsArg = flagVal('--creates');
 
     const ctx = { task };
+    if (createsArg) ctx.creates = createsArg.split(',').map((x) => x.trim()).filter(Boolean);
 
     if (nameArg) {
       ctx.name = nameArg;
@@ -34953,7 +35100,7 @@ function main() {
 
     if (jsonOut) {
       process.stdout.write(JSON.stringify(result) + '\n');
-      process.exit(result.summary.ok ? 0 : 1);
+      process.exit(result.summary.nothingRan ? EXIT_NOTHING_RAN : (result.summary.ok ? 0 : 1));
     }
 
     console.log(`[sigmap] create${result.task ? ` "${result.task}"` : ''} — running deterministic guards (scaffold · verify-plan · verify-ai-output · review-pr); the LLM does the authoring`);
@@ -34964,6 +35111,17 @@ function main() {
     }
     const su = result.summary;
     console.log(`\n  ${su.ran}/${su.total} ran · ${su.passed} passed · ${su.failed} failed · ${su.skipped} skipped`);
+    // #767: 0 ran is not a pass. `failed === 0` is vacuously true over an empty
+    // set, so a CI step shelling out to `create` read success from a run that
+    // verified nothing. Exit 2 — "nothing to do" — distinguishes it from a
+    // stage that ran and failed (1), matching `judge`'s inconclusive code.
+    if (su.nothingRan) {
+      console.log('\n  nothing ran — create verifies the inputs you give it:');
+      for (const st of result.steps) {
+        console.log(`    ${st.name.padEnd(17)} needs ${st.needs}`);
+      }
+      process.exit(EXIT_NOTHING_RAN);
+    }
     process.exit(su.ok ? 0 : 1);
   }
 

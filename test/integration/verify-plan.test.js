@@ -13,7 +13,7 @@ const { spawnSync, execFileSync } = require('child_process');
 
 const ROOT = path.resolve(__dirname, '../..');
 const SCRIPT = path.join(ROOT, 'gen-context.js');
-const { verifyPlan } = require(path.join(ROOT, 'src/plan/verify-plan'));
+const { verifyPlan, extractIntroductions } = require(path.join(ROOT, 'src/plan/verify-plan'));
 
 let passed = 0, failed = 0;
 function test(name, fn) {
@@ -94,7 +94,102 @@ test('broad scope flagged over threshold', () => {
   });
 });
 
+// ── #666: introductions (names the plan CREATES, verified in reverse) ───────
+test('Creates section is parsed from heading, label and inline forms', () => {
+  const heading = extractIntroductions('## Creates\n- `formatDate(d)` — format\n- `src/util/date.js`\n\n## Edits\n- `src/a.js`');
+  assert.deepStrictEqual(heading.map((x) => x.name), ['formatDate', 'src/util/date.js']);
+  const inline = extractIntroductions('Creates: `formatDate`, `parseDate`\n');
+  assert.deepStrictEqual(inline.map((x) => x.name), ['formatDate', 'parseDate']);
+  const bold = extractIntroductions('**Creates:**\n  `src/util/date.js`\n');
+  assert.deepStrictEqual(bold.map((x) => x.name), ['src/util/date.js']);
+});
+test('prose beginning with "creates" is not a Creates section', () => {
+  assert.deepStrictEqual(extractIntroductions('Creates a new helper for dates.\n- `src/a.js`\n'), []);
+  assert.deepStrictEqual(extractIntroductions('Creates new widgets for the UI.\n- `src/a.js`\n'), []);
+  assert.deepStrictEqual(extractIntroductions('This step creates: nothing\n'), []);
+});
+test('a plan introducing new symbols passes — the create happy path (#666)', () => {
+  withRepo((dir) => {
+    const plan = '# Add a date helper\n\n## Creates\n- `formatDate(date)`\n- `src/util/date.js`\n\nWire it into `src/core.js`.';
+    const r = verifyPlan(plan, dir);
+    assert.strictEqual(r.summary.ok, true, JSON.stringify(r.issues));
+    assert.strictEqual(r.summary.symbolsIntroduced, 1);
+    assert.strictEqual(r.summary.filesIntroduced, 1);
+  });
+});
+test('the same plan without the section still fails strictly (#666)', () => {
+  withRepo((dir) => {
+    const plan = '# Add a date helper\n\nAdd `formatDate(date)` in `src/util/date.js`.';
+    const r = verifyPlan(plan, dir);
+    assert.strictEqual(r.summary.ok, false);
+    assert.ok(r.issues.some((i) => i.type === 'missing-file'));
+    assert.ok(r.issues.some((i) => i.type === 'unknown-symbol'));
+  });
+});
+test('introducing a symbol that already exists is flagged (#666)', () => {
+  withRepo((dir) => {
+    const r = verifyPlan('## Creates\n- `coreFn(x)`\n', dir);
+    const redef = r.issues.find((i) => i.type === 'redefines-existing');
+    assert.ok(redef, JSON.stringify(r.issues));
+    assert.strictEqual(redef.ref, 'coreFn');
+    assert.strictEqual(redef.kind, 'symbol');
+    assert.strictEqual(redef.severity, 'error');
+    assert.strictEqual(r.summary.ok, false);
+  });
+});
+test('introducing a file that already exists is flagged (#666)', () => {
+  withRepo((dir) => {
+    const r = verifyPlan('## Creates\n- `src/core.js`\n', dir);
+    const redef = r.issues.find((i) => i.type === 'redefines-existing');
+    assert.ok(redef, JSON.stringify(r.issues));
+    assert.strictEqual(redef.kind, 'file');
+    assert.strictEqual(r.summary.ok, false);
+  });
+});
+test('opts.creates marks introductions without a plan section (#666)', () => {
+  withRepo((dir) => {
+    const plan = 'Add `formatDate(d)` in `src/util/date.js`.';
+    assert.strictEqual(verifyPlan(plan, dir).summary.ok, false);
+    const r = verifyPlan(plan, dir, { creates: ['formatDate', 'src/util/date.js'] });
+    assert.strictEqual(r.summary.ok, true, JSON.stringify(r.issues));
+  });
+});
+test('introduced files are not counted in blast radius', () => {
+  withRepo((dir) => {
+    const r = verifyPlan('## Creates\n- `src/util/date.js`\n\nCalled from `src/core.js`.', dir);
+    assert.ok(!r.blast.some((b) => b.file.includes('date.js')), JSON.stringify(r.blast));
+  });
+});
+test('introductions are reported with their existence verdict', () => {
+  withRepo((dir) => {
+    const r = verifyPlan('## Creates\n- `formatDate(d)`\n- `coreFn(x)`\n', dir);
+    const byName = Object.fromEntries(r.introduces.map((i) => [i.name, i.exists]));
+    assert.strictEqual(byName.formatDate, false);
+    assert.strictEqual(byName.coreFn, true);
+  });
+});
+
 // ── CLI ─────────────────────────────────────────────────────────────────────
+test('CLI: verify-plan --creates exits 0 on a creation plan (#666)', () => {
+  withRepo((dir) => {
+    fs.writeFileSync(path.join(dir, 'plan.md'), 'Add `formatDate(d)` in `src/util/date.js`.');
+    const strict = spawnSync('node', [SCRIPT, 'verify-plan', 'plan.md'], { cwd: dir, encoding: 'utf8' });
+    assert.strictEqual(strict.status, 1, strict.stdout);
+
+    const res = spawnSync('node', [SCRIPT, 'verify-plan', 'plan.md', '--creates', 'formatDate,src/util/date.js'],
+      { cwd: dir, encoding: 'utf8' });
+    assert.strictEqual(res.status, 0, res.stdout + res.stderr);
+    assert.ok(/2 introduced/.test(res.stdout), res.stdout);
+  });
+});
+test('CLI: verify-plan reports a redefinition in prose (#666)', () => {
+  withRepo((dir) => {
+    fs.writeFileSync(path.join(dir, 'plan.md'), '## Creates\n- `coreFn(x)`\n');
+    const res = spawnSync('node', [SCRIPT, 'verify-plan', 'plan.md'], { cwd: dir, encoding: 'utf8' });
+    assert.strictEqual(res.status, 1);
+    assert.ok(/already exists: coreFn/.test(res.stdout), res.stdout);
+  });
+});
 test('CLI: verify-plan on a clean plan exits 0', () => {
   withRepo((dir) => {
     fs.writeFileSync(path.join(dir, 'plan.md'), 'Update `src/core.js` via `coreFn(...)`.');
