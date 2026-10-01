@@ -1346,6 +1346,343 @@ __factories["./src/analysis/diagnostics"] = function(module, exports) {
   
 };
 
+// ── ./src/analysis/index-state ──
+__factories["./src/analysis/index-state"] = function(module, exports) {
+  
+  /**
+   * One definition of what the signature index holds, and of how old it is.
+   *
+   * WHY THIS EXISTS
+   * ---------------
+   * `generate` writes the index over an AUGMENTED population: the configured
+   * `srcDirs` walk, widened by the declared package entrypoints, every test root
+   * and every CI definition — all three deliberate, all three shipped so
+   * `sigmap ask` can reach code that lives outside `srcDirs` by construction.
+   *
+   * `validate` and `doctor` measured that same index against the UN-widened
+   * `srcDirs` list, so on this repo 266 perfectly good entries (256 under
+   * `test/`, 10 under `.github/`) read as "stale index entries … re-run sigmap",
+   * which fixed nothing because nothing was broken. Meanwhile `doctor` counted
+   * the same 266 as indexed coverage and called the index fresh, and `status`
+   * — reading only the usage log — said the index had never been built.
+   *
+   * Three private definitions of one population and one timestamp. This module
+   * owns both, so the four surfaces can only agree. It classifies entries the
+   * index already holds rather than re-walking the tree: the fix is a population
+   * widening, not an index prune, and index size must not move because of it.
+   *
+   * Zero-dependency, bundle-safe (fs + path only).
+   */
+
+  const fs = require('fs');
+  const path = require('path');
+
+  /**
+   * Directory roots whose contents `generate` indexes as tests. Imported by
+   * `collectTestEntries` so the collector and the classifier cannot drift.
+   */
+  const TEST_ROOTS = ['test', 'tests', '__tests__', 'spec', 'e2e'];
+
+  /**
+   * Directories holding CI / pipeline definitions. `.` covers the single-file
+   * forms (.gitlab-ci.yml, Jenkinsfile, compose files, …). Imported by
+   * `collectPipelineEntries` for the same reason as TEST_ROOTS.
+   */
+  const CI_DIRS = [
+    '.', '.github/workflows', '.gitea/workflows', '.forgejo/workflows',
+    '.circleci', '.woodpecker',
+  ];
+
+  /** The index artifact `generate` writes before the token budget is applied. */
+  const INDEX_REL = '.context/sig-index.json';
+
+  /** Generated context files, in the order the resolvers prefer them. */
+  const ADAPTER_OUTPUTS = [
+    ['.github', 'copilot-instructions.md'],
+    ['CLAUDE.md'],
+    ['AGENTS.md'],
+    ['.cursorrules'],
+    ['.windsurfrules'],
+    ['.github', 'openai-context.md'],
+    ['.github', 'gemini-context.md'],
+    ['llm-full.txt'],
+    ['llm.txt'],
+  ];
+
+  const EXCLUDE_DIRS = new Set([
+    'node_modules', '.git', 'dist', 'build', 'out', '__pycache__',
+    '.next', 'coverage', 'target', 'vendor', '.context',
+  ]);
+
+  function _norm(p) {
+    return String(p || '').replace(/\\/g, '/').replace(/^\.\//, '');
+  }
+
+  /**
+   * Source files a project declares as its own entrypoints in package.json
+   * (`main` and every `bin` target), repo-relative.
+   *
+   * @param {string} cwd
+   * @returns {Set<string>}
+   */
+  function declaredEntrypointPaths(cwd) {
+    const out = new Set();
+    try {
+      const pkg = JSON.parse(fs.readFileSync(path.join(cwd, 'package.json'), 'utf8'));
+      const refs = [];
+      if (typeof pkg.main === 'string') refs.push(pkg.main);
+      if (typeof pkg.bin === 'string') refs.push(pkg.bin);
+      else if (pkg.bin && typeof pkg.bin === 'object') {
+        refs.push(...Object.values(pkg.bin).filter((v) => typeof v === 'string'));
+      }
+      for (const ref of refs) {
+        const rel = _norm(path.relative(cwd, path.resolve(cwd, ref)));
+        if (rel && !rel.startsWith('..')) out.add(rel);
+      }
+    } catch (_) { /* no package.json → nothing declared */ }
+    return out;
+  }
+
+  /**
+   * Why a repo-relative path is in the index despite falling outside `srcDirs`,
+   * or null when nothing justifies it.
+   *
+   * @param {string} rel - repo-relative, forward slashes
+   * @param {{ entrypoints?: Set<string> }} [ctx]
+   * @returns {'test'|'ci'|'entrypoint'|null}
+   */
+  function augmentedReason(rel, ctx = {}) {
+    const r = _norm(rel);
+    if (!r) return null;
+    if (ctx.entrypoints && ctx.entrypoints.has(r)) return 'entrypoint';
+
+    const first = r.split('/')[0];
+    if (r.includes('/') && TEST_ROOTS.includes(first)) return 'test';
+
+    const dir = r.includes('/') ? r.slice(0, r.lastIndexOf('/')) : '.';
+    if (CI_DIRS.includes(dir)) {
+      // The extractor's own routing decides what counts as a pipeline file, so
+      // this cannot drift from `langFor`. A root-level file only qualifies when
+      // the extractor claims it — `.` would otherwise match the whole repo root.
+      let platformFor = null;
+      try { ({ platformFor } = __require('./src/extractors/pipeline')); } catch (_) {}
+      if (platformFor && platformFor(r)) return 'ci';
+    }
+    return null;
+  }
+
+  /**
+   * Split the entries an index holds into the four classes that have different
+   * remedies.
+   *
+   * `inScope` and `augmented` are both legitimate — together they are the
+   * population `generate` writes. `missing` and `outOfScope` are the two real
+   * stale classes, separated because a deleted file is cleared by re-running
+   * `sigmap` while a file that merely left `srcDirs` is a config question.
+   *
+   * @param {string} cwd
+   * @param {Iterable<string>} indexedRel - repo-relative keys of the index
+   * @param {{srcDirs?: string[]}} config
+   * @returns {{ inScope: string[], augmented: string[], missing: string[],
+   *             outOfScope: string[], stale: number, byReason: object }}
+   */
+  function classifyIndexEntries(cwd, indexedRel, config) {
+    const srcDirs = (config && Array.isArray(config.srcDirs) && config.srcDirs.length)
+      ? config.srcDirs.map((d) => _norm(d).replace(/\/+$/, ''))
+      : ['src', 'app', 'lib'];
+    const entrypoints = declaredEntrypointPaths(cwd);
+
+    const inScope = [];
+    const augmented = [];
+    const missing = [];
+    const outOfScope = [];
+    const byReason = { test: 0, ci: 0, entrypoint: 0 };
+
+    for (const raw of indexedRel || []) {
+      const rel = _norm(raw);
+      if (!rel) continue;
+      let exists = true;
+      try { exists = fs.statSync(path.join(cwd, rel)).isFile(); } catch (_) { exists = false; }
+      if (!exists) { missing.push(rel); continue; }
+
+      if (srcDirs.some((d) => rel === d || rel.startsWith(`${d}/`))) { inScope.push(rel); continue; }
+
+      const reason = augmentedReason(rel, { entrypoints });
+      if (reason) { augmented.push(rel); byReason[reason]++; continue; }
+
+      outOfScope.push(rel);
+    }
+
+    return {
+      inScope, augmented, missing, outOfScope,
+      stale: missing.length + outOfScope.length,
+      byReason,
+    };
+  }
+
+  /**
+   * Human summary of the augmented entries, e.g. "256 test, 10 CI".
+   *
+   * @param {{ byReason: object }} classification
+   * @returns {string}
+   */
+  function formatAugmented(classification) {
+    const by = (classification && classification.byReason) || {};
+    const label = { test: 'test', ci: 'CI', entrypoint: 'entrypoint' };
+    return Object.keys(label)
+      .filter((k) => by[k] > 0)
+      .map((k) => `${by[k]} ${label[k]}`)
+      .join(', ');
+  }
+
+  /**
+   * Remediation lines for whatever stale classes are actually present, each
+   * naming a command or change that fixes THAT class. Empty when nothing is
+   * stale — the previous single message advised re-running `sigmap` for entries
+   * a re-run could never clear.
+   *
+   * @param {{ missing: string[], outOfScope: string[] }} classification
+   * @returns {string[]}
+   */
+  function staleRemedies(classification) {
+    const out = [];
+    const missing = (classification && classification.missing) || [];
+    const outOfScope = (classification && classification.outOfScope) || [];
+    if (missing.length) {
+      out.push(`${missing.length} indexed file(s) no longer exist (e.g. ${missing[0]}) — run: sigmap   (a full run prunes them)`);
+    }
+    if (outOfScope.length) {
+      out.push(`${outOfScope.length} indexed file(s) are outside srcDirs with no test/CI/entrypoint role (e.g. ${outOfScope[0]}) — widen "srcDirs" in gen-context.config.json, or run: sigmap roots --fix`);
+    }
+    return out;
+  }
+
+  /** Newest mtime among the generated context files, or 0 when none exist. */
+  function _contextMtime(cwd) {
+    let newest = 0;
+    for (const parts of ADAPTER_OUTPUTS) {
+      try {
+        const m = fs.statSync(path.join(cwd, ...parts)).mtimeMs;
+        if (m > newest) newest = m;
+      } catch (_) {}
+    }
+    return newest;
+  }
+
+  /**
+   * When the index was last built, and from which evidence.
+   *
+   * Ordered by how much the source actually knows: the usage log records the run
+   * itself but only exists under `--track`; the index artifact records its own
+   * `generated` stamp, file count and version; the context file knows only its
+   * mtime. `status` reported `never` whenever the first was absent, which is the
+   * default — hence the disclosed fallback rather than a silent one.
+   *
+   * @param {string} cwd
+   * @returns {{ ts: string|null, source: string|null, files: number|null,
+   *             version: string|null }}
+   */
+  function indexFreshness(cwd) {
+    // 1. Usage log — the run itself, when tracking is on.
+    try {
+      const { readLog } = __require('./src/tracking/logger');
+      const log = readLog(cwd) || [];
+      if (log.length) {
+        const last = log[log.length - 1];
+        if (last && last.ts) {
+          return {
+            ts: last.ts,
+            source: 'usage log',
+            files: last.fileCount != null ? last.fileCount : null,
+            version: last.version || null,
+          };
+        }
+      }
+    } catch (_) {}
+
+    // 2. The retrieval index — self-describing, written by every full run.
+    try {
+      const abs = path.join(cwd, INDEX_REL);
+      const data = JSON.parse(fs.readFileSync(abs, 'utf8'));
+      const ts = data && data.generated
+        ? data.generated
+        : new Date(fs.statSync(abs).mtimeMs).toISOString();
+      return {
+        ts,
+        source: INDEX_REL,
+        files: data && data.files ? Object.keys(data.files).length : null,
+        version: (data && data.sigmapVersion) || null,
+      };
+    } catch (_) {}
+
+    // 3. The generated context file — mtime only.
+    const ctx = _contextMtime(cwd);
+    if (ctx > 0) {
+      return { ts: new Date(ctx).toISOString(), source: 'context file mtime', files: null, version: null };
+    }
+
+    return { ts: null, source: null, files: null, version: null };
+  }
+
+  /**
+   * Count code files under `srcDirs` modified after `sinceMs`.
+   *
+   * Lifted out of `doctor` so `status` counts the same thing: the two reported
+   * different freshness because they were reading different populations with
+   * different timestamps, and sharing only the timestamp would have left half
+   * the disagreement in place.
+   *
+   * @param {string} cwd
+   * @param {{srcDirs?: string[], exclude?: string[]}} config
+   * @param {number} sinceMs
+   * @returns {number}
+   */
+  function changedSince(cwd, config, sinceMs) {
+    const { CODE_EXTS } = __require('./src/analysis/coverage-score');
+    const exclude = new Set(EXCLUDE_DIRS);
+    if (config && Array.isArray(config.exclude)) for (const x of config.exclude) exclude.add(String(x));
+    const srcDirs = (config && Array.isArray(config.srcDirs) && config.srcDirs.length)
+      ? config.srcDirs : ['src', 'app', 'lib'];
+
+    let changed = 0;
+    let seen = 0;
+    const walk = (dir, depth) => {
+      if (depth > 8 || seen > 5000) return;
+      let entries;
+      try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return; }
+      for (const e of entries) {
+        if (exclude.has(e.name)) continue;
+        const full = path.join(dir, e.name);
+        if (e.isDirectory()) walk(full, depth + 1);
+        else if (e.isFile() && CODE_EXTS.has(path.extname(e.name).toLowerCase())) {
+          seen++;
+          try { if (fs.statSync(full).mtimeMs > sinceMs) changed++; } catch (_) {}
+        }
+      }
+    };
+    for (const d of srcDirs) {
+      const abs = path.isAbsolute(d) ? d : path.join(cwd, d);
+      if (fs.existsSync(abs)) walk(abs, 0);
+    }
+    return changed;
+  }
+
+  module.exports = {
+    TEST_ROOTS,
+    CI_DIRS,
+    INDEX_REL,
+    ADAPTER_OUTPUTS,
+    declaredEntrypointPaths,
+    augmentedReason,
+    classifyIndexEntries,
+    formatAugmented,
+    staleRemedies,
+    indexFreshness,
+    changedSince,
+  };
+  
+};
+
 // ── ./src/cache/freshen ──
 __factories["./src/cache/freshen"] = function(module, exports) {
   
@@ -1578,7 +1915,32 @@ __factories["./src/cache/sig-cache"] = function(module, exports) {
     }
   }
 
-  module.exports = { loadCache, saveCache, getChangedFiles, updateCacheEntries };
+  /**
+   * Drop cache entries whose file no longer exists on disk.
+   *
+   * `saveCache` writes the whole Map back, and `ranker.buildSigIndex` merges the
+   * cache into the retrieval index, so a deleted file stayed in the index until a
+   * version bump busted the cache — which is why `validate`'s "re-run sigmap to
+   * refresh the index" was advice that could not work. Keyed on existence only,
+   * never on the current scope, so a per-package monorepo run cannot evict
+   * another package's entries.
+   *
+   * @param {Map<string, { mtime: number, sigs: string[] }>} cache
+   * @returns {number} entries removed
+   */
+  function pruneMissing(cache) {
+    let removed = 0;
+    for (const absPath of [...cache.keys()]) {
+      try {
+        if (fs.statSync(absPath).isFile()) continue;
+      } catch (_) { /* unreadable → treat as gone */ }
+      cache.delete(absPath);
+      removed++;
+    }
+    return removed;
+  }
+
+  module.exports = { loadCache, saveCache, getChangedFiles, updateCacheEntries, pruneMissing };
   
 };
 
@@ -5654,33 +6016,14 @@ __factories["./src/doctor/diagnose"] = function(module, exports) {
     ];
   }
 
-  /** Count code files under srcDirs modified after the context was generated. */
+  /**
+   * Count code files under srcDirs modified after the context was generated.
+   * Delegates to the shared primitive so `status` counts the same population
+   * against the same timestamp (#825).
+   */
   function _countChangedSince(cwd, srcDirs, config, ctxMtime) {
-    const { CODE_EXTS } = __require('./src/analysis/coverage-score');
-    const exclude = new Set(EXCLUDE_DIRS);
-    if (config && Array.isArray(config.exclude)) for (const x of config.exclude) exclude.add(String(x));
-
-    let changed = 0;
-    let seen = 0;
-    const walk = (dir, depth) => {
-      if (depth > 8 || seen > 5000) return;
-      let entries;
-      try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return; }
-      for (const e of entries) {
-        if (exclude.has(e.name)) continue;
-        const full = path.join(dir, e.name);
-        if (e.isDirectory()) walk(full, depth + 1);
-        else if (e.isFile() && CODE_EXTS.has(path.extname(e.name).toLowerCase())) {
-          seen++;
-          try { if (fs.statSync(full).mtimeMs > ctxMtime) changed++; } catch (_) {}
-        }
-      }
-    };
-    for (const d of srcDirs) {
-      const abs = path.isAbsolute(d) ? d : path.join(cwd, d);
-      if (fs.existsSync(abs)) walk(abs, 0);
-    }
-    return changed;
+    const { changedSince } = __require('./src/analysis/index-state');
+    return changedSince(cwd, Object.assign({}, config, { srcDirs }), ctxMtime);
   }
 
   /**
@@ -5775,25 +6118,52 @@ __factories["./src/doctor/diagnose"] = function(module, exports) {
     }
 
     // 4. Signature index
+    //
+    // #825: this printed one bare total ("447 file(s) indexed") over a population
+    // `generate` deliberately widens past srcDirs, so it read as coverage of the
+    // source tree and never surfaced a genuinely stale entry. The classifier owns
+    // the split; the three classes are reported as what they are.
     let indexSize = 0;
+    let indexClass = null;
     try {
       const { buildSigIndex } = __require('./src/retrieval/ranker');
-      indexSize = buildSigIndex(cwd).size;
+      const sigIndex = buildSigIndex(cwd);
+      indexSize = sigIndex.size;
+      const { classifyIndexEntries } = __require('./src/analysis/index-state');
+      indexClass = classifyIndexEntries(cwd, sigIndex.keys(), config);
     } catch (_) {}
     if (indexSize === 0) {
       add('index', 'Signature index', ctxFiles.length === 0 ? 'fail' : 'warn', 'no signatures indexed', 'run: npx sigmap   then: sigmap ask "<query>"');
-    } else {
+    } else if (!indexClass) {
       add('index', 'Signature index', 'ok', `${indexSize} file(s) indexed`);
+    } else {
+      const { formatAugmented, staleRemedies } = __require('./src/analysis/index-state');
+      const parts = [`${indexClass.inScope.length} in-scope file(s) indexed`];
+      if (indexClass.augmented.length) parts.push(`${indexClass.augmented.length} beyond srcDirs (${formatAugmented(indexClass)})`);
+      if (indexClass.stale) parts.push(`${indexClass.stale} stale`);
+      const remedies = staleRemedies(indexClass);
+      add('index', 'Signature index', indexClass.stale ? 'warn' : 'ok', parts.join(' · '), remedies.length ? remedies[0] : null);
     }
 
     // 5. Index freshness
+    //
+    // #825: the timestamp comes from the shared primitive, so `status` cannot
+    // report "never" against the same index this calls up to date. An index
+    // holding stale entries is not up to date either, whatever the mtimes say.
     try {
       if (ctxFiles.length) {
-        const ctxMtime = Math.max(...ctxFiles.map((f) => { try { return fs.statSync(f).mtimeMs; } catch (_) { return 0; } }));
+        const { indexFreshness } = __require('./src/analysis/index-state');
+        const fresh = indexFreshness(cwd);
+        const sinceMs = fresh.ts ? Date.parse(fresh.ts) : NaN;
+        const refMs = Number.isFinite(sinceMs)
+          ? sinceMs
+          : Math.max(...ctxFiles.map((f) => { try { return fs.statSync(f).mtimeMs; } catch (_) { return 0; } }));
         const srcDirs = (config && Array.isArray(config.srcDirs) && config.srcDirs.length) ? config.srcDirs : ['src', 'app', 'lib'];
-        const changed = _countChangedSince(cwd, srcDirs, config, ctxMtime);
-        if (changed > 0) add('freshness', 'Index freshness', 'warn', `${changed} source file(s) changed since last generate`, 'run: sigmap   (or: sigmap --watch to auto-refresh)');
-        else add('freshness', 'Index freshness', 'ok', 'index is up to date with sources');
+        const changed = _countChangedSince(cwd, srcDirs, config, refMs);
+        const from = fresh.source ? ` (from ${fresh.source})` : '';
+        if (changed > 0) add('freshness', 'Index freshness', 'warn', `${changed} source file(s) changed since last generate${from}`, 'run: sigmap   (or: sigmap --watch to auto-refresh)');
+        else if (indexClass && indexClass.stale) add('freshness', 'Index freshness', 'warn', `sources unchanged${from}, but the index holds ${indexClass.stale} stale entry/entries`, 'run: sigmap   (prunes deleted files), then: sigmap validate');
+        else add('freshness', 'Index freshness', 'ok', `index is up to date with sources${from}`);
       }
     } catch (_) {}
 
@@ -29527,7 +29897,9 @@ function buildFileList(cwd, config) {
  * entrypoints are load-bearing by definition, so they are always scanned.
  */
 function collectTestEntries(cwd, config, existing) {
-  const TEST_ROOTS = ['test', 'tests', '__tests__', 'spec', 'e2e'];
+  // #825: the roots come from the shared primitive, so `validate`/`doctor`
+  // cannot classify as stale a file this collector deliberately indexed.
+  const { TEST_ROOTS } = requireSourceOrBundled('./src/analysis/index-state');
   const have = new Set((existing || []).map((e) => e.filePath));
   const out = [];
   let moduleDocSig = null;
@@ -29575,10 +29947,8 @@ function collectTestEntries(cwd, config, existing) {
 function collectPipelineEntries(cwd, config, existing) {
   // Directories whose contents are CI definitions, plus the root itself for
   // the single-file forms (.gitlab-ci.yml, Jenkinsfile, compose files, …).
-  const CI_DIRS = [
-    '.', '.github/workflows', '.gitea/workflows', '.forgejo/workflows',
-    '.circleci', '.woodpecker',
-  ];
+  // Shared with the index classifier for the same reason as TEST_ROOTS (#825).
+  const { CI_DIRS } = requireSourceOrBundled('./src/analysis/index-state');
   const have = new Set((existing || []).map((e) => e.filePath));
   const out = [];
   const seen = new Set();
@@ -31342,7 +31712,7 @@ function runGenerate(cwd, config, reportMode, reportJson = false) {
 
   // v6.7: Load signature cache if enabled
   let cache = null;
-  const { loadCache, saveCache, getChangedFiles, updateCacheEntries } = requireSourceOrBundled('./src/cache/sig-cache');
+  const { loadCache, saveCache, getChangedFiles, updateCacheEntries, pruneMissing } = requireSourceOrBundled('./src/cache/sig-cache');
   if (config.sigCache) {
     cache = loadCache(cwd, VERSION);
   }
@@ -31692,6 +32062,10 @@ function runGenerate(cwd, config, reportMode, reportJson = false) {
   // v6.7: Save cache if enabled
   if (config.sigCache && cache) {
     try {
+      // #825: drop entries for files that no longer exist before writing the
+      // map back, so a deleted file does not survive the full run that
+      // `validate` tells the user to perform.
+      pruneMissing(cache);
       saveCache(cwd, VERSION, cache);
     } catch (err) {
       console.warn(`[sigmap] cache save failed: ${err.message}`);
@@ -33592,15 +33966,24 @@ function main() {
 
     let valCovered = 0;
     for (const f of valInScope) if (valIndexed.has(f)) valCovered++;
-    let valStale = 0;
-    for (const f of valIndexed) if (!valInScope.has(f)) valStale++;
+
+    // #825: `generate` indexes an AUGMENTED population — srcDirs widened by the
+    // declared entrypoints, every test root and every CI definition — so
+    // "indexed but not in buildFileList" is not the same thing as "stale".
+    // Measuring it that way reported 266 stale entries on a healthy index here
+    // (256 test, 10 CI) and advised a re-run that could not change the number.
+    // The classifier owns the population; stale is only what it cannot justify.
+    const _idxState = __require('./src/analysis/index-state');
+    const valClass = _idxState.classifyIndexEntries(cwd, valIndexed, config);
+    const valStale = valClass.stale;
+    const valAugmented = valClass.augmented.length;
 
     const coveragePct  = valTotal > 0 ? Math.round((valCovered / valTotal) * 100) : 0;
     const valNotIndexed = valTotal - valCovered;
     if (coveragePct < 70)
       warnings.push(`coverage ${coveragePct}% is below recommended 70% — increase maxTokens or expand srcDirs`);
-    if (valStale > 0)
-      warnings.push(`stale index entries: ${valStale} indexed file(s) are no longer in scope — re-run sigmap to refresh the index`);
+    for (const remedy of _idxState.staleRemedies(valClass))
+      warnings.push(`stale index entries: ${remedy}`);
 
     // Optional query check. Two complementary signals:
     //  (a) cased-symbol coverage — if the query literally names a camelCase /
@@ -33676,6 +34059,10 @@ function main() {
         indexedInScope: valCovered,
         notIndexed: valNotIndexed,
         staleEntries: valStale,
+        augmentedEntries: valAugmented,
+        augmentedByReason: valClass.byReason,
+        missingEntries: valClass.missing.length,
+        outOfScopeEntries: valClass.outOfScope.length,
         totalFiles: valTotal,
         outsideSrcDirs: __valOutside,
       };
@@ -33686,6 +34073,9 @@ function main() {
       if (issues.length === 0) {
         const residual = [
           valNotIndexed > 0 ? `${valNotIndexed} not indexed` : null,
+          // Named, not counted as stale: these are the entries `generate`
+          // indexes on purpose so `ask` can reach tests, CI and entrypoints.
+          valAugmented > 0 ? `${valAugmented} beyond srcDirs (${_idxState.formatAugmented(valClass)})` : null,
           valStale > 0 ? `${valStale} stale` : null,
         ].filter(Boolean).join(', ');
         // #762: `indexed` — how much of the in-scope set the retrieval index
@@ -34339,7 +34729,7 @@ function main() {
   if (args[0] === 'status') {
     const jsonOut = args.includes('--json');
     const gitOpts = { cwd };
-    const st = { branch: null, dirty: 0, lastIndex: null, indexVersion: null, indexFiles: null, changedSinceIndex: null, notes: 0, lastNote: null };
+    const st = { branch: null, dirty: 0, lastIndex: null, indexSource: null, indexVersion: null, indexFiles: null, changedSinceIndex: null, notes: 0, lastNote: null };
 
     st.branch = __tryGit(['rev-parse', '--abbrev-ref', 'HEAD'], gitOpts) || null;
     // Fallback for an unborn branch (fresh repo, no commits yet).
@@ -34351,27 +34741,24 @@ function main() {
       st.dirty = porcelain ? porcelain.split('\n').filter(Boolean).length : 0;
     } catch (_) {}
 
+    // #825: this read the usage log and nothing else, so with tracking off —
+    // the default — it reported "never" about an index `doctor` was calling up
+    // to date in the same repo. The shared primitive falls back to the index
+    // artifact's own stamp and discloses which source it used.
+    const _idxState = __require('./src/analysis/index-state');
     try {
-      const { readLog } = requireSourceOrBundled('./src/tracking/logger');
-      const log = readLog(cwd);
-      if (log.length) {
-        const last = log[log.length - 1];
-        st.lastIndex = last.ts || null;
-        st.indexVersion = last.version || null;
-        st.indexFiles = last.fileCount != null ? last.fileCount : null;
-      }
+      const fresh = _idxState.indexFreshness(cwd);
+      st.lastIndex = fresh.ts;
+      st.indexSource = fresh.source;
+      st.indexVersion = fresh.version;
+      st.indexFiles = fresh.files;
     } catch (_) {}
 
-    // Index freshness: count tracked files modified after the last index run.
+    // Index freshness: count source files modified after the last index run,
+    // over the same population `doctor` walks so the two cannot disagree.
     if (st.lastIndex) {
       try {
-        const since = Date.parse(st.lastIndex);
-        const tracked = __git(['ls-files'], gitOpts).split('\n').filter(Boolean);
-        let changed = 0;
-        for (const f of tracked.slice(0, 5000)) {
-          try { if (fs.statSync(path.join(cwd, f)).mtimeMs > since) changed++; } catch (_) {}
-        }
-        st.changedSinceIndex = changed;
+        st.changedSinceIndex = _idxState.changedSince(cwd, config, Date.parse(st.lastIndex));
       } catch (_) {}
     }
 
@@ -34403,6 +34790,7 @@ function main() {
     console.log(`  Working tree:  ${st.dirty === 0 ? 'clean' : `${st.dirty} file${st.dirty === 1 ? '' : 's'} changed`}`);
     if (st.lastIndex) {
       let fresh = `${fmtAgo(st.lastIndex)} (v${st.indexVersion || '?'}, ${st.indexFiles != null ? st.indexFiles + ' files' : 'n/a'})`;
+      if (st.indexSource) fresh += ` — from ${st.indexSource}`;
       if (st.changedSinceIndex != null && st.changedSinceIndex > 0) fresh += ` — STALE: ${st.changedSinceIndex} file${st.changedSinceIndex === 1 ? '' : 's'} changed since`;
       console.log(`  Last index:    ${fresh}`);
     } else {
