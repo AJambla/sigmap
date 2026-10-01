@@ -31293,7 +31293,10 @@ function installHook(cwd, scriptPath) {
   }
   const hookPath = path.join(hookDir, 'post-commit');
   const resolvedScript = path.resolve(scriptPath);
-  const hookLine = `\nnode ${JSON.stringify(resolvedScript)} --generate 2>/dev/null || true\n`;
+  // Bare invocation = the documented `sigmap` generate run. The previous
+  // `--generate` flag was undocumented and only worked via unknown-flag
+  // fallthrough (#669); re-running --setup migrates existing hooks.
+  const hookLine = `\nnode ${JSON.stringify(resolvedScript)} 2>/dev/null || true\n`;
 
   if (fs.existsSync(hookPath)) {
     const existing = fs.readFileSync(hookPath, 'utf8');
