@@ -91,6 +91,29 @@ test('summary: ok=true when clean', () => {
   assert.strictEqual(r.findings.length, 0);
 });
 
+test('generated artifacts: excluded from findings, counted separately (#669)', () => {
+  const r = reviewPr([
+    { path: 'src/foo.js', status: 'M' },
+    { path: 'src/foo.test.js', status: 'M' },
+    { path: '.context/gain.ndjson', status: 'M' },
+    { path: '.github/copilot-instructions.md', status: 'M' },
+    { path: 'CLAUDE.md', status: 'M' },
+    { path: 'dist/bundle.js', status: 'M' },
+  ], process.cwd(), { readFile: () => '' });
+  assert.strictEqual(r.summary.generatedChanged, 4, JSON.stringify(r.summary));
+  assert.strictEqual(r.summary.sourceChanged, 1);
+  assert.ok(!r.findings.some((f) => f.file === 'dist/bundle.js'), 'generated file produced a finding');
+  assert.strictEqual(r.summary.ok, true, JSON.stringify(r.findings));
+});
+
+test('generated artifacts: do not contribute to scope drift (#669)', () => {
+  const files = ['a', 'b', 'c', 'd', 'e'].map((d) => ({ path: `${d}/x.js`, status: 'M' }));
+  files.push({ path: '.context/gain.ndjson', status: 'M' });
+  files.push({ path: 'CLAUDE.md', status: 'M' });
+  const r = reviewPr(files, process.cwd(), { scopeThreshold: 5, readFile: () => '' });
+  assert.ok(!r.findings.some((f) => f.type === 'scope-drift'), JSON.stringify(r.findings));
+});
+
 // ── CLI (real git repo) ─────────────────────────────────────────────────────
 function withGitRepo(fn) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'reviewpr-'));

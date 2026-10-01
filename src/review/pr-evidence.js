@@ -113,8 +113,9 @@ function formatPrEvidenceMarkdown(evidence, opts = {}) {
   L.push('## 🔍 PR Evidence Report');
   L.push('');
   L.push(
-    `**${s.filesChanged} file(s) changed** — ${s.sourceChanged} source, ${s.testsChanged} test · ` +
-    (s.ok ? '✅ no review findings' : `⚠️ ${s.findings} finding(s)`) +
+    `**${s.filesChanged} file(s) changed** — ${s.sourceChanged} source, ${s.testsChanged} test` +
+    (s.generatedChanged ? `, ${s.generatedChanged} generated (excluded from findings)` : '') +
+    (s.ok ? ' · ✅ no review findings' : ` · ⚠️ ${s.findings} finding(s)`) +
     ` · scope: ${evidence.scope}`
   );
   L.push('');

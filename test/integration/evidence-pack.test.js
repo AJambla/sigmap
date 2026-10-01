@@ -118,6 +118,20 @@ test('riskLabelFor classifies the v8.5 richer label set (C3)', () => {
   assert.strictEqual(pack.riskLabelFor('db/migrate/20200101_add_auth_tokens.rb'), 'migration');
 });
 
+test('riskLabelFor classifies SigMap artifacts as generated (#669)', () => {
+  for (const p of [
+    '.context/gain.ndjson', '.context/usage.json', '.context/sig-index.json',
+    '.github/copilot-instructions.md', '.github/openai-context.md', '.github/gemini-context.md',
+    'CLAUDE.md', 'AGENTS.md', 'GEMINI.md', '.cursorrules', '.windsurfrules',
+    'llm.txt', 'llm-full.txt', 'llms.txt',
+  ]) {
+    assert.strictEqual(pack.riskLabelFor(p), 'generated', p);
+  }
+  // real authored files keep their labels
+  assert.strictEqual(pack.riskLabelFor('docs/claude-setup.md'), 'source');
+  assert.strictEqual(pack.riskLabelFor('src/context/helper.js'), 'source');
+});
+
 test('findRelatedTests matches a test file by stem', () => {
   const universe = ['src/widget.js', 'test/widget.test.js', 'src/other.js'];
   assert.deepStrictEqual(pack.findRelatedTests('src/widget.js', universe), ['test/widget.test.js']);
