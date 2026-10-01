@@ -122,14 +122,21 @@ test('riskLabelFor classifies SigMap artifacts as generated (#669)', () => {
   for (const p of [
     '.context/gain.ndjson', '.context/usage.json', '.context/sig-index.json',
     '.github/copilot-instructions.md', '.github/openai-context.md', '.github/gemini-context.md',
-    'CLAUDE.md', 'AGENTS.md', 'GEMINI.md', '.cursorrules', '.windsurfrules',
+    '.github/context-cold.md', '.github/context-auth.md', '.github/context-mall-mbg.md',
+    '.sigmap-cache.json',
+    'CLAUDE.md', 'AGENTS.md', '.cursorrules', '.windsurfrules',
     'llm.txt', 'llm-full.txt', 'llms.txt',
   ]) {
     assert.strictEqual(pack.riskLabelFor(p), 'generated', p);
   }
+  // GEMINI.md is not an adapter output — the Gemini adapter writes
+  // .github/gemini-context.md — so it is not labelled generated (#669 review)
+  assert.strictEqual(pack.riskLabelFor('GEMINI.md'), 'source');
   // real authored files keep their labels
   assert.strictEqual(pack.riskLabelFor('docs/claude-setup.md'), 'source');
   assert.strictEqual(pack.riskLabelFor('src/context/helper.js'), 'source');
+  // near-miss: a context-*.md outside .github/ is authored prose, not a split file
+  assert.notStrictEqual(pack.riskLabelFor('docs/context-notes.md'), 'generated');
 });
 
 test('findRelatedTests matches a test file by stem', () => {

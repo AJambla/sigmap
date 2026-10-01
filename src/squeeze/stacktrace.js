@@ -51,10 +51,12 @@ function enrichFrame(frame, symbolIndex) {
   if (!key) return null;
   const sigs = symbolIndex.get(key) || [];
   const wantFn = frame.fn ? frame.fn.split('.').pop() : '';
-  // Preference: name+line match, then name, then the NARROWEST containing line
-  // range. Last-containing-match-wins used to attach the file-tail
-  // `module.exports` sig (widest range, last in the list) to frames that sit
-  // inside an anchored function (#669).
+  // Preference: name+line match first, then the pre-#669 order — a containing
+  // line match outranks a name-only match. Two fixes over the old code: the
+  // winner among name+line candidates is the NARROWEST range, not the last
+  // (first-match re-attached the wide file-tail `module.exports` sig, which is
+  // also listed before the functions), and containing ranges are compared by
+  // span for the same reason.
   let byNameInLine = null, nameLineSpan = Infinity, byName = null, byLine = null, byLineSpan = Infinity;
   for (const sig of sigs) {
     const s = String(sig);
@@ -76,7 +78,7 @@ function enrichFrame(frame, symbolIndex) {
     }
     if (contains && span < byLineSpan) { byLineSpan = span; byLine = s; }
   }
-  const sig = byNameInLine || byName || byLine;
+  const sig = byNameInLine || byLine || byName;
   return sig ? { file: key, sig: sig.replace(/\s*:\d+(?:-\d+)?\s*(?:#.*)?$/, '').trim() } : null;
 }
 
