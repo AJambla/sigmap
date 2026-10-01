@@ -10,6 +10,28 @@ Format: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [8.56.0] — 2026-10-01
+
+### Fixed
+- **A flat repo root was never a candidate source root** (#805, PR #821) — `_enumerateCandidates` only ever walked *directories*, so on a flat layout — the normal shape of a Go module — `.` could not be selected no matter how much source sat there. A fresh `gin` clone detected `["internal","binding","render","codec","ginS","testdata"]` and left `gin.go`, `routergroup.go`, `context.go` and `tree.go` invisible; on a reduced 13-file fixture only **2 files were scanned** and `explain gin.go` reported `EXCLUDED`. It also preferred `testdata`, a fixture directory the go tool ignores outright. Two **structural** signals now qualify the root, deliberately not one tuned ratio: a `go.mod` carrying root-level `.go` files — a Go module root *is* a package, which is the toolchain's own model — and, generically, a root holding at least 20% of the tree's code files. Measured across all 43 cached benchmark repos this selects exactly the four Go modules (`cobra`, `echo`, `gin`, `gorm`) and changes nothing else: every non-Go repo has **zero** root-level `.go` files and sits at or below 4% share. `gorm` is at 10%, which is why the `go.mod` rule had to be structural rather than a threshold. `_dedupeNested` now knows `.` is the parent of everything, so a flat layout resolves to `["."]` instead of walking the same files twice
+- **…and nothing told the user** (#805, PR #821) — a coverage figure computed over `srcDirs` cannot see a file the detector never selected, which is how the broken case reported a plausible *"indexed 67% (2/3 files)"* while ten of thirteen source files were missing. The number was not wrong about its own population; nothing disclosed that the population was wrong. New `outsideSrcDirs` counts implementation files outside `srcDirs` with an extension breakdown, and both `validate` and `doctor` report it. It is a **separate primitive**, not a new denominator inside `coverageScore`: the named populations (#762) are pinned, and the fix is to disclose what is missing rather than redefine coverage
+- **Three monorepo detectors disagreed about the same repo** (#781, PR #821) — the marker-based pair (`_detectMonorepo` in the source-root resolver, duplicated byte-for-byte as `_monorepoMarker` in `tune.js`) answered *no* while the layout scan found two packages. So `roots` and `tune` told the user they were not in a monorepo while `--monorepo` demonstrably processed `packages/core` and `packages/cli`, and `tune` never proposed `monorepo: true` for a layout the mode supports. New `src/discovery/monorepo.js` answers it once and reports **how** it decided — a declared workspace and a layout-only match are different facts, and collapsing them into a bare boolean is exactly what let the disagreement hide
+
+### Added
+- **`validate` and `doctor` disclose source files outside `srcDirs`** (#805, PR #821) — graded on **share, not raw count**. The first implementation warned about *297 files* on this repo, because `test/`, `scripts/` and `benchmarks/` are deliberately outside `srcDirs`; a check that cries wolf on a correct configuration teaches the user to ignore it. This repo now reads `✓ 176 in scope · 4 outside (2%)`, while a wrongly-configured flat repo reads `⚠ 10 of 13 implementation file(s) are OUTSIDE srcDirs (77%) — 10.go in .`. `validate --json` carries the figure as `outsideSrcDirs`; `doctor` carries it as a new `srcdirs-coverage` check
+- **`roots` and `tune` name the evidence behind the monorepo verdict** (#781, PR #821) — `Monorepo: yes  (layout: 2 manifests under packages/)`, and `tune`'s recommendation reason is the same string, so a layout-only match is distinguishable from a declared workspace at a glance
+
+### Changed
+- **`testdata` and the fixture-directory family are never preferred as source roots** (#805, PR #821) — `testdata` is Go's fixture convention and the go tool ignores it outright; `test-data`, `__fixtures__`, `snapshots` and `__snapshots__` join it in the penalised set
+- **Both new tree walks stop at nested repositories** (#805, PR #821) — recorded because it was a real defect introduced and then fixed inside the same change. `outsideSrcDirs` was walking **53,013 files** on this repo, 47,327 of them inside `benchmarks/repos/` — 43 cloned repositories whose files could never be the user's source. A `.git` entry is the marker, which also covers submodules and any vendored checkout the exclude list does not happen to name. Same answer, **232ms → 111ms**
+- **One existing assertion was corrected rather than worked around** (#805, PR #821) — `v650-source-root-resolver.test.js` required `internal` as a *separate* root for a Go module, which is the #805 defect stated as a requirement. It now asserts the corrected contract (`.` is the root and covers `internal/`), with `vendor` still excluded both from the roots and from the walk
+
+### Measurement
+- 23 new tests, each verified **failing** against a `v8.55.0` worktree before the fix. Full suite **193 passed, 0 failed**; `validate:source-roots` PASS across 33 repos; bundle reproducible at 173 modules
+- This release changes **what gets indexed** for `gin`, `cobra`, `echo` and `gorm` — all four carry benchmark tasks — so retrieval and honest figures move for the first time on those repos. Every number below was re-measured against a `v8.55.0` control rather than assumed
+
+---
+
 ## [8.55.0] — 2026-09-30
 
 ### Fixed

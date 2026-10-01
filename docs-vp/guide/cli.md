@@ -1304,6 +1304,7 @@ sigmap doctor
 
 ✓ Git repository — recency boost + impact analysis enabled
 ✓ Config & source roots — srcDirs: src, packages
+✓ Source files in scope — 176 in scope · 4 outside (2%) — 2.js 1.mjs 1.sh in ., public-benchmarks
 ✓ Generated context — 1 file(s): .github/copilot-instructions.md
 ✓ Signature index — 131 file(s) indexed
 ⚠ Index freshness — 1 source file(s) changed since last generate
@@ -1313,6 +1314,17 @@ sigmap doctor
 
 0 error(s), 1 warning(s).
 ```
+
+::: tip Source files in scope (v8.56.0)
+`Coverage` above is measured *over* `srcDirs`, so it cannot see a file the detector never selected — which is how a flat Go layout reported a healthy percentage while the codebase was invisible (#805). The `Source files in scope` check measures the **population itself**: implementation files that fall outside every `srcDir`.
+
+It warns only above a **10% share**, and counts implementation only — tests, docs, CI, mocks and tooling directories are legitimately outside `srcDirs`. A wrongly-configured flat repo reads:
+
+```text
+⚠ Source files in scope — 10 of 13 implementation file(s) are OUTSIDE srcDirs (77%) — 10.go in .
+    ↳ run: sigmap roots --fix   or widen "srcDirs" in gen-context.config.json
+```
+:::
 
 ::: tip Coverage figures name their population (v8.52.0)
 Four commands report coverage and they measure different things, so each one says which:
@@ -1431,7 +1443,17 @@ The two residuals are reported separately because they mean different things:
 | `notIndexed` | In scope, missing from the index | Raise `maxTokens` or widen `srcDirs` — this is missing context |
 | `staleEntries` | Indexed, no longer in scope | Re-run `sigmap` to refresh — this is a stale index, not a coverage problem |
 
-JSON output includes `valid`, `issues`, `warnings`, `coverage`, `indexedInScope`, `notIndexed`, `staleEntries`, `totalFiles`, and — when `--query` is given — a `query` report (`{ text, topFile, topScore, confidence }`). Exits `1` when hard issues are found.
+**The population itself is now checked (v8.56.0).** Coverage is computed *over* `srcDirs`, so it cannot see a file the detector never selected. On a flat Go layout that produced a comfortable `indexed 67% (2/3 files)` while ten of thirteen source files were invisible — the figure was not wrong about its own population; nothing disclosed that the population was wrong (#805). `validate` now reports implementation files that fall **outside** every `srcDir`:
+
+```
+[sigmap] ⚠  10 of 13 implementation file(s) OUTSIDE srcDirs (77%) — 10.go
+[sigmap]    in: .
+[sigmap]    srcDirs is (internal, render, testdata) — widen it or set "srcDirs" explicitly
+```
+
+It is graded on **share, not raw count**, and counts implementation only: tests, docs, CI, mocks and the conventional tooling directories (`test/`, `scripts/`, `benchmarks/`, `examples/`, …) are routinely and correctly outside `srcDirs`, and are reported as `skipped` rather than as a miss. Below 10% nothing is printed — a couple of root-level entrypoints outside `srcDirs` is an ordinary layout, and a check that fires on a correct configuration teaches you to ignore it. [`doctor`](#doctor) carries the same figure as its `srcdirs-coverage` check.
+
+JSON output includes `valid`, `issues`, `warnings`, `coverage`, `indexedInScope`, `notIndexed`, `staleEntries`, `totalFiles`, `outsideSrcDirs` (`{ total, byExt, dirs, skipped, inScope, share }`), and — when `--query` is given — a `query` report (`{ text, topFile, topScore, confidence }`). Exits `1` when hard issues are found.
 
 ---
 
@@ -1455,7 +1477,7 @@ sigmap roots --explain
 
 Detected languages   : TypeScript (tsconfig.json), JavaScript (.ts/.tsx files)
 Detected frameworks  : Next.js (next.config.js), React (package.json dep)
-Monorepo             : no
+Monorepo             : no  (no: no workspace marker and no sibling packages)
 
 Selected roots:
   1. app/        — confidence: high — score: 8.5 (framework match +3.0, density +2.5, entrypoint +1.5)
@@ -1476,9 +1498,39 @@ Outputs structured JSON:
   "frameworks": [{ "name": "nextjs", "confidence": 0.95 }, ...],
   "confidence": "high",
   "isMonorepo": false,
+  "monorepo": { "isMonorepo": false, "source": "none", "evidence": "no: no workspace marker and no sibling packages", "marker": null, "packages": [] },
   "explanation": [...]
 }
 ```
+
+### Flat layouts: the repo root is a source root (v8.56.0)
+
+Candidate detection used to walk **directories only**, so on a flat layout — the normal shape of a Go module — `.` could never be selected however much source sat there. A fresh `gin` clone detected `["internal","binding","render","codec","ginS","testdata"]` and left `gin.go`, `routergroup.go`, `context.go` and `tree.go` invisible, having preferred `testdata` — a fixture directory the go tool ignores outright (#805).
+
+Two **structural** signals now qualify the root:
+
+| Signal | Rule |
+|---|---|
+| Go module | `go.mod` at the root with at least one root-level `.go` file — a Go module root *is* a package, which is the toolchain's own model |
+| Generic share | the root holds **≥20%** of the tree's code files (minimum 3 files) |
+
+Chosen by measuring all 43 cached benchmark repos rather than by tuning a ratio: together they select exactly the four Go modules (`cobra`, `echo`, `gin`, `gorm`) and change nothing else. Every non-Go repo there has **zero** root-level `.go` files and sits at or below 4% share. `gorm` is at 10%, which is why the `go.mod` rule is structural rather than a threshold.
+
+When the root is selected it **replaces** its subdirectories rather than joining them, so a flat layout resolves to `["."]` and the same files are not walked twice. `testdata`, `test-data`, `__fixtures__`, `snapshots` and `__snapshots__` are never preferred as roots.
+
+### One monorepo verdict, with its evidence (v8.56.0)
+
+Three detectors used to answer this question and they disagreed: a marker-based pair (in the source-root resolver, duplicated in `tune`) required `pnpm-workspace.yaml`, `turbo.json`, `nx.json`, `lerna.json` or `package.json.workspaces`, while a separate layout scan looked for sibling manifests. On a repo with `packages/core` and `packages/cli` but no marker, `roots` and `tune` reported **no** while `--monorepo` processed both packages, and `tune` never proposed `monorepo: true` for a layout the mode supports (#781).
+
+One detector answers it now, and it names **how** it decided — a declared workspace and a layout-only match are different facts:
+
+```
+Monorepo: yes  (layout: 2 manifests under packages/)
+Monorepo: yes  (marker: pnpm-workspace.yaml)
+Monorepo: no   (no: 1 package under packages/ (needs 2))
+```
+
+A layout match needs **two or more** sibling packages: one package under `packages/` is an ordinary single-package layout. Manifests counted are `package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod`, `build.gradle(.kts)`, `pom.xml` and `requirements.txt`, so a polyglot workspace is recognised. [`tune`](#tune) uses the same string as its recommendation reason.
 
 **`--fix`**
 Interactive mode: prompts you to review and correct the detected roots, then writes the corrected list to `gen-context.config.json`:
@@ -1835,7 +1887,7 @@ sigmap bench --submit --json
  SigMap Community Benchmark Submission
 ────────────────────────────────────────────────────────
  SigMap version : 8.51.2
- Benchmark ID   : sigmap-v8.55-main
+ Benchmark ID   : sigmap-v8.56-main
  Submitted      : 2026-09-13
 ────────────────────────────────────────────────────────
  Canonical metrics (official release):

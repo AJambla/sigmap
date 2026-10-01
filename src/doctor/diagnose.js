@@ -34,6 +34,10 @@ const EXCLUDE_DIRS = new Set([
 
 const ICON = { ok: '✓', warn: '⚠', fail: '✗' };
 
+// Share of implementation outside srcDirs that turns the report into a warning.
+// Below it, a couple of root entrypoints outside srcDirs is an ordinary layout.
+const OUTSIDE_WARN_SHARE = 0.10;
+
 function _short(p, cwd) {
   const rel = path.relative(cwd, p);
   return rel && !rel.startsWith('..') ? rel : p.replace(os.homedir(), '~');
@@ -146,6 +150,31 @@ function diagnose(cwd, opts = {}) {
       } else {
         add('config', 'Config & source roots', 'ok', `source roots: ${present.slice(0, 8).join(', ')}${present.length > 8 ? `, +${present.length - 8} more` : ''}`);
       }
+
+      // #805: srcDirs can be confidently wrong. A coverage figure computed over
+      // srcDirs cannot see a file the detector never selected, so a flat Go
+      // layout reported a healthy-looking percentage while the codebase was
+      // invisible. This check measures the population itself.
+      try {
+        const { outsideSrcDirs } = require('../analysis/coverage-score');
+        const outside = outsideSrcDirs(cwd, config);
+        const pct = Math.round(outside.share * 100);
+        if (outside.total === 0) {
+          add('srcdirs-coverage', 'Source files in scope', 'ok', 'every implementation file is under srcDirs');
+        } else if (outside.share < OUTSIDE_WARN_SHARE) {
+          // A few root-level entrypoints outside srcDirs is a normal layout,
+          // so the count is reported without crying wolf.
+          const exts = outside.byExt.slice(0, 3).map((e) => `${e.count}${e.ext}`).join(' ');
+          add('srcdirs-coverage', 'Source files in scope', 'ok',
+            `${outside.inScope} in scope · ${outside.total} outside (${pct}%) — ${exts} in ${outside.dirs.slice(0, 3).join(', ')}`);
+        } else {
+          const exts = outside.byExt.slice(0, 4).map((e) => `${e.count}${e.ext}`).join(' ');
+          add('srcdirs-coverage', 'Source files in scope',
+            'warn',
+            `${outside.total} of ${outside.inScope + outside.total} implementation file(s) are OUTSIDE srcDirs (${pct}%) — ${exts} in ${outside.dirs.slice(0, 5).join(', ')}`,
+            'run: sigmap roots --fix   or widen "srcDirs" in gen-context.config.json');
+        }
+      } catch (_) {}
     }
   } catch (e) {
     if (!checks.some((c) => c.id === 'config')) add('config', 'Config & source roots', 'warn', `could not load config: ${e.message}`);
