@@ -74,6 +74,31 @@ test('stacktrace: enriches top frame from symbol index', () => {
   assert.ok(r.enriched, 'not enriched');
   assert.ok(/validateToken\(token\)/.test(r.squeezed), r.squeezed);
 });
+test('stacktrace: enrichment prefers anchored function over wide module.exports (#669)', () => {
+  const t = 'Err: x\n    at formatResults (/app/src/report.js:10:3)';
+  // Real index sigs carry a trailing `  # hint` after the anchor — the parse
+  // must tolerate it or the function sig silently never line-matches.
+  const idx = new Map([['src/report.js', [
+    'module.exports = { formatResults }  :1-15',
+    'function formatResults(rows) → string  :9-11  # Render rows as a table',
+  ]]]);
+  const r = squeezeStackTrace(t, { srcDirs: ['src'], symbolIndex: idx });
+  assert.ok(r.enriched, 'not enriched');
+  const enrichedLine = r.squeezed.split('\n').find((l) => l.includes('↳')) || '';
+  assert.ok(/formatResults\(rows\)/.test(enrichedLine), `wrong sig attached: ${enrichedLine}`);
+  assert.ok(!/module\.exports/.test(enrichedLine), 'module.exports sig attached to frame');
+  assert.ok(!/:9-11|# Render/.test(enrichedLine), `anchor/hint leaked into display: ${enrichedLine}`);
+});
+test('stacktrace: anonymous frame enriches with narrowest containing range (#669)', () => {
+  const t = 'Err: x\n    at /app/src/report.js:10:3';
+  const idx = new Map([['src/report.js', [
+    'module.exports = { formatResults, other }  :1-40',
+    'function formatResults(rows) → string  :9-11  # Render rows as a table',
+  ]]]);
+  const r = squeezeStackTrace(t, { srcDirs: ['src'], symbolIndex: idx });
+  const enrichedLine = r.squeezed.split('\n').find((l) => l.includes('↳')) || '';
+  assert.ok(/formatResults\(rows\)/.test(enrichedLine), `wrong sig attached: ${enrichedLine}`);
+});
 test('stacktrace: graceful fallback when symbol not indexed', () => {
   const t = 'Err: x\n    at ghost (/app/src/a.js:5:1)';
   const r = squeezeStackTrace(t, { srcDirs: ['src'], symbolIndex: new Map() });

@@ -51,18 +51,33 @@ function enrichFrame(frame, symbolIndex) {
   if (!key) return null;
   const sigs = symbolIndex.get(key) || [];
   const wantFn = frame.fn ? frame.fn.split('.').pop() : '';
-  let byLine = null, byName = null;
+  // Preference: name+line match, then name, then the NARROWEST containing line
+  // range. Last-containing-match-wins used to attach the file-tail
+  // `module.exports` sig (widest range, last in the list) to frames that sit
+  // inside an anchored function (#669).
+  let byNameInLine = null, nameLineSpan = Infinity, byName = null, byLine = null, byLineSpan = Infinity;
   for (const sig of sigs) {
     const s = String(sig);
-    const mm = s.match(/:(\d+)(?:-(\d+))?\s*$/);
+    // Anchors may carry a trailing `  # hint` in the real index — without
+    // tolerating it, every documented function sig silently failed the line
+    // match and a bare `module.exports` name-hit won (#669).
+    const mm = s.match(/:(\d+)(?:-(\d+))?\s*(?:#.*)?$/);
+    let contains = false, span = Infinity;
     if (mm) {
       const a = +mm[1], b = mm[2] ? +mm[2] : a;
-      if (frame.line >= a && frame.line <= b) byLine = s;
+      if (frame.line >= a && frame.line <= b) { contains = true; span = b - a; }
     }
-    if (wantFn && new RegExp('\\b' + wantFn.replace(/[^\w$]/g, '') + '\\b').test(s)) byName = byName || s;
+    const nameHit = wantFn && new RegExp('\\b' + wantFn.replace(/[^\w$]/g, '') + '\\b').test(s);
+    if (nameHit) {
+      // Narrowest wins, not first: the index lists `module.exports` before the
+      // functions, so first-match would re-attach the wide exports sig.
+      if (contains) { if (span < nameLineSpan) { nameLineSpan = span; byNameInLine = s; } }
+      else byName = byName || s;
+    }
+    if (contains && span < byLineSpan) { byLineSpan = span; byLine = s; }
   }
-  const sig = byLine || byName;
-  return sig ? { file: key, sig: sig.replace(/\s*:\d+(?:-\d+)?\s*$/, '').trim() } : null;
+  const sig = byNameInLine || byName || byLine;
+  return sig ? { file: key, sig: sig.replace(/\s*:\d+(?:-\d+)?\s*(?:#.*)?$/, '').trim() } : null;
 }
 
 /**
