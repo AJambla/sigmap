@@ -78,12 +78,12 @@ features:
 
 <div style="max-width:840px;margin:0 auto;padding:18px 24px 0;text-align:center">
 <div style="display:inline-flex;flex-wrap:wrap;gap:.5rem;justify-content:center;background:var(--vp-c-brand-soft,#ede9fe);border:1px solid rgba(124,106,247,.25);border-radius:999px;padding:.55rem .9rem;font-size:.9rem;color:var(--vp-c-text-1)">
-  <span><strong>Release:</strong> v8.58.0</span>
+  <span><strong>Release:</strong> v8.59.0</span>
   <span>·</span>
-  <span><strong>New — one definition per number:</strong> <code>validate</code>, <code>doctor</code> and <code>status</code> each held a private definition of what the signature index contains and when it was last built, so on a <em>healthy</em> index all three contradicted each other: <code>266 stale entries</code>, <code>447 file(s) indexed · index is up to date</code>, and <code>Last index: never</code>. <code>generate</code> writes the index over an <strong>augmented</strong> population — the <code>srcDirs</code> walk widened by the declared entrypoints, every test root and every CI definition, all three deliberate because they are how <code>ask</code> reaches code that lives outside <code>srcDirs</code> <em>by construction</em>. <code>validate</code> measured it against the <strong>un-widened</strong> list, so every widened entry read as stale — 256 under <code>test/</code>, 10 under <code>.github/</code>, <strong>none of them stale</strong> — and advised a re-run that could not change a number that was never wrong. Two real bugs hid behind that false alarm and both are fixed: the signature cache was written back whole and never pruned, so a genuinely <em>deleted</em> file did survive the full run <code>validate</code> prescribed, and <code>status</code> read only the usage log — which exists only under <code>--track</code> — so by default it reported <code>never</code> about an index <code>doctor</code> was calling up to date. One shared primitive now owns the population and its age, and exports the collector roots <code>generate</code> itself imports, so the two cannot drift. Index size does not move: this is a population <strong>widening</strong>, not a prune. 36 languages, zero dependencies, offline, deterministic.</span>
+  <span><strong>New — the dashboard owns neither its path nor its language list:</strong> <code>--dashboard</code> wrote into <code>benchmarks/reports/</code>, a directory SigMap does not own — in a consumer repo it either does not exist, so SigMap created it, or it means something else entirely, and either way the file landed outside the <code>.context/</code> line <code>--init</code> gitignores. It now writes <code>.context/dashboard.html</code>, with <code>--out &lt;path&gt;</code> for an explicit destination; an audit confirmed this was the <strong>only</strong> SigMap command writing outside <code>.context/</code>. Separately the coverage panel graded against a hardcoded 21-entry language list while the project ships <strong>36</strong>, so a repo written in Elixir, Lua, R, GDScript, Astro, TOML or Terraform read as uncovered. The denominator was only half of it: detection was a <em>second</em> extension map covering the same 21, so the numerator could never reach a widened denominator — raising it 21 &rarr; 36 alone would have moved this repo from 2/21 to 2/36, making the published figure <em>worse</em>. Both sides now come from one module, whose exported language list reproduces the derived list behind <code>version.json</code> exactly. A third copy fell out with it — the chart's 21 positional label abbreviations, replaced by the languages actually present. On a repo using Elixir, Lua, R and Terraform the figure moves <strong>0/21 &rarr; 4/36</strong>. 36 languages, zero dependencies, offline, deterministic.</span>
 </div>
 <div style="margin-top:.4rem;display:inline-flex;flex-wrap:wrap;gap:.5rem;justify-content:center;background:var(--vp-c-default-soft,#f3f4f6);border:1px solid rgba(0,0,0,.08);border-radius:999px;padding:.55rem .9rem;font-size:.9rem;color:var(--vp-c-text-2)">
-  <span><strong>Benchmark:</strong> sigmap-v8.58-main</span>
+  <span><strong>Benchmark:</strong> sigmap-v8.59-main</span>
   <span>·</span>
   <span>78.6% hit@5 · 95.8% token reduction · 2026-10-01</span>
 </div>
@@ -177,7 +177,7 @@ See the full [end-to-end walkthrough](/guide/walkthrough) to watch this in actio
 | Overall token reduction | — | **95.8%** |
 | GPT-4o overflow repos | 14/21 | **0/21** |
 
-Latest saved benchmark run: **2026-10-01 (v8.58.0)**.
+Latest saved benchmark run: **2026-10-01 (v8.59.0)**.
 
 </div>
 

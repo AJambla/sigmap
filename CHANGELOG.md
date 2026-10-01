@@ -10,6 +10,32 @@ Format: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [8.59.0] — 2026-10-01
+
+Second PR of ladder **R2 — "one definition per number, pinned structurally"**. Two defects in the same command, so they shipped as one change.
+
+### Changed
+- **`--dashboard` writes `.context/dashboard.html`** (#782, PR #829) — it wrote into `benchmarks/reports/`, a directory SigMap does not own. In a consumer repo that path either does not exist, so SigMap created it, or it means something else entirely; either way the file landed outside the `.context/` line `--init` gitignores. **Migration:** if you referenced `benchmarks/reports/dashboard.html`, point at `.context/dashboard.html` or pass the new `--out`. An audit of the published surface confirms this was the only hardcoded write outside `.context/` — every other `benchmarks/` reference is an optional *read* with a graceful fallback
+- **The per-language chart shows the languages actually present**, busiest first (#663, PR #829) — it charted a fixed 21 bars against a positionally-aligned list of 21 label abbreviations. Charting all 36 supported languages would put 20px between labels and most are zero in any one repo, so it renders what is there, with an empty state when none are
+
+### Fixed
+- **Dashboard coverage graded against a stale 21-language list** (#663, PR #829) — `LANGUAGE_KEYS` in `src/format/dashboard.js` had drifted from the 36 languages the project ships, so a repo written in Elixir, Lua, R, GDScript, Astro, TOML, Terraform, GraphQL or Protobuf read as uncovered
+- **The denominator was only half of it** (#663, PR #829) — `detectLanguage()` in the same file was a **second** extension map covering the same 21 languages, so the numerator could never reach a widened denominator. Raising `supported` 21 → 36 alone would have moved this repo from 2/21 to 2/36 — making the published figure **worse**. Detection and the supported set now come from the same module
+
+### Added
+- **`dispatch.LANGUAGES`** (#663, PR #829) — the languages SigMap can extract, derived from `EXT_MAP`'s values plus the two `langFor` routes by *filename* rather than extension (`dockerfile`, `pipeline`). It reproduces `scripts/lib/source-meta.mjs` `deriveLanguages()` **byte-identically** — the list `version.json` publishes and `check-doc-counts` gates. `source-meta.mjs` itself cannot be used at runtime: it is ESM under `scripts/` (not in `package.json` `files`) and `readdirSync`s `src/extractors/`, which does not exist in the standalone bundle
+- **`--dashboard --out <path>`** (#782, PR #829) — explicit destination, parent directory created, matching `wiki --out`. `--json` reports the path actually written
+
+### Measurement
+- On this repo the figure moves `9.5% (2/21)` → `8.3% (3/36)`. The percentage **drops because the denominator is finally honest**; the numerator rose too (2 → 3 — `markdown` was invisible before). On a fixture using Elixir, Lua, R and Terraform it moves **0/21 → 4/36**
+- The `#591` note warned that folding the dashboard's map into `EXT_MAP` "would miscount languages" because `.tsx → typescript_react`. That no longer applies: `deriveLanguages()` already counts `typescript_react` as its own entry, so matching dispatch **agrees** with the gated count rather than diverging from it. `extension-map-single-source.test.js` stays green
+- **Five of the 11 new tests are structural** — `dashboard.js` declares no `LANGUAGE_KEYS` and no extension map of its own (asserted on comment-stripped source, so the explanatory comments cannot satisfy it), the chart carries no positional label list, the denominator is tied to **both** `dispatch.LANGUAGES` **and** `version.json.languages`, `--dashboard` creates no directory outside `.context/`, and `--help` no longer advertises the old path
+- All **11 fail against v8.58.0** (verified in a throwaway worktree: 0 passed, 11 failed). One initially passed because its callback was marked `async` while the harness calls `fn()` without awaiting — the assertion threw into an unawaited promise and reported a pass regardless; removing `async` took the control from 1/11 to 0/11
+- Full suite **195 integration + 26 unit, 0 failed**
+- **No measured number changes.** This touches the dashboard and extractor dispatch, not retrieval or extraction output; `latest.json` untouched and `check:metrics` green
+
+---
+
 ## [8.58.0] — 2026-10-01
 
 First PR of ladder **R2 — "one definition per number, pinned structurally"**. `validate`, `doctor` and `status` each held a private definition of what the signature index contains and when it was last built, so on a **healthy** index all three contradicted each other. Two open issues, one root cause, one change.
