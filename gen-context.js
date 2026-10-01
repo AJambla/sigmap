@@ -32164,7 +32164,17 @@ function runGenerate(cwd, config, reportMode, reportJson = false) {
       lines.push(' Always-on only : signatures live in .context/sig-index.json — pulled by `sigmap ask`');
     }
     if (coverageLine) lines.push(coverageLine);
-    lines.push(` Output         : .github/copilot-instructions.md`);
+    // #669: name the file(s) this run actually wrote, not a hardcoded default —
+    // `--adapter claude` used to print "Output: .github/copilot-instructions.md".
+    const outTargets = (Array.isArray(config.outputs) && config.outputs.length) ? config.outputs : ['copilot'];
+    const outLabels = outTargets.map((t) => {
+      try {
+        const resolved = resolveAdapterPath(t, cwd, config);
+        const abs = resolved || __require('./packages/adapters/' + t).outputPath(cwd);
+        return path.relative(cwd, abs).split(path.sep).join('/');
+      } catch (_) { return t; }
+    });
+    lines.push(` Output         : ${outLabels.join(', ')}`);
     lines.push(bar);
     lines.push(` Try: "explain the architecture" \u00b7 "find the auth module"`);
     lines.push(bar, '');
