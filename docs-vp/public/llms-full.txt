@@ -79,9 +79,9 @@ sigmap gain --since 7d                    Window filter (7d, 30d, 12h, or ISO da
 sigmap gain --top <n> | --model <name>   Limit rows / set $ pricing model
 sigmap gain --reset                      Clear the local savings log (.context/gain.ndjson)
 sigmap ... --no-track                    Disable gain savings capture for this run
-sigmap --diff                            Generate context for git-changed files only
-sigmap --diff <base-ref>                 Generate context + structural diff vs base ref (e.g. main)
-sigmap --diff --staged                   Generate context for staged files only
+sigmap --diff                            Changed files: working tree vs HEAD
+sigmap --diff <base-ref>                 Changed files: working tree vs <base-ref> (incl. uncommitted)
+sigmap --diff --staged                   Changed files: index vs HEAD (staged only)
 sigmap --benchmark                       Run retrieval benchmark (benchmarks/tasks/retrieval.jsonl)
 sigmap --adapter <name>                  Generate for a specific adapter only (v3.0+)
 sigmap --adapter <name> --json           Show adapter output path as JSON

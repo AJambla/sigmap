@@ -17820,10 +17820,15 @@ __factories["./src/graph/call-graph"] = function(module, exports) {
       return null;
     };
 
+    // #768: a zero here means "no edge was found", not "no caller exists". The
+    // two systematic blind spots are counted while scanning so the formatter can
+    // say which, instead of asserting a safety property the graph cannot support.
+    let dynamicLoads = 0;
     for (const f of files) {
       normToAbs.set(normalizePath(path.resolve(f)), path.resolve(f));
       let src;
       try { src = fs.readFileSync(f, 'utf8'); } catch (_) { continue; }
+      dynamicLoads += countDynamicLoads(src);
       const fileDefs = extractDefs(f, src);
       if (!fileDefs) continue;
       perFileDefs.set(f, fileDefs);
@@ -17933,7 +17938,13 @@ __factories["./src/graph/call-graph"] = function(module, exports) {
       for (const [k, set] of mapOfSets.entries()) out.set(k, [...set]);
       return out;
     };
-    return { forward: toArr(forward), reverse: toArr(reverse), defs, edgeConfidence };
+    const scopeRoots = opts.files
+      ? ['(explicit file list)']
+      : (opts.srcDirs || _configuredSrcDirs(cwd) || ['src', 'app', 'lib']);
+    return {
+      forward: toArr(forward), reverse: toArr(reverse), defs, edgeConfidence,
+      scope: { roots: scopeRoots, files: files.length, dynamicLoads },
+    };
   }
 
   /**
@@ -18010,9 +18021,28 @@ __factories["./src/graph/call-graph"] = function(module, exports) {
   function methodImpact(symbol, cwd, opts = {}) {
     const graph = opts.graph || buildCallGraph(cwd, opts);
     const ids = _resolveSymbol(symbol, graph.defs);
-    if (ids.length === 0) return { symbol, resolved: [], direct: [], transitive: [], total: 0, unresolved: true };
+    const scope = graph.scope || null;
+    if (ids.length === 0) return { symbol, resolved: [], direct: [], transitive: [], total: 0, unresolved: true, scope };
     const { direct, transitive } = _bfs(ids, graph.reverse, opts.depth || 0);
-    return { symbol, resolved: ids, direct, transitive, total: direct.length + transitive.length, unresolved: false };
+    return { symbol, resolved: ids, direct, transitive, total: direct.length + transitive.length, unresolved: false, scope };
+  }
+
+  /**
+   * Module loads the import graph cannot follow, per file.
+   *
+   * Two forms, both common in this codebase: a `require()` whose argument is not
+   * a static string literal, and the bundle-safe wrappers (`requireSourceOrBundled`,
+   * `__require`) that take a literal but are invisible to a resolver looking for
+   * `require`/`import`. Each one is a caller edge that may exist and was not seen.
+   */
+  function countDynamicLoads(src) {
+    if (!src) return 0;
+    let n = 0;
+    const dynamicRequire = /\brequire\s*\(\s*(?!['"`])/g;
+    const wrappers = /\b(?:requireSourceOrBundled|__require)\s*\(/g;
+    while (dynamicRequire.exec(src)) n++;
+    while (wrappers.exec(src)) n++;
+    return n;
   }
 
   /**
@@ -18022,21 +18052,47 @@ __factories["./src/graph/call-graph"] = function(module, exports) {
   function methodCallees(symbol, cwd, opts = {}) {
     const graph = opts.graph || buildCallGraph(cwd, opts);
     const ids = _resolveSymbol(symbol, graph.defs);
-    if (ids.length === 0) return { symbol, resolved: [], direct: [], transitive: [], total: 0, unresolved: true };
+    const scope = graph.scope || null;
+    if (ids.length === 0) return { symbol, resolved: [], direct: [], transitive: [], total: 0, unresolved: true, scope };
     const { direct, transitive } = _bfs(ids, graph.forward, opts.depth || 0);
-    return { symbol, resolved: ids, direct, transitive, total: direct.length + transitive.length, unresolved: false };
+    return { symbol, resolved: ids, direct, transitive, total: direct.length + transitive.length, unresolved: false, scope };
   }
 
   // ── Formatters ───────────────────────────────────────────────────────────────
+  /**
+   * What the search actually covered, as a human clause (#768).
+   *
+   * `--callers` printed `zero method blast radius` — an affirmative safety claim
+   * — for symbols that are demonstrably called, because the graph walks srcDirs
+   * only and cannot follow dynamic module loads. It could not distinguish "no
+   * caller exists" from "no edge was found here", and that is precisely the
+   * claim a developer leans on before changing a signature. `--impact` already
+   * labels itself a lower bound; this brings the stronger claim into line.
+   */
+  function _scopeClause(scope) {
+    if (!scope) return 'lower bound — out-of-scope and dynamically-loaded callers are not resolved';
+    const roots = (scope.roots || []).join(', ') || 'the configured source roots';
+    const parts = [`searched ${roots}`];
+    if (scope.files) parts.push(`${scope.files} file(s)`);
+    let clause = `lower bound — ${parts.join(', ')}`;
+    if (scope.dynamicLoads > 0) {
+      clause += `; ${scope.dynamicLoads} dynamic module load(s) could not be followed`;
+    }
+    return clause;
+  }
+
   function formatCallGraph(result, kind) {
     const verb = kind === 'callees' ? 'calls' : 'callers of';
     const lines = [`## ${kind === 'callees' ? 'Callees' : 'Callers'}: \`${result.symbol}\``, ''];
     if (result.unresolved) { lines.push('_symbol not found in the call-graph._'); return lines.join('\n'); }
+    const qualifier = _scopeClause(result.scope);
     if (result.total === 0) {
-      lines.push(kind === 'callees' ? '_calls no repo-defined symbols._' : '_no repo symbol calls this — zero method blast radius._');
+      lines.push(kind === 'callees'
+        ? `_no repo-defined callee found (${qualifier})._`
+        : `_no caller found (${qualifier})._`);
       return lines.join('\n');
     }
-    lines.push(`**Total ${verb}:** ${result.total}`, '');
+    lines.push(`**Total ${verb}:** ${result.total} _(${qualifier})_`, '');
     if (result.direct.length) { lines.push(`### Direct`); for (const id of result.direct) lines.push(`- \`${id}\``); lines.push(''); }
     if (result.transitive.length) { lines.push(`### Transitive`); for (const id of result.transitive) lines.push(`- \`${id}\``); lines.push(''); }
     return lines.join('\n');
@@ -18051,6 +18107,10 @@ __factories["./src/graph/call-graph"] = function(module, exports) {
       transitive: result.transitive,
       total: result.total,
       unresolved: result.unresolved,
+      // The same qualification the human output carries, so a machine consumer
+      // cannot read an unqualified zero either (#768).
+      lowerBound: true,
+      scope: result.scope || null,
     };
   }
 
@@ -21680,17 +21740,10 @@ __factories["./src/mcp/handlers"] = function(module, exports) {
    * Shell-free (routes through src/util/git.js). Returns relative paths.
    */
   function _changedFiles(cwd, args) {
-    const { tryGit } = __require('./src/util/git');
-    let out = '';
-    if (args.base) {
-      if (!/^[A-Za-z0-9._/\-~^]+$/.test(args.base)) return [];
-      out = tryGit(['diff', `${args.base}..HEAD`, '--name-only'], { cwd });
-    } else if (args.staged) {
-      out = tryGit(['diff', '--cached', '--name-only'], { cwd });
-    } else {
-      out = tryGit(['diff', 'HEAD', '--name-only'], { cwd });
-    }
-    return out.split('\n').map((s) => s.trim()).filter(Boolean);
+    // #667: shared with the `--diff` CLI path so both surfaces agree on what
+    // "since <ref>" means. The ref form is ref-vs-working-tree, not ref..HEAD.
+    const { changedFiles } = __require('./src/util/git');
+    return changedFiles(cwd, { base: args.base, staged: args.staged });
   }
 
   /**
@@ -22634,7 +22687,7 @@ __factories["./src/mcp/tools"] = function(module, exports) {
         properties: {
           base: {
             type: 'string',
-            description: 'Optional git ref to diff against (e.g. "main"). Returns files changed in `base..HEAD`. Omit for working-tree changes.',
+            description: 'Optional git ref to diff against (e.g. "main"). Returns files changed between that ref and the WORKING TREE — committed and uncommitted alike. Omit for working-tree changes vs HEAD.',
           },
           staged: {
             type: 'boolean',
@@ -27932,7 +27985,52 @@ __factories["./src/util/git"] = function(module, exports) {
     catch (_) { return ''; }
   }
 
-  module.exports = { git, tryGit };
+  /**
+   * Git ref names this accepts as a diff base. Anything else is refused rather
+   * than passed through, so a ref can never smuggle an option into the argv.
+   */
+  const REF_RE = /^[A-Za-z0-9._/\-~^]+$/;
+
+  /**
+   * Files changed in one of the three diff modes, as repo-relative paths.
+   *
+   * WHY THIS EXISTS
+   * ---------------
+   * `--diff <ref>` ran `git diff <ref>..HEAD`, which is ref-vs-HEAD and therefore
+   * **excludes the working tree** — while the flag is documented as "changes
+   * since <ref>". A developer with local edits got a diff that omitted exactly
+   * the files they were editing (#667). The correct range for "since <ref>" is
+   * the two-dot-free `git diff <ref>`: ref vs working tree, committed and
+   * uncommitted alike.
+   *
+   * The same wrong range existed in two places — the CLI and the
+   * `get_diff_context` MCP tool — so this is one helper rather than two fixes,
+   * and the two surfaces cannot answer the same question differently.
+   *
+   *   mode            range                 meaning
+   *   ──────────────────────────────────────────────────────────────────
+   *   (default)       git diff HEAD         working tree vs HEAD
+   *   { base }        git diff <base>       working tree vs <base>
+   *   { staged }      git diff --cached     index vs HEAD
+   *
+   * @param {string} cwd
+   * @param {{ base?: string, staged?: boolean }} [mode]
+   * @returns {string[]} repo-relative paths, empty on any failure
+   */
+  function changedFiles(cwd, mode = {}) {
+    let args;
+    if (mode.base) {
+      if (!REF_RE.test(mode.base)) return [];
+      args = ['diff', mode.base, '--name-only'];
+    } else if (mode.staged) {
+      args = ['diff', '--cached', '--name-only'];
+    } else {
+      args = ['diff', 'HEAD', '--name-only'];
+    }
+    return tryGit(args, { cwd }).split('\n').map((s) => s.trim()).filter(Boolean);
+  }
+
+  module.exports = { git, tryGit, changedFiles, REF_RE };
   
 };
 
@@ -30582,19 +30680,16 @@ function getDiffFiles(cwd, stagedOnly) {
 }
 
 function getFilesChangedSinceBase(cwd, baseRef) {
-  if (!/^[A-Za-z0-9._/\-~^]+$/.test(baseRef)) {
+  // #667: this ran `git diff <ref>..HEAD`, which is ref-vs-HEAD and therefore
+  // excludes the working tree — while the flag is documented as "changes since
+  // <ref>". One shared helper now owns the three ranges, so the CLI and the
+  // `get_diff_context` MCP tool cannot answer this question differently.
+  const { changedFiles, REF_RE } = requireSourceOrBundled('./src/util/git');
+  if (!REF_RE.test(baseRef)) {
     console.warn(`[sigmap] --diff: invalid base ref '${baseRef}'`);
     return new Set();
   }
-  try {
-    const { execFileSync } = require('child_process');
-    const out = execFileSync('git', ['diff', `${baseRef}..HEAD`, '--name-only'], {
-      cwd, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    return new Set(out.split('\n').map((f) => f.trim()).filter(Boolean).map((f) => path.resolve(cwd, f)));
-  } catch (_) {
-    return new Set();
-  }
+  return new Set(changedFiles(cwd, { base: baseRef }).map((f) => path.resolve(cwd, f)));
 }
 
 function buildDiffSectionFromBase(cwd, baseRef, currentEntries, config) {
@@ -32416,9 +32511,9 @@ Usage:
   ${cmd} gain --top <n> | --model <name>   Limit rows / set $ pricing model
   ${cmd} gain --reset                      Clear the local savings log (.context/gain.ndjson)
   ${cmd} ... --no-track                    Disable gain savings capture for this run
-  ${cmd} --diff                            Generate context for git-changed files only
-  ${cmd} --diff <base-ref>                 Generate context + structural diff vs base ref (e.g. main)
-  ${cmd} --diff --staged                   Generate context for staged files only
+  ${cmd} --diff                            Changed files: working tree vs HEAD
+  ${cmd} --diff <base-ref>                 Changed files: working tree vs <base-ref> (incl. uncommitted)
+  ${cmd} --diff --staged                   Changed files: index vs HEAD (staged only)
   ${cmd} --benchmark                       Run retrieval benchmark (benchmarks/tasks/retrieval.jsonl)
   ${cmd} --adapter <name>                  Generate for a specific adapter only (v3.0+)
   ${cmd} --adapter <name> --json           Show adapter output path as JSON
