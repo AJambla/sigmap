@@ -1,6 +1,6 @@
 ---
 title: Retrieval benchmark
-description: Latest saved retrieval benchmark for SigMap v8.57.0. 78.6% hit@5 across 105 tasks on 18 repos; the honest grep comparison scores 88.0% vs 40.8% (2.16× lift) on its own 125-task corpus.
+description: Latest saved retrieval benchmark for SigMap v8.58.0. 78.6% hit@5 across 105 tasks on 18 repos; the honest grep comparison scores 88.0% vs 40.8% (2.16× lift) on its own 125-task corpus.
 head:
   - - meta
     - property: og:title
@@ -15,8 +15,8 @@ head:
 
 # Retrieval benchmark
 
-::: info Official v8.57.0 benchmark snapshot
-**Benchmark ID:** sigmap-v8.57-main &nbsp;·&nbsp; **Date:** 2026-10-01 (with R language)
+::: info Official v8.58.0 benchmark snapshot
+**Benchmark ID:** sigmap-v8.58-main &nbsp;·&nbsp; **Date:** 2026-10-01 (with R language)
 
 | Metric | Value |
 |---|---:|
@@ -30,7 +30,7 @@ head:
 | GPT-4o overflow (without → with) | **16/21 → 0/21** |
 :::
 
-Latest saved run: **2026-10-01 (v8.57.0)**
+Latest saved run: **2026-10-01 (v8.58.0)**
 
 The task set, baselines, and the hit@5 definition are documented in [benchmark methodology](/guide/methodology).
 
@@ -143,15 +143,21 @@ It is now held to its **70% floor** instead (currently 66/90 tasks pass, 1 task
 = 1.1pp, three tasks of headroom). The floor, the leak assertions, and
 `--no-regress` on `mined` and `jvm` are the enforced checks.
 
-<!-- benchmark: skipped at v8.57.0 — hard / mined / jvm-akka / jvm-spring-petclinic repos not cloned in the release run; figures below are carried from v8.56.0 -->
+<!-- benchmark: re-measured at v8.58.0 — all four corpora present (43 cached repos); figures above are measured, not carried -->
 
-::: tip Not re-measured at v8.57.0
-The `hard`, `mined` and two `jvm` corpora need cloned third-party repositories
-that were not present in the v8.57.0 release run, so **their figures below are
-carried forward from v8.56.0, not re-measured**. v8.57.0 changed only the
-`create`/`verify-plan` guard path, which is not in the retrieval path, so no
-movement is expected — but "not expected to move" is not the same as measured,
-and this page says which it is.
+::: tip Re-measured at v8.58.0 — and against a control
+All four corpora were present in the v8.58.0 release run, so the figures above
+are **measured, not carried forward**. They are unchanged from v8.56.0 to the
+decimal: `hard` 73.3%, `mined` 60.9%, `jvm` 29.5%, `easy` 90.0%.
+
+Unchanged is the expected result — v8.58.0 touched the index-*reporting* path
+(`validate`, `doctor`, `status`), not ranking — but "not expected to move" is
+not the same as measured. Because `hard` scores against SigMap's own source and
+this release **added a file to it** (`src/analysis/index-state.js`), the run was
+repeated on a **pristine `v8.57.0` worktree over the same cached corpus**: all
+four corpora returned identical figures, so the new file did not shift the BM25
+statistics either. The standalone 105-task retrieval harness agrees — 78.1% on
+both control and HEAD.
 :::
 
 ::: warning The committed `hard` baseline does not reproduce (v8.55.0)

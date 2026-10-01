@@ -10,6 +10,36 @@ Format: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [8.58.0] — 2026-10-01
+
+First PR of ladder **R2 — "one definition per number, pinned structurally"**. `validate`, `doctor` and `status` each held a private definition of what the signature index contains and when it was last built, so on a **healthy** index all three contradicted each other. Two open issues, one root cause, one change.
+
+### Fixed
+- **`validate` called 266 legitimate index entries stale, and advised a re-run that could not help** (#770, PR #826) — `generate` writes the index over an **augmented** population: the configured `srcDirs` walk, widened by the declared package entrypoints, every test root and every CI definition. All three widenings are deliberate — they are how `sigmap ask` reaches code that lives outside `srcDirs` by construction. `validate` measured that index against the **un-widened** list, so every widened entry read as stale. On this repo the 266 decomposed exactly: 256 under `test/`, 10 under `.github/`, **zero** actually stale. Stale is now only what the shared classifier cannot justify
+- **`doctor` counted the same entries as indexed coverage and called the index fresh** (#770, PR #826) — one bare total (`447 file(s) indexed`) over a population deliberately wider than the source tree, so it read as coverage and never surfaced a genuinely stale entry
+- **A deleted file survived the full run `validate` told the user to perform** (#770, PR #826) — `saveCache()` writes the cache map back **whole** and never pruned it, and `ranker.buildSigIndex()` merges that cache into the retrieval index, so a deleted file stayed indexed until a version bump busted the cache. This was the half that made the remediation text literally unactionable
+- **`status` reported `Last index: never` whenever tracking was off** (#664, PR #826) — freshness came solely from `readLog()` (`.context/usage.ndjson`), which only exists under `--track`/`config.tracking`, i.e. not by default. `doctor` read context-file mtimes in the same repo and called the index up to date
+
+### Added
+- **`src/analysis/index-state.js` — one owner of the index population and its age** (#825, PR #826) — `TEST_ROOTS` / `CI_DIRS` are imported by `generate`'s `collectTestEntries` / `collectPipelineEntries`, so the collector and the classifier **cannot drift**; `classifyIndexEntries()` splits in-scope / augmented / missing / out-of-scope; `indexFreshness()` resolves usage log → `.context/sig-index.json` → context mtime, **disclosing which**; `changedSince()` is lifted out of `doctor` so `status` counts the same population
+- **Per-class remediation** (#770, PR #826) — `staleRemedies()` names a command per stale class rather than one message for both: a deleted file is cleared by a full run, a file that merely left `srcDirs` is a config question
+- **`sig-cache.pruneMissing()`** (#770, PR #826) — run by `generate` before `saveCache`. Keyed on **existence only**, never on the current scope, so a per-package monorepo run cannot evict another package's entries
+- **`validate --json` gains `augmentedEntries`, `augmentedByReason`, `missingEntries`, `outOfScopeEntries`**; **`status --json` gains `indexSource`** (PR #826)
+
+### Changed
+- **`validate`** — `266 stale` → `268 beyond srcDirs (256 test, 10 CI, 2 entrypoint)`, named rather than miscounted
+- **`doctor`** — `447 file(s) indexed` → `179 in-scope file(s) indexed · 268 beyond srcDirs (…)`; the index check **warns** while stale entries exist, and freshness no longer claims "up to date" over a stale index
+- **`status`** — `never — run: sigmap` → `1h ago (v8.57.0, 447 files) — from .context/sig-index.json`, and the changed-since count now matches `doctor`'s exactly
+
+### Measurement
+- **Index size does not move.** This is a population **widening**, not a prune: the classifier reads the entries the index already holds rather than re-walking the tree. Pinned by a test that runs `generate` and asserts 0 stale on a fixture carrying a test root, a workflow and a declared entrypoint
+- **Four of the 14 new tests are structural**, per R2's exit criteria — they pin the single definition rather than a number: `collectTestEntries` imports `TEST_ROOTS` and does not redeclare it, `collectPipelineEntries` likewise for `CI_DIRS`, all three surfaces consume the primitive, and `doctor._countChangedSince` keeps no private `readdirSync` walker
+- All **14 fail against v8.57.0** (verified in a throwaway worktree: 0 passed, 14 failed) and pass here
+- Full suite **194 integration + 26 unit, 0 failed**
+- **No measured number changes.** This touches the index-reporting path, not retrieval or extraction; `latest.json` untouched and `check:metrics` green
+
+---
+
 ## [8.57.0] — 2026-10-01
 
 Closes the last two open items of ladder **R1**. Both defects sit in the same four-stage `create` pipeline, and together they meant the grounded-creation loop could neither fail honestly nor succeed at the thing it exists for — so they shipped as one change.
