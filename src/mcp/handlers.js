@@ -763,17 +763,10 @@ function notifyFileDeleted(args, cwd) {
  * Shell-free (routes through src/util/git.js). Returns relative paths.
  */
 function _changedFiles(cwd, args) {
-  const { tryGit } = require('../util/git');
-  let out = '';
-  if (args.base) {
-    if (!/^[A-Za-z0-9._/\-~^]+$/.test(args.base)) return [];
-    out = tryGit(['diff', `${args.base}..HEAD`, '--name-only'], { cwd });
-  } else if (args.staged) {
-    out = tryGit(['diff', '--cached', '--name-only'], { cwd });
-  } else {
-    out = tryGit(['diff', 'HEAD', '--name-only'], { cwd });
-  }
-  return out.split('\n').map((s) => s.trim()).filter(Boolean);
+  // #667: shared with the `--diff` CLI path so both surfaces agree on what
+  // "since <ref>" means. The ref form is ref-vs-working-tree, not ref..HEAD.
+  const { changedFiles } = require('../util/git');
+  return changedFiles(cwd, { base: args.base, staged: args.staged });
 }
 
 /**

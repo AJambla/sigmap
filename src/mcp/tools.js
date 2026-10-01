@@ -320,7 +320,7 @@ const TOOLS = [
       properties: {
         base: {
           type: 'string',
-          description: 'Optional git ref to diff against (e.g. "main"). Returns files changed in `base..HEAD`. Omit for working-tree changes.',
+          description: 'Optional git ref to diff against (e.g. "main"). Returns files changed between that ref and the WORKING TREE — committed and uncommitted alike. Omit for working-tree changes vs HEAD.',
         },
         staged: {
           type: 'boolean',
