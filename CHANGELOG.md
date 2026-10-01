@@ -10,6 +10,33 @@ Format: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [8.60.0] — 2026-10-01
+
+Third PR of ladder **R2**. Two commands reported a **narrower scope than they claimed**, and neither said so. R2's theme is one definition per number; this is its sibling — every claim names its basis.
+
+### Fixed
+- **`--diff <ref>` silently excluded uncommitted work** (#667, PR #832) — it ran `git diff <ref>..HEAD`, which is ref-vs-HEAD and therefore **excludes the working tree**, while the flag is documented as "changes since `<ref>`". A developer with local edits got a diff that omitted exactly the files they were editing: on a fixture with one committed and one uncommitted change it reported `diff-vs-HEAD~1 files: 1`. The ref form is now `git diff <ref>` — ref vs working tree, committed and uncommitted alike
+- **The same wrong range existed twice** (#667, PR #832) — in the CLI and in the `get_diff_context` MCP tool, so the two surfaces could answer the same question differently. `src/util/git.js` `changedFiles()` now owns all three ranges and both call it. The MCP tool description no longer advertises `base..HEAD`
+- **`--callers` asserted a zero it could not support** (#768, PR #832) — it printed `zero method blast radius` for symbols that are demonstrably called. Two systematic blind spots, neither of which is "no callers exist": the graph walks `srcDirs` only, so the CLI entry point — the largest caller of every `src/` module — contributes no edges; and `requireSourceOrBundled('./src/…')` is a dynamic load the resolver cannot follow. This is the exact claim a developer leans on before changing a signature, and it was unqualified while `--impact` in the same codebase already labelled itself a lower bound
+
+### Added
+- **`src/util/git.js` `changedFiles(cwd, {base, staged})` and `REF_RE`** (#667, PR #832) — one owner of the three diff ranges: default `git diff HEAD` (working tree vs HEAD), `{base}` `git diff <base>` (working tree vs base), `{staged}` `git diff --cached` (index vs HEAD)
+- **Scope disclosure on `--callers` / `--callees`** (#768, PR #832) — `buildCallGraph` returns the scope it searched and counts the module loads it could not follow, and both formatters carry the qualification: `_no caller found (lower bound — searched src, packages, 177 file(s); 17 dynamic module load(s) could not be followed)._`
+- **`--callers --json` gains `lowerBound: true` and `scope`** (#768, PR #832) — so a machine consumer cannot read an unqualified zero either. The MCP `get_method_impact` tool shares `formatCallGraph` and inherits all of it
+
+### Changed
+- **`--help` states the exact git semantics of all three diff forms** — bare = working tree vs HEAD · `<base-ref>` = working tree vs base · `--staged` = index vs HEAD
+- **A counted `--callers` result carries the qualifier too** — the number is a lower bound whether it is zero or not, and `--callees` is labelled for the same reason
+
+### Measurement
+- **Bare `--diff` and `--diff --staged` are byte-identical**, asserted by a regression test that passes on **both sides** of this change — which is what makes it a guard rather than a dead test
+- This also **removed a direct `child_process` call from the CLI**: the old `getFilesChangedSinceBase` had its own inline `execFileSync` rather than routing through `src/util/git.js`. The ref stays a separate argv element guarded by `REF_RE`, never interpolated into a command string
+- **14 tests; 13 fail against v8.59.0.** Coverage includes the uncommitted change appearing on both CLI and MCP for the same ref, an invalid ref refused before reaching git's argv, a structural assertion that neither surface builds a `<ref>..HEAD` range, and a fixture whose only caller lives **outside `srcDirs`** — the precise blind spot — not being reported as zero-risk
+- Full suite **196 integration + 26 unit, 0 failed**
+- **No measured number changes.** This touches diff scope and call-graph reporting, not retrieval or extraction; `latest.json` untouched and `check:metrics` green
+
+---
+
 ## [8.59.0] — 2026-10-01
 
 Second PR of ladder **R2 — "one definition per number, pinned structurally"**. Two defects in the same command, so they shipped as one change.

@@ -1,6 +1,6 @@
 ---
 title: Retrieval benchmark
-description: Latest saved retrieval benchmark for SigMap v8.59.0. 78.6% hit@5 across 105 tasks on 18 repos; the honest grep comparison scores 88.0% vs 40.8% (2.16× lift) on its own 125-task corpus.
+description: Latest saved retrieval benchmark for SigMap v8.60.0. 78.6% hit@5 across 105 tasks on 18 repos; the honest grep comparison scores 88.0% vs 40.8% (2.16× lift) on its own 125-task corpus.
 head:
   - - meta
     - property: og:title
@@ -15,8 +15,8 @@ head:
 
 # Retrieval benchmark
 
-::: info Official v8.59.0 benchmark snapshot
-**Benchmark ID:** sigmap-v8.59-main &nbsp;·&nbsp; **Date:** 2026-10-01 (with R language)
+::: info Official v8.60.0 benchmark snapshot
+**Benchmark ID:** sigmap-v8.60-main &nbsp;·&nbsp; **Date:** 2026-10-01 (with R language)
 
 | Metric | Value |
 |---|---:|
@@ -30,7 +30,7 @@ head:
 | GPT-4o overflow (without → with) | **16/21 → 0/21** |
 :::
 
-Latest saved run: **2026-10-01 (v8.59.0)**
+Latest saved run: **2026-10-01 (v8.60.0)**
 
 The task set, baselines, and the hit@5 definition are documented in [benchmark methodology](/guide/methodology).
 
@@ -143,26 +143,32 @@ It is now held to its **70% floor** instead (currently 66/90 tasks pass, 1 task
 = 1.1pp, three tasks of headroom). The floor, the leak assertions, and
 `--no-regress` on `mined` and `jvm` are the enforced checks.
 
-<!-- benchmark: re-measured at v8.59.0 — all four corpora present (43 cached repos); figures above are measured, not carried -->
+<!-- benchmark: re-measured at v8.60.0 — all four corpora present (43 cached repos); figures above are measured, not carried -->
 
-::: tip Re-measured at v8.59.0, and `hard` is watched for self-repo drift
-All four corpora were present in the v8.59.0 release run, so the figures above
-are **measured, not carried forward**. They are unchanged from v8.56.0 to the
-decimal: `hard` 73.3%, `mined` 60.9%, `jvm` 29.5%, `easy` 90.0%.
+::: tip Re-measured at v8.60.0 — and self-repo drift finally showed up
+All four corpora were present in the v8.60.0 release run, so the figures above
+are **measured, not carried forward**. Every hit@5 is unchanged from v8.56.0 to
+the decimal: `hard` 73.3%, `mined` 60.9%, `jvm` 29.5%, `easy` 90.0%.
 
-Unchanged is the expected result — v8.58.0 touched the index-*reporting* path
-and v8.59.0 the dashboard, neither of which is in the ranking path — but "not
-expected to move" is not the same as measured, and `hard` scores against
-**SigMap's own source**, so anything that changes the indexed file set can shift
-its BM25 statistics whether or not ranking changed.
+`hard` scores against **SigMap's own source**, so anything that changes the
+indexed file set can shift its BM25 statistics whether or not ranking changed.
+Each of the last three releases was checked against a pristine worktree over the
+same cached corpus rather than assumed:
 
-Both releases did change that set. v8.58.0 added `src/analysis/index-state.js`,
-so its run was repeated on a **pristine `v8.57.0` worktree over the same cached
-corpus** — all four corpora returned identical figures, and the standalone
-105-task harness agreed at 78.1% on both control and HEAD. v8.59.0 added a test
-file and rewrote two modules, and `hard` again measured 73.3%, matching that
-control-verified figure exactly. Self-repo drift is real (see the box below);
-these two releases simply did not trigger it.
+| release | what it added to SigMap's own source | `hard` hit@5 | `hard` MRR |
+|---|---|---|---|
+| v8.58.0 | `src/analysis/index-state.js` + tests | 73.3% (control 73.3%) | 0.589 (control 0.589) |
+| v8.59.0 | a test file, two modules rewritten | 73.3% | 0.589 |
+| v8.60.0 | a test file, five sources edited | 73.3% (control 73.3%) | **0.584** (control 0.589) |
+
+v8.60.0 is the first of the three to move anything: **MRR −0.005, hit@5 flat.**
+The indexed file set changed, so the IDF statistics did too, and that was enough
+to reorder results *within* the top five without changing which queries land
+there. It is not a ranking change — `retrieval.callGraphBoost` is off by default,
+so that release's call-graph edits cannot reach the ranker — and MRR is not a
+published figure. It is recorded here rather than passed over, because this is
+exactly the drift the `hard` floor exists to tolerate and the kind of movement
+that becomes a mystery if nobody writes down when it started.
 :::
 
 ::: warning The committed `hard` baseline does not reproduce (v8.55.0)

@@ -112,8 +112,9 @@ If you are new to the product, start with the workflow pages first:
 | `--watch` | Watch for file changes and regenerate incrementally |
 | `daemon start\|stop\|status` | Run `--watch` as a detached background daemon (PID + log in `.context/`) |
 | `--setup` | Auto-wire MCP for Claude, Cursor, Windsurf, Zed, VS Code, OpenCode, Gemini CLI, Codex CLI; install git hook; start watcher |
-| `--diff` | Generate context only for changed files (shows risk score per file) |
-| `--diff --staged` | Generate context only for staged files |
+| `--diff` | Changed files: working tree vs HEAD (shows risk score per file) |
+| `--diff <ref>` | Changed files: working tree vs `<ref>` — includes uncommitted work |
+| `--diff --staged` | Changed files: index vs HEAD (staged only) |
 | `--mcp` | Start the stdio MCP server |
 | `--query <text>` | Rank files by relevance to a free-text query (identifier-aware BM25 + signals) |
 | `--query <text> --explain` | Per-file score signals, per-token corpus coverage and near-miss candidates |
@@ -145,7 +146,7 @@ If you are new to the product, start with the workflow pages first:
 | `--init` | Scaffold `gen-context.config.json` and `.contextignore`; inject a "Creation workflow" block into `CLAUDE.md` |
 | `--benchmark` | Run retrieval evaluation tasks |
 | `--impact <file>` | Trace every file that transitively imports the given file |
-| `--callers <symbol>` | Method-level blast radius — every function that transitively calls `<symbol>` (JS/TS, Python, Java, Go, Rust) |
+| `--callers <symbol>` | Method-level blast radius — every function that transitively calls `<symbol>`; reported as a **lower bound** naming the scope searched |
 | `--callees <symbol>` | Every repo function that `<symbol>` transitively calls |
 | `--suggest-tool <task>` | Classify a task into fast / balanced / powerful model tier |
 | `--version` | Print version and exit |
@@ -1992,7 +1993,7 @@ sigmap bench --submit --json
  SigMap Community Benchmark Submission
 ────────────────────────────────────────────────────────
  SigMap version : 8.51.2
- Benchmark ID   : sigmap-v8.59-main
+ Benchmark ID   : sigmap-v8.60-main
  Submitted      : 2026-09-13
 ────────────────────────────────────────────────────────
  Canonical metrics (official release):
@@ -2206,19 +2207,34 @@ After registration `--setup` also prints manual snippets for all tools so you ca
 
 ## --diff
 
-Generate context only for files changed in the current git working tree. Ideal for PR reviews and CI jobs.
+Generate context only for the files git reports as changed. Ideal for PR reviews and CI jobs. Three forms, each a different git comparison:
+
+| Form | git equivalent | Meaning |
+|---|---|---|
+| `sigmap --diff` | `git diff HEAD` | working tree vs HEAD |
+| `sigmap --diff <ref>` | `git diff <ref>` | working tree vs `<ref>` — **committed and uncommitted alike** |
+| `sigmap --diff --staged` | `git diff --cached` | index vs HEAD (staged only) |
 
 ```bash
 sigmap --diff
-```
-
-`--diff --staged` restricts to staged files only, making it a perfect pre-commit check:
-
-```bash
+sigmap --diff main
 sigmap --diff --staged
 ```
 
-Both modes automatically fall back to a full generate when run outside a git repository or when no files have changed.
+All three fall back to a full generate when run outside a git repository or when no files have changed.
+
+::: warning The ref form used to exclude your uncommitted work (v8.60.0)
+Until v8.60.0 `--diff <ref>` ran `git diff <ref>..HEAD` — ref vs **HEAD**, not vs the working tree — while the flag was documented as "changes since `<ref>`". With local edits in flight you got a diff that omitted exactly the files you were editing ([#667](https://github.com/manojmallick/sigmap/issues/667)):
+
+```
+$ sigmap --diff HEAD~1          # one file committed, one modified in the tree
+[sigmap] diff-vs-HEAD~1 files: 1     ← the modified file was invisible
+```
+
+The ref form is now `git diff <ref>`, so "since `<ref>`" means what it says. Bare `--diff` and `--diff --staged` were always correct and are unchanged.
+
+The same range was wrong in two places — this command and the [`get_diff_context`](#mcp-install-mcp-list) MCP tool — so both now call one helper (`changedFiles()` in `src/util/git.js`) and cannot answer the question differently.
+:::
 
 ### Risk score (v4.0)
 
@@ -2236,7 +2252,7 @@ Every `--diff` run prints a **risk classification** for each changed file:
   src/utils/format.ts         [LOW]     — no dependents, internal utility
 ```
 
-You can also pass a specific base ref:
+A base ref compares the working tree against that ref:
 
 ```bash
 sigmap --diff HEAD~3
@@ -2690,7 +2706,7 @@ sigmap --callers src/auth.ts#login --json # machine-readable edges
 ```
 ## Callers: `validateToken`
 
-**Total callers of:** 3
+**Total callers of:** 3 _(lower bound — searched src, packages, 177 file(s); 17 dynamic module load(s) could not be followed)_
 
 ### Direct
 - `src/auth/middleware.ts#requireAuth`
@@ -2700,10 +2716,26 @@ sigmap --callers src/auth.ts#login --json # machine-readable edges
 - `src/server.ts#start`
 ```
 
+::: warning Every result is a lower bound, and says so (v8.60.0)
+This printed `zero method blast radius` when it found no edge — an affirmative safety claim it could not support ([#768](https://github.com/manojmallick/sigmap/issues/768)). Two systematic blind spots, neither of which means "no callers exist":
+
+1. **the graph walks `srcDirs` only** — a repo's CLI entry point usually sits at the root, outside it, and is the largest caller of every module underneath;
+2. **dynamic module loads are unresolvable** — `require(someVar)`, and the bundle-safe wrappers that take a literal but are invisible to a resolver looking for `require`/`import`.
+
+It could not distinguish *"no caller exists"* from *"no edge was found here"* — and that is precisely the claim you lean on before deleting or changing a signature. Every result now names what was searched and counts what could not be followed:
+
+```
+$ sigmap --callers buildEvidencePack
+_no caller found (lower bound — searched src, packages, 177 file(s); 17 dynamic module load(s) could not be followed)._
+```
+
+A **counted** result is a lower bound too, so the qualifier appears there as well, and `--callees` carries it for the same reason. This brings the stronger claim into line with [`--impact`](#impact), which already labelled itself one.
+:::
+
 | Option | Description |
 |---|---|
 | `--depth <n>` | BFS depth limit (0 = unlimited; default 0) |
-| `--json` | Emit `{ symbol, kind, resolved, direct, transitive, total, unresolved }` |
+| `--json` | Emit `{ symbol, kind, resolved, direct, transitive, total, unresolved, lowerBound, scope }` — `lowerBound` is always `true` and `scope` carries `{ roots, files, dynamicLoads }`, so a machine consumer cannot read an unqualified zero either |
 
 ---
 
